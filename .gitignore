@@ -1,3 +1,4 @@
 __pycache__/
 *.py[cod]
 dist/
+secret/mod_update_api_key.md
