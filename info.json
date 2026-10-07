@@ -1,9 +1,10 @@
 {
 	"name": "mining-patch-planner",
-	"version": "1.9.0",
-	"title": "Mining Patch Planner",
+	"version": "1.9.1",
+	"title": "Resource Outpost Planner",
 	"author": "Rimbas",
 	"factorio_version": "2.1",
 	"dependencies": ["base >= 2.1.0"],
-	"description": "Plans mining patches and oil outposts with miners, pumpjacks, pipes, poles, beacons and heat pipes."
+	"homepage": "https://github.com/Nowaterisenough/resource_outpost_planner",
+	"description": "Preview and plan mining patches and oil outposts with drills, pumpjacks, belts, pipes, poles, beacons and heat pipes. Adjust settings live, avoid obstacles, and apply construction ghosts only when ready."
 }

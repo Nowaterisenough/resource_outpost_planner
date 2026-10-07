@@ -1,4 +1,12 @@
 ---------------------------------------------------------------------------------------------------
+Version: 1.9.1
+Date: 2026-10-07
+  Changes:
+    - Rename the display title to Resource Outpost Planner with complete English and Simplified Chinese naming.
+    - Document the preview, live configuration, Apply and Cancel workflow in both languages.
+    - Fill missing Chinese translations and align oil settings terminology.
+    - Preserve the mining-patch-planner internal ID for existing saves and settings.
+---------------------------------------------------------------------------------------------------
 Version: 1.9.0
 Date: 2026-10-07
   Features:
