@@ -1,4 +1,10 @@
 ---------------------------------------------------------------------------------------------------
+Version: 1.9.2
+Date: 2026-10-07
+  Graphics:
+    - Replace the mod-list thumbnail with a subdued blueprint-style mining and oil outpost cover.
+    - Retain the existing shortcut and settings icons.
+---------------------------------------------------------------------------------------------------
 Version: 1.9.1
 Date: 2026-10-07
   Changes:

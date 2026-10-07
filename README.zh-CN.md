@@ -18,7 +18,7 @@
 
 需要 **Factorio 2.1 或更新版本**。《太空时代》为可选内容；大矿机、额外资源和寒冷星球功能需要对应的游戏内容。
 
-将 `mining-patch-planner_1.9.1.zip` 放入 Factorio 的 mods 目录；也可将仓库放进名为 `mining-patch-planner` 的文件夹。启用模组并重启游戏。
+将 `mining-patch-planner_1.9.2.zip` 放入 Factorio 的 mods 目录；也可将仓库放进名为 `mining-patch-planner` 的文件夹。启用模组并重启游戏。
 
 显示名称为 **资源开采规划器 / Resource Outpost Planner**。内部标识继续使用 `mining-patch-planner`，以兼容旧存档的配置、快捷键和规划记录。更新时替换旧安装包，不要同时启用两个副本。开发脚本和文档不是运行所必需的文件。
 
