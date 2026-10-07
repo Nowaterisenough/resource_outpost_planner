@@ -16,11 +16,11 @@ Plan mining patches and oil outposts in Factorio. Select resources, inspect a ro
 
 ## Requirements And Installation
 
-Requires **Factorio 2.1 or newer**. Space Age is optional; the big drill and additional resource or cold-surface features require the corresponding game content.
+Requires **Factorio 2.1**. Space Age is optional; the big drill and additional resource or cold-surface features require the corresponding game content.
 
-Put `mining-patch-planner_1.9.2.zip` in the Factorio mods directory, or install this repository in a folder named `mining-patch-planner`. Enable the mod and restart Factorio.
+Put `resource-outpost-planner_1.9.3.zip` in the Factorio mods directory, or install this repository in a folder named `resource-outpost-planner`. Enable the mod and restart Factorio.
 
-The display name is **Resource Outpost Planner**. The internal ID stays `mining-patch-planner` to preserve existing saved settings, shortcuts and planning state. Replace the previous package instead of enabling two copies. Development scripts and documentation are not required at runtime.
+This independent release uses the internal ID `resource-outpost-planner`. Disable the original Mining Patch Planner (or the earlier fork distributed under its ID) before enabling this mod. Existing built entities remain in the save, but original planner data and pending plans are not imported; configure this planner after switching.
 
 ## Workflow
 
