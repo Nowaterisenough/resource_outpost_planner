@@ -178,7 +178,7 @@ function render_util.renderer(event)
 end
 
 function render_util.draw_clear_rendering(player_data, event)
-	rendering.clear("mining-patch-planner")
+	rendering.clear("resource-outpost-planner")
 end
 
 ---Draws the properties of a mining drill
@@ -348,7 +348,7 @@ end
 function render_util.draw_pole_layout_simple(player_data, event)
 
 	
-	rendering.clear("mining-patch-planner")
+	rendering.clear("resource-outpost-planner")
 
 	local renderer = render_util.renderer(event)
 
@@ -453,7 +453,7 @@ end
 ---@param player_data PlayerData
 ---@param event EventData.on_player_reverse_selected_area
 function render_util.draw_pole_layout_interleaved(player_data, event)
-	rendering.clear("mining-patch-planner")
+	rendering.clear("resource-outpost-planner")
 
 	local renderer = render_util.renderer(event)
 
@@ -576,7 +576,7 @@ end
 ---@param player_data PlayerData
 ---@param event EventData.on_player_reverse_selected_area
 function render_util.draw_built_things(player_data, event)
-	rendering.clear("mining-patch-planner")
+	rendering.clear("resource-outpost-planner")
 
 	local renderer = render_util.renderer(event)
 
@@ -635,7 +635,7 @@ end
 ---@param player_data PlayerData
 ---@param event EventData.on_player_reverse_selected_area
 function render_util.draw_drill_convolution(player_data, event)
-	rendering.clear("mining-patch-planner")
+	rendering.clear("resource-outpost-planner")
 
 	local renderer = render_util.renderer(event)
 
@@ -1153,7 +1153,7 @@ function render_util.draw_cliff_collisions(player_data, event)
 	local S = event.surface
 	local renderer = render_util.renderer(event)
 
-	rendering.clear("mining-patch-planner")
+	rendering.clear("resource-outpost-planner")
 	
 	local fx1, fy1 = event.area.left_top.x, event.area.left_top.y
 	fx1, fy1 = floor(fx1), floor(fy1)
@@ -1257,7 +1257,7 @@ end
 ---@param player_data PlayerData
 ---@param event EventData.on_player_reverse_selected_area
 function render_util.draw_consumed_resources(player_data, event)
-	rendering.clear("mining-patch-planner")
+	rendering.clear("resource-outpost-planner")
 
 	local renderer = render_util.renderer(event)
 
@@ -1363,7 +1363,7 @@ end
 ---@param player_data PlayerData
 ---@param event EventData.on_player_reverse_selected_area
 function render_util.draw_belt_specification(player_data, event)
-	rendering.clear("mining-patch-planner")
+	rendering.clear("resource-outpost-planner")
 
 	local renderer = render_util.renderer(event)
 

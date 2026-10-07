@@ -1,9 +1,9 @@
-local graphics = "__mining-patch-planner__/graphics/"
+local graphics = "__resource-outpost-planner__/graphics/"
 
 data:extend{
 	{
 		type="selection-tool",
-		name="mining-patch-planner",
+		name="resource-outpost-planner",
 		icon=graphics.."drill-icon.png",
 		icon_size = 64,
 		flags = {"only-in-cursor", "spawnable", "not-stackable"},
@@ -51,37 +51,37 @@ data:extend{
 	},
 	{
 		type="custom-input",
-		name="mining-patch-planner-keybind",
+		name="resource-outpost-planner-keybind",
 		key_sequence="CONTROL + M",
 		action="spawn-item",
-		item_to_spawn="mining-patch-planner",
+		item_to_spawn="resource-outpost-planner",
 	},
 	{
 		type="custom-input",
-		name="mining-patch-planner-keybind-rotate",
+		name="resource-outpost-planner-keybind-rotate",
 		key_sequence="R",
 		action="lua",
 		include_selected_prototype = true,
 	},
 	{
 		type="custom-input",
-		name="mining-patch-planner-keybind-rotate-reversed",
+		name="resource-outpost-planner-keybind-rotate-reversed",
 		key_sequence="SHIFT + R",
 		action="lua",
 		include_selected_prototype = true,
 	},
 	{
 		type="shortcut",
-		name="mining-patch-planner-shortcut",
+		name="resource-outpost-planner-shortcut",
 		icon = graphics.."drill-icon-toolbar.png",
 		small_icon = graphics.."drill-icon-toolbar-small.png",
 		order="b[blueprints]-i[miner-planner]",
 		action = "spawn-item",
 		icon_size = 56,
 		small_icon_size = 24,
-		item_to_spawn="mining-patch-planner",
+		item_to_spawn="resource-outpost-planner",
 		style="blue",
-		associated_control_input="mining-patch-planner-keybind",
+		associated_control_input="resource-outpost-planner-keybind",
 	},
 }
 

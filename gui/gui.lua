@@ -1555,7 +1555,7 @@ local function abort_blueprint_mode(player)
 	local cursor_stack = player.cursor_stack
 	if cursor_stack == nil then return end
 	player.clear_cursor()
-	cursor_stack.set_stack("mining-patch-planner")
+	cursor_stack.set_stack("resource-outpost-planner")
 end
 
 ---@param player LuaPlayer
@@ -1729,7 +1729,7 @@ local function on_gui_click(event)
 		player_data.blueprint_add_mode = not player_data.blueprint_add_mode
 		player.clear_cursor()
 		if not player_data.blueprint_add_mode then
-			player.cursor_stack.set_stack("mining-patch-planner")
+			player.cursor_stack.set_stack("resource-outpost-planner")
 		end
 		player_data.gui["blueprint_add_section"].visible = player_data.blueprint_add_mode
 		player_data.gui["blueprint_add_button"].style = style_helper_blueprint_toggle(player_data.blueprint_add_mode)

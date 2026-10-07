@@ -1,4 +1,12 @@
 ---------------------------------------------------------------------------------------------------
+Version: 1.9.3
+Date: 2026-10-07
+  Changes:
+    - Prepare an independent Resource Outpost Planner release with its own internal mod ID.
+    - Rename the selection tool, shortcuts, custom inputs, artwork paths and runtime references.
+    - Prevent simultaneous activation with the original Mining Patch Planner.
+    - Retain the original MIT notices and identify the independent maintainer.
+---------------------------------------------------------------------------------------------------
 Version: 1.9.2
 Date: 2026-10-07
   Graphics:
