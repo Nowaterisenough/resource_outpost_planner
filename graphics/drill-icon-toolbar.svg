@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">
+  <g id="planner-frame" fill="#e2e2e2" transform="scale(0.5714285714)">
+    <path d="M0 0h8v4H0z M16 0h8v4H16z M32 0h8v4H32z M48 0h8v4H48z
+             M0 52h8v4H0z M16 52h8v4H16z M32 52h8v4H32z M48 52h8v4H48z
+             M0 0h4v8H0z M0 16h4v8H0z M0 32h4v8H0z M0 48h4v8H0z
+             M52 0h4v8H52z M52 16h4v8H52z M52 32h4v8H52z M52 48h4v8H52z"/>
+  </g>
+  <g fill="#e2e2e2" transform="translate(4.45 4.45) scale(0.7)">
+    <path d="M6 7h4v18h3v3H3v-3h3z"/>
+    <path fill-rule="evenodd" d="M10 3h12a2 2 0 0 1 2 2v6H9V4a1 1 0 0 1 1-1zm3 3v2h7V6z"/>
+    <path d="M18.5 11h3v12h-3z"/>
+    <path d="m16 15 8-3v3l-8 3zm0 5 8-3v3l-8 3zm2.5 3h3L20 26z"/>
+    <path d="m14 28 2-2 3 1 1 3h-5zm10-3 3-2 3 3-2 4h-5l-1-3z"/>
+  </g>
+</svg>
