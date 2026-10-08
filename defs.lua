@@ -135,6 +135,7 @@
 ---@field belt_choice string
 ---@field belt_quality_choice string?
 ---@field count number Belt count
+---@field output_count number? Balanced output count; source entries still use count
 ---@field ungrouped boolean Is first step when belts are spaced out?
 ---@field _renderables LuaRenderObject[]
 

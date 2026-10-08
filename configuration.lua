@@ -71,6 +71,8 @@ local terrain = require("mpp.terrain")
 ---@field ore_filtering_choice boolean
 ---@field balancer_choice boolean
 ---@field belt_planner_choice boolean
+---@field output_balance_choice boolean
+---@field output_belt_count_choice number
 ---@field belt_merge_choice boolean
 
 ---@class PlayerGui
@@ -155,6 +157,8 @@ conf.default_config = {
 		debugging_choice = "none",
 		ore_filtering_choice = false,
 		belt_planner_choice = false,
+		output_balance_choice = false,
+		output_belt_count_choice = 8,
 		belt_merge_choice = false,
 		balancer_choice = false,
 

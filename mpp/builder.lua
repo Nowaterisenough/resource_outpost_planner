@@ -132,6 +132,10 @@ function builder.create_entity_builder(state, opts)
 		if state.preview_only then result = builder.record_preview(state,ghost)
 		else result = surface.create_entity(ghost) end
 		if result then
+			if not state.preview_only then
+				if ghost.input_priority then result.splitter_input_priority=ghost.input_priority end
+				if ghost.output_priority then result.splitter_output_priority=ghost.output_priority end
+			end
 			if ghost.thing and grid and not opts.diagnostic then
 				grid:build_specification(ghost)
 			end

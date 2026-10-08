@@ -4,6 +4,7 @@ local obstacles = require("mpp.obstacles")
 local EAST, NORTH, SOUTH, WEST, ROTATION = util.directions()
 local floor, min, max, abs = math.floor, math.min, math.max, math.abs
 local terrain = require("mpp.terrain")
+local output_balancer = require("mpp.output_balancer")
 local belt_planner = {}
 local blueprint_name = "mpp-blueprint-belt-planner"
 
@@ -84,12 +85,13 @@ function belt_planner.update_blueprint(player, spec)
 	if not stack or not stack.valid_for_read or stack.name ~= blueprint_name then return end
 	local entities = stack.get_blueprint_entities() or {}
 	local quality = spec.belt_quality_choice or "normal"
-	if #entities == spec.count and entities[1].name == spec.belt_choice
+	local count = spec.output_count or spec.count
+	if #entities == count and entities[1].name == spec.belt_choice
 		and (entities[1].quality or "normal") == quality then return stack end
 	local data = storage.players[player.index]
 	local direction = data.belt_cursor_direction or (entities[1] and entities[1].direction) or NORTH
 	entities = {}
-	for i=1,spec.count do
+	for i=1,count do
 		entities[i] = {entity_number=i, name=spec.belt_choice, quality=quality,
 			position={x=i-0.5,y=0.5}, direction=NORTH,
 			tags={mpp_belt_planner=i==1 and "main" or "delete"}}
@@ -97,7 +99,7 @@ function belt_planner.update_blueprint(player, spec)
 	data.belt_cursor_restore = nil
 	data.belt_cursor_direction = direction
 	stack.set_blueprint_entities(orient_cursor_entities(entities, direction))
-	stack.label = spec.count.." x [item="..spec.belt_choice.."]"
+	stack.label = count.." x [item="..spec.belt_choice.."]"
 	return stack
 end
 
@@ -173,7 +175,8 @@ end
 ---@return BeltinatorState?, LocalisedString?
 function belt_planner.create_state(spec, target, choices)
 	local c, pos = spec.coords, target.position
-	if abs(c.gx + c.w/2 - pos.x) > 100 or abs(c.gy + c.h/2 - pos.y) > 100 then
+	local range = choices.output_balance_choice and 512 or 100
+	if abs(c.gx + c.w/2 - pos.x) > range or abs(c.gy + c.h/2 - pos.y) > range then
 		return nil, {"mpp.msg_belt_planner_err_too_far"}
 	end
 	local x,y = grid_position(spec,pos)
@@ -184,6 +187,8 @@ function belt_planner.create_state(spec, target, choices)
 		belt_x=floor(x+0.5), belt_y=floor(y+0.5), belt_direction=direction,
 		belt_choice=spec.belt_choice, belt_quality_choice=spec.belt_quality_choice,
 		belt_target=target, _belt_routing=true,
+		output_balance_choice=choices.output_balance_choice==true,
+		output_belt_count_choice=choices.output_belt_count_choice or output_balancer.default_count,
 		cliff_mode_choice=choices.cliff_mode_choice, terrain_mode_choice=choices.terrain_mode_choice,
 		space_landfill_choice=choices.space_landfill_choice,
 		avoid_obstacles_choice=choices.avoid_obstacles_choice,
@@ -336,7 +341,8 @@ local function route_bundle(state, reverse, negotiate)
 	for i, belt in ipairs(spec) do
 		local start={x=belt.x_start-1, y=belt.y}
 		local finish={x=state.belt_x, y=state.belt_y}
-		if dir==WEST then finish.y=finish.y+i-spec.count
+		if state.belt_input_targets then finish=state.belt_input_targets[i]
+		elseif dir==WEST then finish.y=finish.y+i-spec.count
 		-- Reversing the output direction also reverses row order, keeping the bundle uncrossed.
 		elseif dir==EAST then finish.y=finish.y+spec.count-i
 		elseif dir==NORTH then finish.x=finish.x+spec.count-i
@@ -485,7 +491,7 @@ local function route_bundle(state, reverse, negotiate)
 	return false,{"mpp.msg_obstacle_route_failed"},{routes={},failed_lane=1,reason="route"}
 end
 
-function belt_planner.plan(state)
+local function plan_routes(state)
 	local ok, result, diagnostic = route_bundle(state, false)
 	if ok then return ok, result end
 	-- A greedy lane can close a corridor needed by the next lane; try the opposite order before failing.
@@ -504,7 +510,8 @@ function belt_planner.plan(state)
 		if not (diagnostic.completed and diagnostic.completed[i]) then
 			local start={x=belt.x_start-1,y=belt.y}
 			local finish={x=state.belt_x,y=state.belt_y}
-			if dir==WEST then finish.y=finish.y+i-spec.count
+			if state.belt_input_targets then finish=state.belt_input_targets[i]
+			elseif dir==WEST then finish.y=finish.y+i-spec.count
 			elseif dir==EAST then finish.y=finish.y+spec.count-i
 			elseif dir==NORTH then finish.x=finish.x+spec.count-i
 			else finish.x=finish.x-spec.count+i end
@@ -541,6 +548,11 @@ function belt_planner.plan(state)
 	return false, result, diagnostic
 end
 
+function belt_planner.plan(state)
+	if state.output_balance_choice then return output_balancer.plan(state,plan_routes) end
+	return plan_routes(state)
+end
+
 function belt_planner.layout(state)
 	local ok, specs=belt_planner.plan(state)
 	if not ok then state.player.print(specs); return false end
@@ -554,7 +566,13 @@ function belt_planner.place_landfill(state, specs)
 	if terrain.avoid_tiles(state) then return end
 	state._belt_landfill = state._belt_landfill or {}
 	for _, spec in ipairs(specs or {}) do
-		local tile=state.surface.get_tile(world(state,spec.grid_x,spec.grid_y))
+		local pos=spec.position or world(state,spec.grid_x,spec.grid_y)
+		pos={x=pos.x or pos[1],y=pos.y or pos[2]}
+		local dir=spec.inner_name and spec.direction or util.bp_direction[state.direction_choice][spec.direction or NORTH]
+		local box=obstacles.entity_box(spec.inner_name or spec.name,pos,dir)
+		for x=floor(box.left_top.x+0.001),math.ceil(box.right_bottom.x-0.001)-1 do
+		for y=floor(box.left_top.y+0.001),math.ceil(box.right_bottom.y-0.001)-1 do
+		local tile=state.surface.get_tile{x=x,y=y}
 		local pos=tile.position
 		local k=key(pos.x,pos.y)
 		local cover=terrain.cover_tile(tile,state)
@@ -568,6 +586,7 @@ function belt_planner.place_landfill(state, specs)
 				if entity and state._collected_ghosts then table.insert(state._collected_ghosts,entity) end
 			end
 		end
+		end end
 	end
 end
 

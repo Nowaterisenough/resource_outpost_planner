@@ -1,5 +1,6 @@
 local belt_planner = require("mpp.belt_planner")
 local common = require("layouts.common")
+local output_balancer = require("mpp.output_balancer")
 
 local input_mode = {}
 local changing = {}
@@ -22,12 +23,16 @@ end
 
 function input_mode.output_specification(data, player)
 	if data.choices.layout_choice == "oil" then return end
+	if data.choices.output_balance_choice and data.output_count_invalid then return end
 	local draft = data.preview
 	local spec = draft and draft.belt_specification or nil
 	if not draft then
 		spec = data.last_state and common.create_belt_planner_specification(data.last_state)
 	end
-	if spec and (not player or spec.surface == player.surface) then return spec end
+	if spec and (not player or spec.surface == player.surface) then
+		spec.output_count=data.choices.output_balance_choice and output_balancer.output_count(spec,data.choices) or nil
+		return spec
+	end
 end
 
 function input_mode.update_gui(data)

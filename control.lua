@@ -60,6 +60,7 @@ end
 local function set_belt_target(player, surface, position, direction)
 	local data=storage.players[player.index]
 	if not data or (data.preview and data.preview.applying) then return end
+	if data.choices.output_balance_choice and data.output_count_invalid then return end
 	local target={position=position,direction=direction}
 	if data.preview then
 		if data.preview.surface==surface and data.choices.belt_planner_choice then

@@ -1136,7 +1136,12 @@ function common.display_lane_filling(state)
 		::continue::
 	end
 	
-	if #belts > 1 then
+	if #belts > 1 or state.balanced_output_count then
+		if state.balanced_output_count then
+			output_count=state.balanced_output_count
+			throughput_capped1=math.min(throughput_capped1,output_count*capacity_mult)
+			throughput_capped2=math.min(throughput_capped2,output_count*capacity_mult)
+		end
 		local x = state.best_attempt.sx + 2
 		local y = belts[1].y
 		if state.direction_choice == "east" then
@@ -1181,6 +1186,7 @@ function common.create_belt_planner_specification(state)
 		direction_choice = state.direction_choice,
 		belt_choice = state.belt_choice,
 		belt_quality_choice = state.belt_quality_choice,
+		output_count = state.output_balance_choice and state.output_belt_count_choice or nil,
 		count = 0,
 		ungrouped = true,
 		_renderables = {},
@@ -1238,6 +1244,7 @@ function common.save_belt_specification(state)
 end
 
 function common.prepare_belt_connection(state)
+	state.balanced_output_count=nil
 	if not state.belt_planner_choice or not state.belt_target then return true end
 	local spec = common.create_belt_planner_specification(state)
 	if not spec then return true end
@@ -1262,6 +1269,7 @@ function common.prepare_belt_connection(state)
 		return false, entities
 	end
 	state.builder_belt_connections = entities
+	state.balanced_output_count=connection.balanced_output_count
 	return true
 end
 

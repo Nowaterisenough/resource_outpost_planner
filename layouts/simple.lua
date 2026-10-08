@@ -1842,7 +1842,7 @@ function layout:placement_belts(state)
 end
 
 function layout:placement_belt_connections(state)
-	local create_entity = builder.create_entity_builder(state,{do_deconstruction=true})
+	local create_entity = builder.create_entity_builder(state,{do_deconstruction=true,diagnostic=state.preview_only})
 	for _, belt in ipairs(state.builder_belt_connections or {}) do create_entity(belt) end
 	belt_planner.place_landfill(state,state.builder_belt_connections)
 	return state.builder_all and "placement_landfill" or "placement_poles"

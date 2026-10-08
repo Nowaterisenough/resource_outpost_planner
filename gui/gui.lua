@@ -9,12 +9,14 @@ local oil_gui = require("oil.gui")
 local oil_config = require("oil.config")
 local preview = require("mpp.preview")
 local beacons = require("mpp.beacons")
+local output_balancer = require("mpp.output_balancer")
+local belt_planner = require("mpp.belt_planner")
 local conf = require("configuration")
 
 local layouts = algorithm.layouts
 
 local gui = {}
-local workflow_version = 10
+local workflow_version = 11
 
 local direction_sprites = {
 	north = "virtual-signal/up-arrow",
@@ -579,6 +581,14 @@ function gui.create_interface(player)
 	do -- Space belt selection
 		local table_root, section = create_setting_section(player_data, player_gui.mining_transport_root, "space_belt", {column_count=4, secondary=true})
 	end
+	player_gui.output_balance_root=player_gui.mining_transport_root.add{type="flow",direction="horizontal"}
+	player_gui.output_balance_toggle=player_gui.output_balance_root.add{type="checkbox",state=false,
+		caption={"mpp.output_balance_label"},tooltip={"mpp.output_balance_tooltip"},tags={mpp_output_balance=true}}
+	player_gui.output_count=player_gui.output_balance_root.add{type="textfield",text="8",numeric=true,
+		allow_decimal=false,allow_negative=false,lose_focus_on_confirm=true,tags={mpp_output_count=true}}
+	player_gui.output_count.style.width=44
+	player_gui.output_count.style.height=28
+	player_gui.output_balance_root.add{type="label",caption={"mpp.output_balance_unit"}}
 	do -- Shared beacon controls
 		local group = player_gui.beacon_group
 		local row = group.add{type="flow", direction="horizontal"}
@@ -1484,6 +1494,15 @@ local function update_selections(player)
 	update_beacon_selection(player_data)
 	update_blueprint_selection(player_data)
 	update_misc_selection(player)
+	local can_output=not is_oil and algorithm.get_mining_layout(player_data).restrictions.belt_available
+	local choices=player_data.choices
+	if choices.output_balance_choice==nil then choices.output_balance_choice=false end
+	if not output_balancer.valid_count(choices.output_belt_count_choice) then choices.output_belt_count_choice=8 end
+	player_data.gui.output_balance_root.visible=can_output
+	player_data.gui.output_balance_toggle.state=choices.output_balance_choice
+	player_data.gui.output_count.text=tostring(choices.output_belt_count_choice)
+	player_data.output_count_invalid=false
+	player_data.gui.output_count.enabled=can_output and choices.output_balance_choice
 	update_debugging_selection(player_data)
 	update_quality_sections(player_data)
 	preview.update_gui(player_data)
@@ -1832,8 +1851,44 @@ end
 
 script.on_event(defines.events.on_gui_elem_changed, on_gui_elem_changed)
 
+local function update_output_cursor(player,data)
+	input_mode.update_gui(data)
+	if data.input_mode=="output" and not data.preview then
+		local spec=input_mode.output_specification(data,player)
+		if spec then belt_planner.update_blueprint(player,spec) end
+	end
+end
+
+script.on_event(defines.events.on_gui_checked_state_changed,function(event)
+	if not event.element.tags.mpp_output_balance then return end
+	local data=storage.players[event.player_index]
+	if not data or (data.preview and data.preview.applying) then return end
+	data.choices.output_balance_choice=event.element.state
+	data.gui.output_count.enabled=event.element.state
+	if event.element.state and data.output_count_invalid then
+		preview.invalidate(data,{"mpp.output_balance_count_error",output_balancer.max_count})
+	else preview.request(data) end
+	update_output_cursor(game.get_player(event.player_index),data)
+end)
+
 script.on_event(defines.events.on_gui_text_changed, function(event)
 	local data = storage.players[event.player_index]
+	if data and event.element.tags.mpp_output_count and not (data.preview and data.preview.applying) then
+		local count=tonumber(event.element.text)
+		if output_balancer.valid_count(count) then
+			data.output_count_invalid=false
+			data.choices.output_belt_count_choice=count
+			event.element.tooltip={"mpp.output_balance_tooltip"}
+			preview.request(data)
+			update_output_cursor(game.get_player(event.player_index),data)
+		else
+			data.output_count_invalid=true
+			event.element.tooltip={"mpp.output_balance_count_error",output_balancer.max_count}
+			preview.invalidate(data,event.element.tooltip)
+			update_output_cursor(game.get_player(event.player_index),data)
+		end
+		return
+	end
 	if data and event.element.tags.mpp_oil_utility and not (data.preview and data.preview.applying) then
 		if oil_gui.on_text_changed(event, data) then preview.request(data)
 		else preview.invalidate(data,{"mpp.preview_invalid_utility"}) end

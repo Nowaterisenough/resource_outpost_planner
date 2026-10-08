@@ -34,6 +34,10 @@ function preview.update_gui(data)
 	if not ui.preview_apply or not ui.preview_apply.valid then return end
 	ui.preview_apply.enabled=draft~=nil and draft.ready==true and not draft.applying
 	ui.preview_cancel.enabled=draft~=nil and not draft.applying
+	if ui.output_balance_toggle and ui.output_balance_toggle.valid then
+		ui.output_balance_toggle.enabled=not (draft and draft.applying)
+		ui.output_count.enabled=ui.output_balance_toggle.enabled and data.choices.output_balance_choice==true
+	end
 	ui.undo_button.enabled=draft~=nil or (data.last_state and #data.last_state._collected_ghosts>0) or false
 	ui.preview_apply.tooltip=draft and draft.error
 		and {"",draft.error,"\n",{"mpp.preview_diagnostics_hint"}} or nil
@@ -68,6 +72,9 @@ end
 function preview.request(data)
 	local draft=data.preview
 	if not draft or draft.applying then return end
+	if data.choices.output_balance_choice and data.output_count_invalid then
+		preview.invalidate(data,{"mpp.output_balance_count_error",32});return
+	end
 	if not data.choices.belt_planner_choice then
 		draft.belt_target=nil
 		if data.input_mode == "output" then input_mode.idle(data) end
