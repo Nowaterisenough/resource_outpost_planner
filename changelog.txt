@@ -1,4 +1,14 @@
 ---------------------------------------------------------------------------------------------------
+Version: 1.9.5
+Date: 2026-10-09
+  Features:
+    - Add optional balanced belt outputs for railway loading, disabled by default with eight configurable output lanes.
+    - Match established Raynquist/Dogmai balancer blueprints to incoming belts, output count and underground belt reach.
+    - Include balancers in ground previews, obstacle diagnostics, construction plans, Undo and reselection cleanup.
+  Changes:
+    - Preserve blueprint splitter priorities, underground pairs and output cursor rotation when changing lane count.
+    - Report balanced output count and outgoing belt capacity in Statistics.
+---------------------------------------------------------------------------------------------------
 Version: 1.9.4
 Date: 2026-10-08
   Features:
