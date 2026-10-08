@@ -1,9 +1,9 @@
-local graphics = "__mining-patch-planner__/graphics/"
+local graphics = "__resource-outpost-planner__/graphics/"
 
 data:extend{
 	{
 		type="selection-tool",
-		name="mining-patch-planner",
+		name="resource-outpost-planner",
 		icon=graphics.."drill-icon.png",
 		icon_size = 64,
 		flags = {"only-in-cursor", "spawnable", "not-stackable"},
@@ -51,13 +51,13 @@ data:extend{
 	},
 	{
 		type="custom-input",
-		name="mining-patch-planner-keybind",
+		name="resource-outpost-planner-keybind",
 		key_sequence="CONTROL + M",
 		action="lua",
 	},
 	{
 		type="custom-input",
-		name="mining-patch-planner-keybind-rotate",
+		name="resource-outpost-planner-keybind-rotate",
 		key_sequence="",
 		linked_game_control="rotate",
 		action="lua",
@@ -65,7 +65,7 @@ data:extend{
 	},
 	{
 		type="custom-input",
-		name="mining-patch-planner-keybind-rotate-reversed",
+		name="resource-outpost-planner-keybind-rotate-reversed",
 		key_sequence="",
 		linked_game_control="reverse-rotate",
 		action="lua",
@@ -73,21 +73,21 @@ data:extend{
 	},
 	{
 		type="custom-input",
-		name="mining-patch-planner-keybind-flip-horizontal",
+		name="resource-outpost-planner-keybind-flip-horizontal",
 		key_sequence="",
 		linked_game_control="flip-horizontal",
 		action="lua",
 	},
 	{
 		type="custom-input",
-		name="mining-patch-planner-keybind-flip-vertical",
+		name="resource-outpost-planner-keybind-flip-vertical",
 		key_sequence="",
 		linked_game_control="flip-vertical",
 		action="lua",
 	},
 	{
 		type="shortcut",
-		name="mining-patch-planner-shortcut",
+		name="resource-outpost-planner-shortcut",
 		icon = graphics.."drill-icon-toolbar.png",
 		small_icon = graphics.."drill-icon-toolbar-small.png",
 		order="b[blueprints]-i[miner-planner]",
@@ -95,7 +95,7 @@ data:extend{
 		icon_size = 56,
 		small_icon_size = 24,
 		style="blue",
-		associated_control_input="mining-patch-planner-keybind",
+		associated_control_input="resource-outpost-planner-keybind",
 	},
 }
 
@@ -112,7 +112,7 @@ table.insert(mpp_blueprint.flags, "only-in-cursor")
 
 data.extend{mpp_blueprint}
 
-local belt_target = table.deepcopy(data.raw["selection-tool"]["mining-patch-planner"])
+local belt_target = table.deepcopy(data.raw["selection-tool"]["resource-outpost-planner"])
 belt_target.name = "mpp-belt-planner"
 belt_target.localised_name = {"mpp.belt_planner_name"}
 belt_target.localised_description = {"mpp.belt_planner_description"}

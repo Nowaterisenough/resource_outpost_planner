@@ -1,4 +1,4 @@
-local graphics = "__mining-patch-planner__/graphics/"
+local graphics = "__resource-outpost-planner__/graphics/"
 
 -- Columns follow render-settings-icons.py. Native backgrounds indicate selection.
 local names = {

@@ -97,7 +97,7 @@ local function select_preview(event,append)
 			storage.players[player.index].belt_planner_direction or NORTH)
 		return
 	end
-	if event.item~="mining-patch-planner" then return end
+	if event.item~="resource-outpost-planner" then return end
 	for _,task in ipairs(storage.tasks) do
 		if task.player==player and not task.preview_only then return end
 	end
@@ -118,7 +118,7 @@ script.on_event(defines.events.on_player_alt_reverse_selected_area, function(eve
 	if not player then return end
 	local cursor_stack = player.cursor_stack
 	if not cursor_stack or not cursor_stack.valid or not cursor_stack.valid_for_read then return end
-	if cursor_stack and cursor_stack.valid and cursor_stack.valid_for_read and cursor_stack.name ~= "mining-patch-planner" then return end
+	if cursor_stack and cursor_stack.valid and cursor_stack.valid_for_read and cursor_stack.name ~= "resource-outpost-planner" then return end
 
 	---@type PlayerData
 	local player_data = storage.players[event.player_index]
@@ -149,9 +149,9 @@ script.on_event(defines.events.on_player_reverse_selected_area, function(event)
 	if not player then return end
 	local cursor_stack = player.cursor_stack
 	if not cursor_stack or not cursor_stack.valid or not cursor_stack.valid_for_read then return end
-	if cursor_stack and cursor_stack.valid and cursor_stack.valid_for_read and cursor_stack.name ~= "mining-patch-planner" then return end
+	if cursor_stack and cursor_stack.valid and cursor_stack.valid_for_read and cursor_stack.name ~= "resource-outpost-planner" then return end
 
-	rendering.clear("mining-patch-planner")
+	rendering.clear("resource-outpost-planner")
 end)
 
 script.on_load(function()
@@ -223,9 +223,9 @@ local function toggle_interface(event)
 	end
 end
 
-script.on_event("mining-patch-planner-keybind", toggle_interface)
+script.on_event("resource-outpost-planner-keybind", toggle_interface)
 script.on_event(defines.events.on_lua_shortcut, function(event)
-	if event.prototype_name == "mining-patch-planner-shortcut" then toggle_interface(event) end
+	if event.prototype_name == "resource-outpost-planner-shortcut" then toggle_interface(event) end
 end)
 
 script.on_event(defines.events.on_research_finished, function(event)
@@ -290,10 +290,10 @@ local function rotate_belt_target(event, reverse)
 	return true
 end
 
-script.on_event("mining-patch-planner-keybind-rotate", function(e)
+script.on_event("resource-outpost-planner-keybind-rotate", function(e)
 	---@cast e EventData.CustomInputEvent
 	if rotate_belt_target(e,false) then return end
-	if not e.selected_prototype or e.selected_prototype.name ~= "mining-patch-planner" then return end
+	if not e.selected_prototype or e.selected_prototype.name ~= "resource-outpost-planner" then return end
 	local player_index = e.player_index
 	local ply = storage.players[player_index] --[[@as PlayerData]]
 	local current_direction = ply.choices.direction_choice
@@ -310,20 +310,20 @@ script.on_event("mining-patch-planner-keybind-rotate", function(e)
 	game.get_player(player_index).play_sound{path="utility/rotated_medium"}
 end)
 
-script.on_event("mining-patch-planner-keybind-flip-horizontal", function(e)
+script.on_event("resource-outpost-planner-keybind-flip-horizontal", function(e)
 	local player = game.get_player(e.player_index)
 	if player then belt_planner.flip_cursor(player, true) end
 end)
 
-script.on_event("mining-patch-planner-keybind-flip-vertical", function(e)
+script.on_event("resource-outpost-planner-keybind-flip-vertical", function(e)
 	local player = game.get_player(e.player_index)
 	if player then belt_planner.flip_cursor(player, false) end
 end)
 
-script.on_event("mining-patch-planner-keybind-rotate-reversed", function(e)
+script.on_event("resource-outpost-planner-keybind-rotate-reversed", function(e)
 	---@cast e EventData.CustomInputEvent
 	if rotate_belt_target(e,true) then return end
-	if not e.selected_prototype or e.selected_prototype.name ~= "mining-patch-planner" then return end
+	if not e.selected_prototype or e.selected_prototype.name ~= "resource-outpost-planner" then return end
 	
 	local player_index = e.player_index
 	local ply = storage.players[player_index] --[[@as PlayerData]]

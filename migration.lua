@@ -4,7 +4,7 @@ local enums = require("mpp.enums")
 local preview = require("mpp.preview")
 
 -- resetting a GUI manually from console
--- /c __mining-patch-planner__ game.player.gui.screen.mpp_settings_frame.destroy()
+-- /c __resource-outpost-planner__ game.player.gui.screen.mpp_settings_frame.destroy()
 
 ---@param player LuaPlayer
 local function reset_gui(player, player_data)
@@ -14,7 +14,7 @@ local function reset_gui(player, player_data)
 		root.destroy()
 	end
 	local cursor_stack = player.cursor_stack
-	if cursor_stack and cursor_stack.valid and cursor_stack.valid_for_read and cursor_stack.name == "mining-patch-planner" then
+	if cursor_stack and cursor_stack.valid and cursor_stack.valid_for_read and cursor_stack.name == "resource-outpost-planner" then
 		cursor_stack.clear()
 	end
 	
@@ -38,7 +38,7 @@ script.on_configuration_changed(function(config_changed_data)
 	local game_players = game.players
 	
 	if version < 010700 then -- do a clean slate before 1.7
-		rendering.clear("mining-patch-planner")
+		rendering.clear("resource-outpost-planner")
 		
 		if storage.players then
 			for player_index, data in pairs(storage.players) do
@@ -88,7 +88,7 @@ script.on_configuration_changed(function(config_changed_data)
 		conf.migrate_terrain_choices(state)
 	end
 
-	if config_changed_data.mod_changes["mining-patch-planner"] and version < current_version then
+	if config_changed_data.mod_changes["resource-outpost-planner"] and version < current_version then
 		storage.tasks = storage.tasks or {}
 		conf.initialize_deconstruction_filter()
 		for player_index, data in pairs(storage.players) do

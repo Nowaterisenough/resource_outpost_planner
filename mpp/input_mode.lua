@@ -16,7 +16,7 @@ end
 local function cursor_mode(player)
 	local stack = player and player.cursor_stack
 	if not stack or not stack.valid_for_read then return end
-	if stack.name == "mining-patch-planner" then return "select" end
+	if stack.name == "resource-outpost-planner" then return "select" end
 	if stack.name == "mpp-blueprint-belt-planner" or stack.name == "mpp-belt-planner" then return "output" end
 end
 
@@ -58,7 +58,7 @@ function input_mode.select(data, player)
 	changing[player.index] = true
 	if not player.clear_cursor() then changing[player.index] = nil; return false end
 	belt_planner.release_cursor(data, player)
-	player.cursor_stack.set_stack("mining-patch-planner")
+	player.cursor_stack.set_stack("resource-outpost-planner")
 	player.cursor_stack_temporary = true
 	data.input_mode = "select"
 	changing[player.index] = nil

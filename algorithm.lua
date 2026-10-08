@@ -145,7 +145,7 @@ local function create_state(event)
 	state.type = "layout"
 	state._callback = "start"
 	state.tick = 0
-	state.mod_version = script.active_mods["mining-patch-planner"]
+	state.mod_version = script.active_mods["resource-outpost-planner"]
 	state._preview_rectangle = nil
 	state._collected_ghosts = {}
 	state._deconstruction_orders = {}
