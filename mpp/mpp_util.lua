@@ -1083,7 +1083,7 @@ function mpp_util.update_undo_button(player_data)
 	end
 
 	undo_button.enabled = enabled
-	undo_button.sprite = "mpp_setting_undo"
+	if undo_button.type == "sprite-button" then undo_button.sprite = "mpp_setting_undo" end
 	undo_button.tooltip = mpp_util.wrap_tooltip(enabled and {"controls.undo"} or {"", {"controls.undo"}," (", {"gui.not-available"}, ")"})
 end
 

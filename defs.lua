@@ -73,6 +73,7 @@
 ---@field start_alignment_tuning boolean
 ---@field deconstruction_omit_available boolean
 ---@field module_available boolean
+---@field beacon_available boolean
 ---@field pipe_available boolean
 ---@field placement_info_available boolean
 ---@field lane_filling_info_available boolean
@@ -132,6 +133,7 @@
 ---@field coords Coords
 ---@field direction_choice DirectionString
 ---@field belt_choice string
+---@field belt_quality_choice string?
 ---@field count number Belt count
 ---@field ungrouped boolean Is first step when belts are spaced out?
 ---@field _renderables LuaRenderObject[]

@@ -53,22 +53,37 @@ data:extend{
 		type="custom-input",
 		name="mining-patch-planner-keybind",
 		key_sequence="CONTROL + M",
-		action="spawn-item",
-		item_to_spawn="mining-patch-planner",
+		action="lua",
 	},
 	{
 		type="custom-input",
 		name="mining-patch-planner-keybind-rotate",
-		key_sequence="R",
+		key_sequence="",
+		linked_game_control="rotate",
 		action="lua",
 		include_selected_prototype = true,
 	},
 	{
 		type="custom-input",
 		name="mining-patch-planner-keybind-rotate-reversed",
-		key_sequence="SHIFT + R",
+		key_sequence="",
+		linked_game_control="reverse-rotate",
 		action="lua",
 		include_selected_prototype = true,
+	},
+	{
+		type="custom-input",
+		name="mining-patch-planner-keybind-flip-horizontal",
+		key_sequence="",
+		linked_game_control="flip-horizontal",
+		action="lua",
+	},
+	{
+		type="custom-input",
+		name="mining-patch-planner-keybind-flip-vertical",
+		key_sequence="",
+		linked_game_control="flip-vertical",
+		action="lua",
 	},
 	{
 		type="shortcut",
@@ -76,10 +91,9 @@ data:extend{
 		icon = graphics.."drill-icon-toolbar.png",
 		small_icon = graphics.."drill-icon-toolbar-small.png",
 		order="b[blueprints]-i[miner-planner]",
-		action = "spawn-item",
+		action = "lua",
 		icon_size = 56,
 		small_icon_size = 24,
-		item_to_spawn="mining-patch-planner",
 		style="blue",
 		associated_control_input="mining-patch-planner-keybind",
 	},
@@ -88,6 +102,8 @@ data:extend{
 local mpp_blueprint = table.deepcopy(data.raw["blueprint"]["blueprint"]) --[[@as data.BlueprintItemPrototype]]
 
 mpp_blueprint.name = "mpp-blueprint-belt-planner"
+mpp_blueprint.localised_name = {"mpp.belt_planner_name"}
+mpp_blueprint.localised_description = {"mpp.belt_planner_description"}
 mpp_blueprint.hidden = true
 mpp_blueprint.hidden_in_factoriopedia = true
 mpp_blueprint.auto_recycle = false
@@ -95,3 +111,13 @@ mpp_blueprint.flags = mpp_blueprint.flags or {}
 table.insert(mpp_blueprint.flags, "only-in-cursor")
 
 data.extend{mpp_blueprint}
+
+local belt_target = table.deepcopy(data.raw["selection-tool"]["mining-patch-planner"])
+belt_target.name = "mpp-belt-planner"
+belt_target.localised_name = {"mpp.belt_planner_name"}
+belt_target.localised_description = {"mpp.belt_planner_description"}
+belt_target.icons = {{icon="__base__/graphics/icons/transport-belt.png", icon_size=64}}
+belt_target.icon = nil
+belt_target.select = {border_color={0.4,0.7,1}, cursor_box_type="pair", mode="any-tile"}
+belt_target.alt_select = table.deepcopy(belt_target.select)
+data:extend{belt_target}

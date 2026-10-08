@@ -75,7 +75,7 @@ end
 ---@return CallbackState
 function layout:finish(state)
 	if state.preview_only then return false end
-	if state.print_placement_info_choice and state.player.valid then
+	if state.statistics_choice and state.player.valid then
 		state.player.print({"mpp.msg_print_info_miner_placement_no_lanes", #state.best_attempt.miners, #state.resources})
 	end
 	return false

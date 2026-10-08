@@ -38,6 +38,7 @@ layout.restrictions.landfill_omit_available = true
 layout.restrictions.start_alignment_tuning = false
 layout.restrictions.deconstruction_omit_available = true
 layout.restrictions.module_available = false
+layout.restrictions.beacon_available = false
 layout.restrictions.pipe_available = false
 layout.restrictions.placement_info_available = false
 layout.restrictions.lane_filling_info_available = false
@@ -102,9 +103,14 @@ end
 ---@param state State
 function layout:deconstruct_previous_ghosts(state)
 	local next_step = "initialize_grid"
-	if state.preview_only then return next_step end
+	if state.preview_only or state._from_preview then return next_step end
+	layout.order_previous_deconstruction(state)
+	return next_step
+end
+
+function layout.order_previous_deconstruction(state)
 	if state._previous_state == nil or state._previous_state._collected_ghosts == nil then
-		return next_step
+		return
 	end
 
 	local force, player = state.player.force, state.player
@@ -113,8 +119,6 @@ function layout:deconstruct_previous_ghosts(state)
 			ghost.order_deconstruction(force, player)
 		end
 	end
-
-	return next_step
 end
 
 return layout

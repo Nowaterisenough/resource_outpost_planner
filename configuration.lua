@@ -2,6 +2,7 @@ local util = require("util")
 local current_version = require("mpp.version")
 local conf = {}
 local preview = require("mpp.preview")
+local terrain = require("mpp.terrain")
 
 ---@alias FilteredEntityStatus
 ---| "auto_hidden" marked hidden automaticall
@@ -22,10 +23,13 @@ local preview = require("mpp.preview")
 ---@field tick_expires integer When was gui closed, for undo button disabling
 ---@field selection_collection LuaEntity[] Selected resources
 ---@field preview table? Pending rendering-only plan
+---@field input_mode "select"|"output"? Active cursor tool, independent of the layout choices
 ---@field selection_cache table<number, table<number, true>> Acceleration structure
 ---@field selection_render LuaRenderObject[] Selection overlay
 ---@field belt_planner_blueprint LuaItemStack?
 ---@field belt_planner_stack BeltPlannerSpecification[]
+---@field belt_planner_direction defines.direction? World direction of the belt output target
+---@field belt_cursor_direction defines.direction? Visible direction preserved when rebuilding the cursor blueprint
 
 ---@class PlayerChoices
 ---@field layout_choice string
@@ -43,11 +47,9 @@ local preview = require("mpp.preview")
 ---@field space_belt_quality_choice string
 ---@field logistics_choice string
 ---@field logistics_quality_choice string
----@field landfill_choice boolean
+---@field terrain_mode_choice "avoid"|"fill"
+---@field cliff_mode_choice "avoid"|"remove"
 ---@field space_landfill_choice string
----@field avoid_water_choice boolean
----@field avoid_cliffs_choice boolean
----@field avoid_obstacles_choice boolean
 ---@field coverage_choice boolean
 ---@field start_choice boolean
 ---@field deconstruction_choice boolean
@@ -55,10 +57,15 @@ local preview = require("mpp.preview")
 ---@field pipe_quality_choice string
 ---@field module_choice string
 ---@field module_quality_choice string
+---@field beacon_choice string
+---@field beacon_quality_choice string
+---@field beacon_module_choice string
+---@field beacon_module_quality_choice string
+---@field beacon_density_choice number Target towers affecting each drill; zero fills available space
 ---@field show_non_electric_miners_choice boolean
 ---@field force_pipe_placement_choice boolean
 ---@field print_debug_info_choice boolean
----@field display_lane_filling_choice boolean
+---@field statistics_choice boolean
 ---@field dumb_power_connectivity_choice boolean
 ---@field debugging_choice string Debugging only value
 ---@field ore_filtering_choice boolean
@@ -75,6 +82,9 @@ local preview = require("mpp.preview")
 ---@field filtering_settings LuaGuiElement
 ---@field undo_button LuaGuiElement
 ---@field layout_dropdown LuaGuiElement
+---@field beacon_density LuaGuiElement?
+---@field beacon_arrangement LuaGuiElement?
+---@field beacon_group LuaGuiElement?
 ---@field layout_values string[]
 ---@field unified boolean
 ---@field oil_settings_root LuaGuiElement
@@ -125,7 +135,8 @@ conf.default_config = {
 		lamp_choice = false,
 		logistics_choice = "passive-provider-chest",
 		logistics_quality_choice = "normal",
-		landfill_choice = false,
+		terrain_mode_choice = "fill",
+		cliff_mode_choice = "remove",
 		space_landfill_choice = "se-space-platform-scaffold",
 		coverage_choice = false,
 		start_choice = false,
@@ -134,6 +145,11 @@ conf.default_config = {
 		pipe_quality_choice = "normal",
 		module_choice = "none",
 		module_quality_choice = "normal",
+		beacon_choice = "none",
+		beacon_quality_choice = "normal",
+		beacon_module_choice = "speed-module-3",
+		beacon_module_quality_choice = "normal",
+		beacon_density_choice = 4,
 		blueprint_choice = nil,
 		dumb_power_connectivity_choice = false,
 		debugging_choice = "none",
@@ -141,15 +157,12 @@ conf.default_config = {
 		belt_planner_choice = false,
 		belt_merge_choice = false,
 		balancer_choice = false,
-		avoid_water_choice = false,
-		avoid_cliffs_choice = false,
-		avoid_obstacles_choice = false,
 
 		-- non layout/convienence/advanced settings
 		show_non_electric_miners_choice = false,
 		force_pipe_placement_choice = false,
 		print_debug_info_choice = false,
-		display_lane_filling_choice = true,
+		statistics_choice = true,
 	},
 
 	gui = {
@@ -183,6 +196,32 @@ local function pass_same_type(old, new)
 	return new
 end
 
+function conf.migrate_statistics_choice(choices)
+	if choices.statistics_choice == nil then
+		if choices.print_placement_info_choice ~= nil or choices.display_lane_filling_choice ~= nil then
+			choices.statistics_choice = choices.print_placement_info_choice == true or choices.display_lane_filling_choice == true
+		else
+			choices.statistics_choice = conf.default_config.choices.statistics_choice
+		end
+	end
+	choices.print_placement_info_choice = nil
+	choices.display_lane_filling_choice = nil
+end
+
+function conf.migrate_terrain_choices(choices)
+	if choices.cliff_mode_choice == nil then
+		choices.cliff_mode_choice = terrain.avoid_cliffs(choices) and "avoid" or "remove"
+	end
+	if choices.terrain_mode_choice == nil then
+		choices.terrain_mode_choice = terrain.avoid_tiles(choices) and "avoid" or "fill"
+	end
+	if choices.avoid_obstacles_choice then choices.deconstruction_choice = true end
+	choices.avoid_cliffs_choice = nil
+	choices.avoid_water_choice = nil
+	choices.avoid_obstacles_choice = nil
+	choices.landfill_choice = nil
+end
+
 ---quality choices
 local quality_settings = {
 	"miner_quality",
@@ -191,6 +230,8 @@ local quality_settings = {
 	"pole_quality",
 	"logistics_quality",
 	"module_quality",
+	"beacon_quality",
+	"beacon_module_quality",
 	"pipe_quality",
 }
 
@@ -235,15 +276,24 @@ function conf.update_player_data(player_index)
 	end
 
 	local old_choices = old_config.choices or {}
+	conf.migrate_statistics_choice(old_choices)
+	conf.migrate_terrain_choices(old_choices)
 	for key, new_choice in pairs(new_config.choices) do
 		new_config.choices[key] = pass_same_type(old_choices[key], new_choice)
 	end
+	new_config.choices.statistics_choice = old_choices.statistics_choice
 
 	storage.players[player_index] = new_config
 end
 
 function conf.update_player_quality_data(player_index)
 	local player_data = storage.players[player_index]
+	conf.migrate_statistics_choice(player_data.choices)
+	conf.migrate_terrain_choices(player_data.choices)
+	if player_data.last_state then
+		conf.migrate_statistics_choice(player_data.last_state)
+		conf.migrate_terrain_choices(player_data.last_state)
+	end
 	local filtered_entities = player_data.filtered_entities
 	for _, quality_name in pairs(conf.get_locked_qualities(game.get_player(player_index) --[[@as LuaPlayer]])) do
 		for _, quality_setting in pairs(quality_settings) do

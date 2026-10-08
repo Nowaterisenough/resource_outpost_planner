@@ -3,6 +3,7 @@ local mpp_util = require("mpp.mpp_util")
 local compatibility = require("mpp.compatibility")
 local oil_config = require("oil.config")
 local common = require("layouts.common")
+local beacons = require("mpp.beacons")
 
 local floor, ceil = math.floor, math.ceil
 local min, max = math.min, math.max
@@ -28,6 +29,7 @@ require_layout("compact_logistics")
 require_layout("sparse_logistics")
 require_layout("blueprints")
 require_layout("oil")
+layouts.beacon_rows = require("layouts.beacon_rows")
 
 function algorithm.get_mining_layout(player_data)
 	local choices = player_data.choices
@@ -100,11 +102,9 @@ end
 ---@field coverage_choice boolean
 ---@field logistics_choice string
 ---@field logistics_quality_choice string
----@field landfill_choice boolean
+---@field terrain_mode_choice "avoid"|"fill"
+---@field cliff_mode_choice "avoid"|"remove"
 ---@field space_landfill_choice string
----@field avoid_water_choice boolean
----@field avoid_cliffs_choice boolean
----@field avoid_obstacles_choice boolean
 ---@field start_choice boolean
 ---@field deconstruction_choice boolean
 ---@field pipe_choice string
@@ -112,8 +112,7 @@ end
 ---@field module_choice string
 ---@field module_quality_choice string
 ---@field force_pipe_placement_choice boolean
----@field print_placement_info_choice boolean
----@field display_lane_filling_choice boolean
+---@field statistics_choice boolean
 ---@field ore_filtering_choice boolean
 ---@field ore_filtering_selected string?
 ---@field belt_planner_choice boolean
@@ -149,8 +148,10 @@ local function create_state(event)
 	state.mod_version = script.active_mods["mining-patch-planner"]
 	state._preview_rectangle = nil
 	state._collected_ghosts = {}
+	state._deconstruction_orders = {}
 	state.preview_only = event.preview_only == true
 	state.preview_revision = event.preview_revision
+	state.belt_target = event.belt_target and util.copy(event.belt_target)
 	state._preview_specs = state.preview_only and {} or nil
 	state._render_objects = List()
 	state._lane_info_rendering = {}
@@ -170,6 +171,12 @@ local function create_state(event)
 		state[k] = util.copy(v)
 	end
 	local layout = layouts[state.layout_choice]
+	if beacons.enabled(state) then
+		state._mining_layout_choice = state.layout_choice
+		state._beacon_logistics = layout.restrictions.logistics_available
+		state.layout_choice = "beacon_rows"
+		if state._beacon_logistics then state.belt_planner_choice=false end
+	end
 	if layout.restrictions.pole_available and state.pole_choice ~= "none" and state.pole_choice ~= "zero_gap" then
 		local pole = mpp_util.pole_struct(state.pole_choice, state.pole_quality_choice)
 		if common.is_pole_restricted(pole, layout.restrictions) then
@@ -316,7 +323,7 @@ function algorithm.on_player_selected_area(event)
 	local player_data = storage.players[event.player_index]
 	local state, err = create_state(event)
 	if not state then return nil, err end
-	local layout = layouts[player_data.choices.layout_choice]
+	local layout = layouts[state.layout_choice]
 
 	if layout.restrictions.miner_available and state.miner_choice == "none" then
 		return nil, {"mpp.msg_miner_err_3"}
@@ -389,7 +396,8 @@ function algorithm.on_player_selected_area(event)
 		return nil, {"cant-build-reason.mining-with-fluid-not-available"}
 	end
 
-	local validation_result, error = layout:validate(state)
+	local validation_layout = layouts[state._mining_layout_choice or state.layout_choice]
+	local validation_result, error = validation_layout:validate(state)
 	if not validation_result then return nil, error end
 
 	local last_state = player_data.last_state --[[@as MinimumPreservedState]]

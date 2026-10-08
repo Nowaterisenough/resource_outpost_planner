@@ -362,6 +362,7 @@ function layout:_get_deconstruction_objects(state)
 	return {
 		state.builder_miners,
 		state.builder_all,
+		state.builder_belt_connections or {},
 		--state.builder_pipes,
 		--state.builder_belts,
 		--state.builder_power_poles,
@@ -1000,7 +1001,7 @@ function layout:process_forward_outputs(state)
 	
 	local converter = mpp_util.reverter_delegate(state.coords, state.direction_choice)
 	
-	if state.display_lane_filling_choice then
+	if state.statistics_choice then
 		for piece, _ in pairs(all_belts) do
 			local tributary = group_tributaries[piece.group_output]
 			if tributary then
@@ -1059,7 +1060,7 @@ function layout:process_forward_outputs(state)
 	end
 	state.belt_count = #belts
 	
-	if belt_choice and state.display_lane_filling_choice then
+	if belt_choice and state.statistics_choice then
 		local belt_struct = mpp_util.belt_struct(belt_choice)
 		state.belt = belt_struct
 		local belt_speed = state.belt.speed
@@ -1339,7 +1340,8 @@ end
 ---@param state BlueprintState
 function layout:expensive_deconstruct(state)
 	if simple.expensive_deconstruct(self --[[@as SimpleLayout]], state) == false then return false end
-	return "placement_miners"
+	if simple.prepare_connections(self --[[@as SimpleLayout]], state) == false then return false end
+	return simple.deconstruct_layout(self --[[@as SimpleLayout]], state)
 end
 
 ---@param self BlueprintLayout
@@ -1398,9 +1400,10 @@ function layout:placement_all(state)
 		::continue::
 	end
 
-	return "placement_landfill"
+	return "placement_belt_connections"
 end
 
+layout.placement_belt_connections = simple.placement_belt_connections
 layout.placement_landfill = simple.placement_landfill
 
 ---@param self BlueprintLayout
@@ -1412,10 +1415,7 @@ function layout:finish(state)
 		common.display_lane_filling(state)
 	end
 	
-	if state.belt_planner_choice then
-		belt_planner.clear_belt_planner_stack(storage.players[state.player.index])
-		common.give_belt_blueprint(state)
-	end
+	common.save_belt_specification(state)
 	
 	return false
 end

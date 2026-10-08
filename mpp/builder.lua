@@ -1,6 +1,7 @@
 local direction = defines.direction
 local mpp_util = require("mpp.mpp_util")
 local obstacles = require("mpp.obstacles")
+local terrain = require("mpp.terrain")
 local EAST, NORTH, SOUTH, WEST, ROTATION = mpp_util.directions()
 local coord_revert_world = mpp_util.revert_world
 local builder = {}
@@ -55,6 +56,7 @@ end
 
 ---@class EntityBuilderOptions
 ---@field do_deconstruction boolean?
+---@field diagnostic boolean? Capture rejected entities for a failed preview without changing the world or grid
 
 --- Builder for a convenience function that automatically translates
 --- internal grid state for a surface.create_entity call
@@ -72,10 +74,6 @@ function builder.create_entity_builder(state, opts)
 	local collected_ghosts = state._collected_ghosts
 	-- local is_space = state.is_space
 
-	local deconstruction_planner
-	if opts.do_deconstruction and not state.avoid_obstacles_choice and not state.preview_only then
-		deconstruction_planner = storage.script_inventory[state.deconstruction_choice and 2 or 1]
-	end
 	
 	local _player = state.player
 	local _force = _player.force
@@ -92,10 +90,11 @@ function builder.create_entity_builder(state, opts)
 		---@diagnostic disable-next-line: assign-type-mismatch
 		ghost.position = position
 		ghost.direction=direction_conv[ghost.direction or defines.direction.north]
-		if state.avoid_obstacles_choice and not obstacles.can_place(state,ghost.inner_name,
+		if not obstacles.can_place(state,ghost.inner_name,
 			{x=position[1],y=position[2]},ghost.direction) then
 			state._obstacle_skipped = (state._obstacle_skipped or 0) + 1
-			return
+			if not (opts.diagnostic and state.preview_only) then return end
+			ghost.preview_blocked=true
 		end
 		
 		if not quality_enabled then ghost.quality = nil end
@@ -124,32 +123,16 @@ function builder.create_entity_builder(state, opts)
 			return
 		end
 		
-		if deconstruction_planner then
-			local x, y = position[1], position[2]
-			local left_top = {x+.01, y+.01}
-			local right_bottom = {position[1]+.99, position[2]+.99}
-			surface.deconstruct_area{
-				force = _force,
-				player = _player,
-				area = {
-					left_top = left_top,
-					right_bottom = right_bottom,
-				},
-				item = deconstruction_planner,
-			}
-			-- rendering.draw_rectangle{
-			-- 	left_top = left_top,
-			-- 	right_bottom = right_bottom,
-			-- 	color = {1, 0, 0},
-			-- 	surface = surface,
-			-- }
+		if opts.do_deconstruction then
+			terrain.deconstruct(state, obstacles.entity_box(ghost.inner_name,
+				{x=position[1], y=position[2]}, ghost.direction))
 		end
 
 		local result
 		if state.preview_only then result = builder.record_preview(state,ghost)
 		else result = surface.create_entity(ghost) end
 		if result then
-			if ghost.thing and grid then
+			if ghost.thing and grid and not opts.diagnostic then
 				grid:build_specification(ghost)
 			end
 			

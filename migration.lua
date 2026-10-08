@@ -83,6 +83,11 @@ script.on_configuration_changed(function(config_changed_data)
 		end
 	end
 	
+	for _, state in pairs(storage.tasks or {}) do
+		conf.migrate_statistics_choice(state)
+		conf.migrate_terrain_choices(state)
+	end
+
 	if config_changed_data.mod_changes["mining-patch-planner"] and version < current_version then
 		storage.tasks = storage.tasks or {}
 		conf.initialize_deconstruction_filter()

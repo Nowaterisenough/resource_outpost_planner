@@ -4,9 +4,10 @@ local grid_mt = require("mpp.grid_mt")
 local pole_grid_mt = require("mpp.pole_grid_mt")
 local mpp_util = require("mpp.mpp_util")
 local builder = require("mpp.builder")
-local cliffs = require("mpp.cliffs")
+local terrain = require("mpp.terrain")
 local obstacles = require("mpp.obstacles")
 local belt_planner = require("mpp.belt_planner")
+local beacons = require("mpp.beacons")
 local coord_convert, coord_revert = mpp_util.coord_convert, mpp_util.coord_revert
 local internal_revert, internal_convert = mpp_util.internal_revert, mpp_util.internal_convert
 local miner_direction, opposite = mpp_util.miner_direction, mpp_util.opposite
@@ -64,6 +65,7 @@ layout.restrictions.pole_supply_area = {2.5, 10e3}
 layout.restrictions.lamp_available = true
 layout.restrictions.coverage_tuning = true
 layout.restrictions.module_available = true
+layout.restrictions.beacon_available = true
 layout.restrictions.pipe_available = true
 layout.restrictions.placement_info_available = true
 layout.restrictions.lane_filling_info_available = true
@@ -216,54 +218,8 @@ function layout:preprocess_grid(state)
 	local grid = state.grid
 	local M = state.miner
 
-	local tile_area = {
-		left_top={c.x1-miner.area-1, c.y1-miner.area-1},
-		right_bottom={c.x2+miner.area+1, c.y2+miner.area+1}
-	}
-	local conv = coord_convert[state.direction_choice]
-	local gx, gy = state.coords.ix1 - 1, state.coords.iy1 - 1
-	if state.avoid_obstacles_choice then obstacles.mark_grid(state) end
-	if state.avoid_water_choice then
-		local avoid_tiles = state.surface.find_tiles_filtered{area=tile_area, collision_mask="water_tile"}
+	if obstacles.active(state) then obstacles.mark_grid(state) end
 
-		for i, avoid_tile in ipairs(avoid_tiles) do
-			local tx, ty = avoid_tile.position.x-.5, avoid_tile.position.y-.5
-			local x, y = conv(tx-gx, ty-gy, c.w, c.h)
-			local tile = grid:get_tile(ceil(x), ceil(y))
-			tile.avoid = true
-			grid:forbid(ceil(x)-M.size+1, ceil(y)-M.size+1, M.size)
-		end
-	end
-	
-	if state.avoid_cliffs_choice then
-		local avoided_cliffs = state.surface.find_entities_filtered{area=tile_area, type="cliff"}
-		
-		for _, cliff in ipairs(avoided_cliffs) do
-			local px, py = cliff.position.x-1, cliff.position.y-1
-			local fx, fy = px-gx, py-gy
-			
-			for _, exclusion in ipairs(cliffs.hardcoded_collisions[cliff.cliff_orientation]) do
-				
-				local x, y = conv(fx+exclusion[1], fy+exclusion[2], c.w, c.h)
-				-- rendering.draw_circle{
-				-- 	surface=state.surface,
-				-- 	target = {fx+.5+exclusion[1], fy+.5+exclusion[2]},
-				-- 	radius = 0.45,
-				-- 	filled = false,
-				-- 	width = 1,
-				-- 	color = {.8, 0, 0},
-				-- }
-				
-				x, y = ceil(x), ceil(y)
-				local tile = grid:get_tile(x, y)
-				if tile then
-					tile.avoid = true
-				end
-				grid:forbid(x-M.size+1, y-M.size+1, M.size)
-			end
-		end
-	end
-	
 	return "process_grid"
 end
 
@@ -1153,9 +1109,12 @@ end
 ---@return number, number
 function layout:_calculate_belt_throughput(state, belt, direction)
 	local belt_speed = state.belt.speed
-	local multiplier = common.get_mining_drill_production_from_state(state)
 	---@param lane MinerPlacement[]
-	local function lane_capacity(lane) if lane then return #lane * multiplier / belt_speed end return 0 end
+	local function lane_capacity(lane)
+		local sum=0
+		for _,miner in ipairs(lane or {}) do sum=sum+common.get_mining_drill_production_from_state(state,nil,miner) end
+		return sum/belt_speed
+	end
 	local lane1, lane2 = belt.lane1, belt.lane2
 
 	return lane_capacity(lane1), lane_capacity(lane2)
@@ -1269,6 +1228,7 @@ end
 ---@param target BaseBeltSpecification
 ---@param direction defines.direction.north | defines.direction.south
 function layout:_apply_belt_merge_strategy(state, source, target, direction)
+	local capacity = common.get_belt_capacity_multiplier(state)
 	local source_t1, source_t2 = source.throughput1, source.throughput2
 	local source_total = source_t1 + source_t2
 	local target_t1, target_t2 = target.merged_throughput1, target.merged_throughput2
@@ -1284,14 +1244,14 @@ function layout:_apply_belt_merge_strategy(state, source, target, direction)
 		or source_total > target_total
 	) then
 		return -- no op
-	elseif direction == SOUTH and source_t1 == 0 and source_total <= 1 - target_t1 then
+	elseif direction == SOUTH and source_t1 == 0 and source_total <= capacity - target_t1 then
 		source.merge_target = target
 		source.merge_direction = direction
 		source.is_output = false
 		source.merge_strategy = "side-merge"
 		target.merge_strategy = "target"
 		target.merged_throughput1 = target_t1 + source_total
-	elseif direction == NORTH and source_t2 == 0 and source_total <= 1 - target_t2 then
+	elseif direction == NORTH and source_t2 == 0 and source_total <= capacity - target_t2 then
 		source.merge_target = target
 		source.merge_direction = direction
 		source.is_output = false
@@ -1300,8 +1260,8 @@ function layout:_apply_belt_merge_strategy(state, source, target, direction)
 		target.merged_throughput2 = target_t2 + source_total
 	elseif (
 		source_total <= target_total
-		and (source_west1 + target_t2) <= 1
-		and (source_west2 + target_t1) <= 1
+		and (source_west1 + target_t2) <= capacity
+		and (source_west2 + target_t1) <= capacity
 		and target.merge_strategy ~= "target-back-merge"
 		and source.merge_strategy ~= "target"
 	)
@@ -1316,14 +1276,14 @@ function layout:_apply_belt_merge_strategy(state, source, target, direction)
 		target.merge_strategy = "target-back-merge"
 		target.merged_throughput2 = target_t2 + source_t1
 		target.merged_throughput1 = target_t1 + source_t2
-	elseif direction == SOUTH and source_total <= 1 - target_t1 then
+	elseif direction == SOUTH and source_total <= capacity - target_t1 then
 		source.merge_target = target
 		source.merge_direction = direction
 		source.is_output = false
 		source.merge_strategy = "side-merge"
 		target.merge_strategy = "target"
 		target.merged_throughput1 = target_t1 + source_total
-	elseif direction == NORTH and source_total <= 1 - target_t2 then
+	elseif direction == NORTH and source_total <= capacity - target_t2 then
 		source.merge_target = target
 		source.merge_direction = direction
 		source.is_output = false
@@ -1331,6 +1291,7 @@ function layout:_apply_belt_merge_strategy(state, source, target, direction)
 		target.merge_strategy = "target"
 		target.merged_throughput2 = target_t2 + source_total
 	end
+	common.record_beacon_merge(state,source,target,direction,source.merge_strategy=="back-merge" and EAST or WEST)
 end
 
 ---@param self SimpleLayout
@@ -1745,25 +1706,44 @@ function layout:_get_deconstruction_objects(state)
 		state.builder_belts,
 		state.builder_power_poles,
 		state.builder_lamps,
+		state.builder_beacons or {},
+		state.builder_belt_connections or {},
 	}
 end
 
 ---@param self SimpleLayout
 ---@param state SimpleState
 function layout:expensive_deconstruct(state)
-	local c, DIR = state.coords, state.direction_choice
 	local player, surface = state.player, state.surface
-	if state.avoid_obstacles_choice then
+	if obstacles.active(state) then
 		if not obstacles.prepare(state) then
-			if state.preview_only then state.preview_error = {"mpp.msg_obstacle_route_failed"}
-			else player.print({"mpp.msg_obstacle_route_failed"}) end
+			state.preview_error = {"mpp.msg_obstacle_route_failed"}
+			if not state.preview_only then player.print(state.preview_error) end
 			return false
 		end
-		return "placement_miners"
 	end
-	if state.preview_only then return "placement_miners" end
+	return "prepare_connections"
+end
 
-	local deconstructor = storage.script_inventory[state.deconstruction_choice and 2 or 1]
+function layout:prepare_beacons(state)
+	if common.prepare_beacons(state,self) then return true end
+	return "deconstruct_layout"
+end
+
+function layout:prepare_connections(state)
+	local ok, err = common.prepare_belt_connection(state)
+	if not ok then
+		state.preview_error = err
+		if not state.preview_only then state.player.print(err);return false end
+	end
+	return "prepare_beacons"
+end
+
+function layout:deconstruct_layout(state)
+	local c, DIR = state.coords, state.direction_choice
+	local player, surface = state.player, state.surface
+	if state.preview_only then return "placement_miners" end
+	if state._from_preview then base.order_previous_deconstruction(state) end
 
 	for _, t in pairs(self:_get_deconstruction_objects(state)) do
 		for _, object in ipairs(t) do
@@ -1777,28 +1757,11 @@ function layout:expensive_deconstruct(state)
 			x1, y1 = mpp_util.revert_ex(c.gx, c.gy, DIR, x1, y1, c.tw, c.th)
 			x2, y2 = mpp_util.revert_ex(c.gx, c.gy, DIR, x2, y2, c.tw, c.th)
 
-			surface.deconstruct_area{
-				force=player.force,
-				player=player.index,
-				area={
-					left_top={min(x1, x2), min(y1, y2)},
-					right_bottom={max(x1, x2), max(y1, y2)},
-				},
-				item=deconstructor,
-			}
+			terrain.deconstruct(state, {
+				left_top={x=min(x1, x2), y=min(y1, y2)},
+				right_bottom={x=max(x1, x2), y=max(y1, y2)},
+			})
 
-			--[[ debug rendering - deconstruction areas
-			rendering.draw_rectangle{
-				surface=state.surface,
-				players={state.player},
-				filled=false,
-				width=1,
-				color={1, 0, 0},
-				-- left_top={x1+.1,y1+.1},
-				-- right_bottom={x2-.1,y2-.1},
-				left_top={x1,y1},
-				right_bottom={x2,y2},
-			} --]]
 		end
 	end
 
@@ -1812,7 +1775,7 @@ function layout:placement_miners(state)
 	local create_entity = builder.create_entity_builder(state)
 	local M = state.miner
 
-	local module_inv_size = state.miner.module_inventory_size --[[@as uint]]
+	local module_inv_size = common.get_mining_drill_module_count(state)
 	local grid = state.grid
 
 	for i, miner in ipairs(state.best_attempt.miners) do
@@ -1829,7 +1792,7 @@ function layout:placement_miners(state)
 			direction = mpp_util.clamped_rotation(defines.direction[direction], M.rotation_bump),
 		}
 
-		if ghost and state.module_choice ~= "none" and M.module_inventory_size > 0 then
+		if ghost and state.module_choice ~= "none" and module_inv_size > 0 then
 			local item_plan = {}
 			for j = 1, module_inv_size do
 				item_plan[j] = {
@@ -1875,7 +1838,14 @@ function layout:placement_belts(state)
 		create_entity(belt)
 	end
 
-	return "placement_poles"
+	return "placement_belt_connections"
+end
+
+function layout:placement_belt_connections(state)
+	local create_entity = builder.create_entity_builder(state,{do_deconstruction=true})
+	for _, belt in ipairs(state.builder_belt_connections or {}) do create_entity(belt) end
+	belt_planner.place_landfill(state,state.builder_belt_connections)
+	return state.builder_all and "placement_landfill" or "placement_poles"
 end
 
 ---@param self SimpleLayout
@@ -1900,7 +1870,7 @@ end
 ---@param state SimpleState
 ---@return CallbackState
 function layout:placement_lamps(state)
-	local next_step = "placement_landfill"
+	local next_step = "placement_beacons"
 	if not layout.restrictions.lamp_available or not state.lamp_choice then return next_step end
 	if not state.builder_lamps then return next_step end
 
@@ -1913,6 +1883,15 @@ function layout:placement_lamps(state)
 	return next_step
 end
 
+function layout:placement_beacons(state)
+	local create=builder.create_entity_builder(state,{diagnostic=state.preview_only})
+	for _,spec in ipairs(state.builder_beacons or {}) do
+		local ghost=create(spec)
+		if ghost then ghost.insert_plan=beacons.module_plan(state) end
+	end
+	return "placement_landfill"
+end
+
 ---@param self SimpleLayout
 ---@param state SimpleState
 ---@return CallbackState
@@ -1922,13 +1901,11 @@ function layout:placement_landfill(state)
 	local grid = state.grid
 	local surface = state.surface
 	
-	if state.landfill_choice or state.avoid_obstacles_choice then
+	if terrain.avoid_tiles(state) then
 		return "finish"
 	end
 	
 	local fill_tiles, tile_progress = state.fill_tiles, state.fill_tile_progress or 1
-	local landfill = state.is_space and state.space_landfill_choice or "landfill"
-	local landfill_tile = prototypes.tile[landfill]
 
 	local conv = coord_convert[state.direction_choice]
 	local gx, gy = state.coords.ix1 - 1, state.coords.iy1 - 1
@@ -1939,10 +1916,9 @@ function layout:placement_landfill(state)
 			left_top={c.x1-m.area-1, c.y1-m.area-1},
 			right_bottom={c.x2+m.area+1, c.y2+m.area+1}
 		}
-		if state.is_space then
-			fill_tiles = surface.find_tiles_filtered{area=area, name="se-space"}
-		else
-			fill_tiles = surface.find_tiles_filtered{area=area, collision_mask="water_tile"}
+		fill_tiles = {}
+		for _, fill in pairs(surface.find_tiles_filtered{area=area}) do
+			if terrain.blocked_tile(fill) then fill_tiles[#fill_tiles+1] = fill end
 		end
 		state.fill_tiles = fill_tiles
 	end
@@ -1965,18 +1941,10 @@ function layout:placement_landfill(state)
 		local x, y = conv(tx-gx, ty-gy, c.w, c.h)
 		local tile = grid:get_tile(ceil(x), ceil(y))
 
-		if tile and tile.built_thing then
-			if fill.name == "out-of-map" then
-				goto skip_fill
-			end
-			local cover_tile = fill.prototype.default_cover_tile
-			
-			if not cover_tile then
-				goto skip_fill
-			elseif state.is_space then
-				cover_tile = landfill_tile
-			end
-				
+		if tile and tile.built_thing and not (state._belt_landfill and state._belt_landfill[fill.position.x..","..fill.position.y]) then
+			local cover_tile = terrain.cover_tile(fill, state)
+			if not cover_tile then goto skip_fill end
+
 			local tile_spec = {
 				raise_built=true,
 				name="tile-ghost",
@@ -2014,7 +1982,7 @@ end
 ---@return CallbackState
 function layout:finish(state)
 	if state.preview_only then return false end
-	if state.print_placement_info_choice and state.player.valid then
+	if state.statistics_choice and state.player.valid then
 		state.player.print({"mpp.msg_print_info_miner_placement", #state.best_attempt.miners, state.belt_count, #state.resources})
 		
 		if state.best_attempt.heuristics.unconsumed > 0 then
@@ -2028,10 +1996,7 @@ function layout:finish(state)
 		common.save_state_to_file(state, "json")
 	end
 	
-	if state.belt_planner_choice then
-		belt_planner.clear_belt_planner_stack(storage.players[state.player.index])
-		common.give_belt_blueprint(state)
-	end
+	common.save_belt_specification(state)
 
 	return false
 end

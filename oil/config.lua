@@ -1,5 +1,7 @@
 local common = require("oil.vendor.common")
 local blacklist = require("mpp.blacklist")
+local terrain = require("mpp.terrain")
+local beacons = require("mpp.beacons")
 
 local config = {}
 local cached_sections
@@ -130,6 +132,11 @@ function config.get(player_data)
 	data.gui = data.gui or {selections = {}}
 	data.gui.selections = data.gui.selections or {}
 	data.filtered_entities = data.filtered_entities or {}
+	for _, name in ipairs{"module", "beacon_module"} do
+		data.choices[name.."_choice"] = data.choices[name.."_choice"] or "none"
+		local quality = data.choices[name.."_quality_choice"]
+		if not quality or not prototypes.quality[quality] then data.choices[name.."_quality_choice"] = "normal" end
+	end
 	local shared = player_data.choices
 	if not data.shared_choices_version then
 		-- Retain the previously active oil settings when upgrading to the shared controls.
@@ -138,7 +145,7 @@ function config.get(player_data)
 				shared[name.."_choice"] = data.choices[name.."_choice"] or shared[name.."_choice"]
 				shared[name.."_quality_choice"] = data.qualities[name] or shared[name.."_quality_choice"]
 			end
-			shared.landfill_choice = data.add_landfill == false
+			shared.terrain_mode_choice = data.add_landfill == false and "avoid" or "fill"
 			shared.deconstruction_choice = data.remove_existing ~= true
 		end
 		data.shared_choices_version = 1
@@ -149,7 +156,7 @@ function config.get(player_data)
 		data.choices[name.."_choice"] = value
 		data.qualities[name] = shared[name.."_quality_choice"]
 	end
-	data.add_landfill = not shared.landfill_choice
+	data.add_landfill = not terrain.avoid_tiles(shared)
 	data.remove_existing = not shared.deconstruction_choice
 	data.retain_entities = shared.deconstruction_choice
 	for _, section in ipairs(config.get_sections()) do
@@ -187,6 +194,19 @@ function config.get_resource_categories(player_data)
 		end
 	end
 	return categories
+end
+
+function config.module_plan(data, proto, quality)
+	local name = proto.type=="beacon" and "beacon_module" or proto.type=="mining-drill" and "module"
+	if not name then return end
+	local item = prototypes.item[data.choices[name.."_choice"] or "none"]
+	if not beacons.module_allowed(proto,item) then return end
+	local inventory = proto.type=="beacon" and defines.inventory.beacon_modules or defines.inventory.mining_drill_modules
+	local slots = proto.get_inventory_size(inventory,quality or "normal") or 0
+	if slots==0 then return end
+	local requests = {}
+	for slot=0,slots-1 do requests[#requests+1]={inventory=inventory,stack=slot} end
+	return {{id={name=item.name,quality=data.choices[name.."_quality_choice"] or "normal"},items={in_inventory=requests}}}
 end
 
 return config

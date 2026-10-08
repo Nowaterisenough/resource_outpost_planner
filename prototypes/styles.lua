@@ -28,17 +28,21 @@ default_style.mpp_setting_cell = {
 	type = "vertical_flow_style",
 	parent = "vertical_flow",
 	vertical_spacing = 1,
+	horizontal_align = "center",
 	natural_width = 40,
 }
 
 default_style.mpp_setting_caption = {
 	type = "label_style",
 	parent = "label",
+	single_line = false,
 	font = "default-small",
 	font_color = {0.82, 0.82, 0.82},
 	horizontal_align = "center",
 	minimal_width = 40,
 	maximal_width = 40,
+	minimal_height = 40,
+	maximal_height = 40,
 }
 
 --- taken from flib
@@ -64,6 +68,9 @@ default_style.mpp_blueprint_mode_button = {
 	parent = "slot_button",
 	size = 28,
 }
+
+default_style.mpp_tool_button_active = table.deepcopy(default_style.mpp_selected_frame_action_button)
+default_style.mpp_tool_button_active.parent = "button"
 
 default_style.mpp_blueprint_mode_button_active = {
 	type = "button_style",

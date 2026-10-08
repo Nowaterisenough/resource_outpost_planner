@@ -58,6 +58,15 @@ function task_runner.mining_patch_task(state)
 			table.remove(storage.tasks,1)
 			return
 		end
+		if state._from_preview and state.preview_error then
+			local data=storage.players[state.player.index]
+			preview.dispose_task(state)
+			table.remove(storage.tasks,1)
+			data.last_state=state._undo_state
+			data.preview.applying=false
+			preview.invalidate(data,state.preview_error)
+			return
+		end
 		local player = state.player
 		if state._obstacle_skipped and state._obstacle_skipped > 0 then
 			player.print({"mpp.msg_obstacle_skipped",state._obstacle_skipped})
@@ -71,6 +80,7 @@ function task_runner.mining_patch_task(state)
 		---@type PlayerData
 		local player_data = storage.players[player.index]
 		state._previous_state = nil
+		state._undo_state = nil
 		player_data.tick_expires = math.huge
 		if debugadapter then
 			player_data.last_state = state
@@ -85,11 +95,17 @@ function task_runner.mining_patch_task(state)
 				direction_choice = state.direction_choice,
 				belts = state.belts,
 				belt_choice = state.belt_choice,
+				belt_quality_choice = state.belt_quality_choice,
 				belt_planner_belts = state.belt_planner_belts,
 				_preview_rectangle = state._preview_rectangle,
 				_collected_ghosts = state._collected_ghosts,
 				_deconstruction_orders = state._deconstruction_orders,
 				avoid_obstacles_choice = state.avoid_obstacles_choice,
+				avoid_cliffs_choice = state.avoid_cliffs_choice,
+				avoid_water_choice = state.avoid_water_choice,
+				cliff_mode_choice = state.cliff_mode_choice,
+				terrain_mode_choice = state.terrain_mode_choice,
+				deconstruction_choice = state.deconstruction_choice,
 				_render_objects = state._render_objects,
 				_lane_info_rendering = state._lane_info_rendering,
 			}

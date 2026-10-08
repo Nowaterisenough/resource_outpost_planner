@@ -3,15 +3,18 @@ local mpp_util = require("mpp.mpp_util")
 local enums = require("mpp.enums")
 local blueprint_meta = require("mpp.blueprintmeta")
 local compatibility = require("mpp.compatibility")
-local belt_planner = require("mpp.belt_planner")
+local input_mode = require("mpp.input_mode")
 local common = require("layouts.common")
 local oil_gui = require("oil.gui")
 local oil_config = require("oil.config")
 local preview = require("mpp.preview")
+local beacons = require("mpp.beacons")
+local conf = require("configuration")
 
 local layouts = algorithm.layouts
 
 local gui = {}
+local workflow_version = 9
 
 local direction_sprites = {
 	north = "virtual-signal/up-arrow",
@@ -27,10 +30,9 @@ local direction_sprites = {
 ]]
 
 ---@alias MppTagAction
----| "mpp_advanced_settings"
----| "mpp_entity_filtering_mode"
 ---| "mpp_action"
 ---| "mpp_toggle"
+---| "mpp_terrain_mode"
 ---| "mpp_blueprint_add_mode"
 ---| "mpp_blueprint_receptacle"
 ---| "mpp_fake_blueprint_button"
@@ -62,12 +64,15 @@ local entity_sections = {
 	logistics=true,
 	pole=true,
 	pipe=true,
+	beacon=true,
 }
 
 ---@class SettingValueEntry
 ---@field type string|nil Button type
 ---@field value string Value name
 ---@field tooltip LocalisedString
+---@field caption LocalisedString?
+---@field caption_width integer?
 ---@field icon SpritePath
 ---@field icon_enabled SpritePath?
 ---@field order string?
@@ -92,6 +97,8 @@ local entity_sections = {
 ---@class SettingSectionCreateOptions
 ---@field direction? GuiDirection
 ---@field column_count? number
+---@field caption? LocalisedString
+---@field secondary? boolean
 
 ---Creates a setting section (label + table)
 ---Can be hidden
@@ -105,9 +112,15 @@ local entity_sections = {
 local function create_setting_section(player_data, root, name, opts)
 	opts = opts or {}
 	local section = root.add{type="flow", direction="vertical", style="mpp_section"}
+	if opts.secondary then
+		section.style.natural_width = 0
+		section.style.horizontally_stretchable = true
+	end
 	player_data.gui.section[name] = section
-	section.add{type="label", name="section_label", style="subheader_caption_label", caption={"mpp.settings_"..name.."_label"}}
-	local table_root = section.add{
+	section.add{type="label", name="section_label", style="subheader_caption_label", visible=not opts.secondary, caption=opts.caption or {"mpp.settings_"..name.."_label"}}
+	local row = section.add{type="flow", name="selection_row", direction="vertical"}
+	row.style.vertical_spacing = 2
+	local table_root = row.add{
 		type="table",
 		direction=opts.direction or "horizontal",
 		style="filter_slot_table",
@@ -118,19 +131,20 @@ local function create_setting_section(player_data, root, name, opts)
 	return table_root, section
 end
 
+local function create_settings_column(root, width)
+	local column = root.add{type="flow", direction="vertical"}
+	column.style.width = width
+	return column
+end
+
 ---@param player_data PlayerData
 ---@param section LuaGuiElement
 ---@param name string
 ---@param opts? SettingSectionCreateOptions
 ---@return unknown
 local function append_quality_table(player_data, section, name, opts)
-	opts = opts or {}
-	quality_root = section.add{
-		type="table",
-		direction="horizontal",
-		style="mpp_quality_table",
-		column_count=opts.column_count or 10,
-	}
+	local quality_root = section.selection_row.add{type="flow", direction="horizontal"}
+	quality_root.style.horizontal_spacing = 0
 	player_data.gui.tables[name] = quality_root
 	quality_root.visible = script.feature_flags.quality
 	return quality_root
@@ -143,10 +157,6 @@ end
 
 local function setting_toggle_icon(name, enabled)
 	return "mpp_setting_"..name..(enabled and "_enabled" or "_disabled")
-end
-
-local function style_helper_advanced_toggle(check)
-	return check and "mpp_selected_frame_action_button" or "frame_action_button"
 end
 
 local function style_helper_blueprint_toggle(check)
@@ -166,6 +176,7 @@ end
 ---@field style_func? fun(bool, bool): string first param to check if is currently selected, second param if is filtered
 ---@field shown_quality? string Adds quality badge on the icon
 ---@field alternate_visibility? true Don't show the eye if setting is filtered
+---@field optional? boolean Clicking the active choice or right-clicking disables the equipment
 
 ---@param player_data PlayerData global player GUI reference object
 ---@param root LuaGuiElement
@@ -179,6 +190,10 @@ local function create_setting_selector(player_data, root, action_type, action, v
 	player_data.gui.selections[action] = action_class
 	root.clear()
 	local selected = player_data.choices[action.."_choice"]
+	if #values == 0 then
+		root.add{type="label", caption={"mpp.label_no_available_choices"}}
+		return
+	end
 
 	local style_helper = opts.style_func or style_helper_selection
 	
@@ -219,6 +234,8 @@ local function create_setting_selector(player_data, root, action_type, action, v
 		else
 			local icon = value.icon
 			if style_check and value.icon_enabled then icon = value.icon_enabled end
+			local tooltip = value.tooltip
+			if opts.optional then tooltip = {"", tooltip, "\n", {"mpp.label_optional_equipment_toggle"}} end
 			---@type LuaGuiElement
 			button = button_root.add{
 				type="sprite-button",
@@ -232,8 +249,9 @@ local function create_setting_selector(player_data, root, action_type, action, v
 					mpp_icon_default=value.icon,
 					mpp_icon_enabled=value.icon_enabled,
 					mpp_filterable=value.filterable,
+					mpp_optional=opts.optional,
 				},
-				tooltip=mpp_util.tooltip_entity_not_available(value.disabled, value.tooltip),
+				tooltip=mpp_util.tooltip_entity_not_available(value.disabled, tooltip),
 				enabled=not value.disabled,
 			}
 			if is_filtered and not opts.alternate_visibility then
@@ -270,13 +288,18 @@ local function create_setting_selector(player_data, root, action_type, action, v
 			end
 		end
 		if action == "misc" then
-			button_root.add{
+			local label = button_root.add{
 				type="label",
-				caption={"mpp.icon_"..value.value},
+				caption=value.caption or {"mpp.icon_"..value.value},
 				style="mpp_setting_caption",
 				tooltip=mpp_util.wrap_tooltip(value.tooltip),
 				ignored_by_interaction=true,
 			}
+			if value.caption_width then
+				button_root.style.natural_width = value.caption_width
+				label.style.minimal_width = value.caption_width
+				label.style.maximal_width = value.caption_width
+			end
 		end
 		action_class[value.value] = button
 
@@ -291,31 +314,30 @@ end
 ---@param values (SettingValueEntry | SettingValueEntryPrototype)[]
 ---@param opts? SettingSelectorOptions
 local function create_quality_selector(player_data, root, action_type, action, values, opts)
-	if #values > 10 then
-		root.clear()
-		local index = 0
-		local value = player_data.choices[action.."_choice"]
-		local choices = {}
-		for i, qual in pairs(values) do
-			---@diagnostic disable-next-line: param-type-mismatch
-			table.insert(choices, {"", "[quality="..qual.value.."] ", qual.tooltip})
-			if qual.value == value then
-				index = i
-			end
-		end
-		
-		-- player_gui.layout_dropdown = 
-		local dropdown = root.add{
-			type="drop-down",
-			style="mpp_quality_dropdown",
-			items=choices,
-			selected_index=index --[[@as uint]],
-			tags={mpp_drop_down=action, mpp_value_map="quality", default=0},
-		}
-		player_data.gui.selections[action.."_choice"] = dropdown
-	else
-		create_setting_selector(player_data, root, action_type, action, values, opts)
+	root.clear()
+	local player = game.get_player(root.player_index)
+	local qualities = {}
+	for _, quality in ipairs(values) do
+		if player.force.is_quality_unlocked(quality.value) then qualities[#qualities+1] = quality end
 	end
+	table.sort(qualities, function(a,b)
+		local left, right = prototypes.quality[a.value], prototypes.quality[b.value]
+		return left.level == right.level and a.value < b.value or left.level < right.level
+	end)
+	local selected = player_data.choices[action.."_choice"]
+	local equipment = player_data.choices[action:sub(1,-9).."_choice"]
+	player_data.gui.selections[action] = {}
+	for _, quality in ipairs(qualities) do
+		local button = root.add{
+			type="sprite-button", sprite="quality/"..quality.value,
+			style=style_helper_quality(quality.value == selected),
+			enabled=equipment~=nil and equipment~="none" and equipment~="zero_gap",
+			tooltip=quality.tooltip,
+			tags={mpp_quality=action, value=quality.value, mpp_oil_quality=action_type=="mpp_oil_choice"},
+		}
+		player_data.gui.selections[action][quality.value] = button
+	end
+	storage.players[root.player_index].gui.quality_selectors[action] = root
 end
 
 ---@param player_data PlayerData
@@ -450,46 +472,27 @@ function gui.create_interface(player)
 	---@type PlayerData
 	local player_data = storage.players[player.index]
 	local player_gui = player_data.gui
+	player_gui.section, player_gui.tables, player_gui.selections = {}, {}, {}
+	local equipment_width = script.feature_flags.quality and 260 or 172
+	local secondary_width = 172
+	frame.style.minimal_width = 340
 
 	local titlebar = frame.add{type="flow", name="mpp_titlebar", direction="horizontal"}
 	titlebar.add{type="label", style="frame_title", name="mpp_titlebar_label", caption={"mpp.settings_frame"}}
 	titlebar.add{type="empty-widget", name="mpp_titlebar_spacer", horizontally_strechable=true}
-	player_gui.quality_toggle = titlebar.add{
-		type="sprite-button",
-		style=style_helper_advanced_toggle(player_data.quality_pickers),
-		sprite=setting_toggle_icon("quality", player_data.quality_pickers),
-		tooltip=mpp_util.wrap_tooltip{"mpp.quality_settings"},
-		tags={mpp_quality_pickers=true},
-	}
-	player_gui.advanced_settings = titlebar.add{
-		type="sprite-button",
-		style=style_helper_advanced_toggle(player_data.advanced),
-		sprite=setting_toggle_icon("advanced", player_data.advanced),
-		tooltip=mpp_util.wrap_tooltip{"mpp.advanced_settings"},
-		tags={mpp_advanced_settings=true},
-	}
-	player_gui.filtering_settings = titlebar.add{
-		type="sprite-button",
-		style=style_helper_advanced_toggle(player_data.entity_filtering_mode),
-		sprite=setting_toggle_icon("entity_filtering", player_data.entity_filtering_mode),
-		tooltip=mpp_util.wrap_tooltip{"mpp.entity_filtering_mode"},
-		tags={mpp_entity_filtering_mode=true},
-	}
-	-- TODO: move to Factorio undo
-	player_gui.undo_button = titlebar.add{
-		type="sprite-button",
-		style=style_helper_advanced_toggle(),
-		sprite="mpp_setting_undo",
-		tooltip=mpp_util.wrap_tooltip{"controls.undo"},
-		tags={mpp_undo=true},
-		enabled=helper_undo_available(player_data),
-	}
+	player_gui.quality_toggle, player_gui.advanced_settings, player_gui.filtering_settings = nil, nil, nil
 	player_gui.unified = true
-	player_gui.workflow_version = 1
+	player_gui.workflow_version = workflow_version
 	do -- Miner selection
-		local table_root, section = create_setting_section(player_data, frame, "miner")
+		local row = frame.add{type="flow", direction="horizontal"}
+		row.style.horizontal_spacing = 12
+		local table_root, section = create_setting_section(player_data, row, "miner", {column_count=4})
+		section.style.width = equipment_width
 		local quality_root = append_quality_table(player_data, section, "miner_quality", {column_count=10})
 		append_quality_table(player_data,section,"oil_extractor_quality",{column_count=10})
+		local _, modules = create_setting_section(player_data, row, "module", {column_count=1, caption={"mpp.settings_module_label"}})
+		modules.style.width = secondary_width
+		append_quality_table(player_data,modules,"module_quality")
 	end
 
 	local body = frame.add{
@@ -497,14 +500,32 @@ function gui.create_interface(player)
 		horizontal_scroll_policy="never", vertical_scroll_policy="auto",
 	}
 	player_gui.settings_body = body
+	body.style.left_padding = 0
+	body.style.right_padding = 0
 	body.style.maximal_height = math.max(180, math.min(640, math.floor(player.display_resolution.height / player.display_scale) - 280))
 	local mining = body.add{type="flow", direction="vertical", style="mpp_section"}
 	player_gui.mining_settings_root = mining
-	player_gui.oil_settings_root = body.add{type="flow", direction="vertical", style="mpp_section"}
-	local shared = body
+	local layout_row = mining.add{type="flow", direction="horizontal", style="mpp_settings_columns"}
+	local transport = body.add{type="flow", direction="vertical", style="mpp_section"}
+	transport.add{type="label", caption={"mpp.settings_transport_label"}, style="subheader_caption_label"}
+	local transport_row = transport.add{type="flow", direction="horizontal", style="mpp_settings_columns"}
+	local belt_column = create_settings_column(transport_row, equipment_width)
+	player_gui.mining_transport_root = belt_column.add{type="flow", direction="vertical"}
+	player_gui.mining_transport_root.style.width = equipment_width
+	local pipe_column = create_settings_column(transport_row, secondary_width)
+	player_gui.oil_settings_root = pipe_column.add{type="flow", direction="vertical"}
+	local power = body.add{type="flow", direction="vertical", style="mpp_section"}
+	power.add{type="label", caption={"mpp.settings_power_label"}, style="subheader_caption_label"}
+	local power_row = power.add{type="flow", direction="horizontal", style="mpp_settings_columns"}
+	local pole_column = create_settings_column(power_row, equipment_width)
+	local power_column = create_settings_column(power_row, secondary_width)
+	player_gui.power_options = power_column.add{type="table", column_count=1, style="filter_slot_table"}
+	player_gui.oil_heat_root = power_column.add{type="flow", direction="vertical"}
+	player_gui.beacon_group = body.add{type="flow", direction="vertical", style="mpp_section"}
 
 	do -- layout selection
-		local table_root, section = create_setting_section(player_data, mining, "layout", {column_count=2})
+		local table_root, section = create_setting_section(player_data, layout_row, "layout", {column_count=2})
+		section.style.width = equipment_width
 
 		local choices = List()
 		local index = 1
@@ -539,7 +560,8 @@ function gui.create_interface(player)
 	end
 
 	do -- Direction selection
-		local table_root, section = create_setting_section(player_data, mining, "direction")
+		local table_root, section = create_setting_section(player_data, layout_row, "direction", {caption={"mpp.settings_direction_short_label"}})
+		section.style.width = secondary_width
 		section.section_label.caption = {"", section.section_label.caption, " [img=info]"}
 		section.section_label.tooltip = mpp_util.wrap_tooltip{"mpp.label_rotate_keybind_tip"}
 		create_setting_selector(player_data, table_root, "mpp_action", "direction", {
@@ -551,29 +573,45 @@ function gui.create_interface(player)
 	end
 
 	do -- Belt selection
-		local table_root, section = create_setting_section(player_data, mining, "belt")
-		local quality_root = append_quality_table(player_data, section, "belt_quality", {column_count=10})
+		local table_root, section = create_setting_section(player_data, player_gui.mining_transport_root, "belt", {column_count=4, secondary=true})
 	end
 
 	do -- Space belt selection
-		local table_root, section = create_setting_section(player_data, mining, "space_belt")
-		local quality_root = append_quality_table(player_data, section, "space_belt_quality", {column_count=10})
+		local table_root, section = create_setting_section(player_data, player_gui.mining_transport_root, "space_belt", {column_count=4, secondary=true})
+	end
+	do -- Shared beacon controls
+		local group = player_gui.beacon_group
+		local row = group.add{type="flow", direction="horizontal"}
+		row.style.horizontal_spacing = 12
+		local _,section=create_setting_section(player_data,row,"beacon",{column_count=1})
+		section.style.width = equipment_width
+		section.section_label.tooltip=mpp_util.wrap_tooltip{"mpp.choice_beacon"}
+		append_quality_table(player_data,section,"beacon_quality")
+		local _,modules=create_setting_section(player_data,row,"beacon_module",{column_count=1})
+		modules.style.width = secondary_width
+		append_quality_table(player_data,modules,"beacon_module_quality")
 	end
 
+	player_gui.beacon_utility = player_gui.beacon_group.add{type="flow", direction="horizontal"}
+	player_gui.beacon_utility.add{type="label", caption={"mpp-oil.settings_beacon_utility"},
+		tooltip={"mpp-oil.settings_beacon_utility_tooltip"}}
+	player_gui.beacon_utility_field = player_gui.beacon_utility.add{type="textfield", text="2", numeric=true,
+		allow_decimal=true, allow_negative=false, lose_focus_on_confirm=true, tags={mpp_oil_utility=true}}
+	player_gui.beacon_utility_field.style.width = 48
+
 	do -- Logistics selection
-		local table_root, section = create_setting_section(player_data, mining, "logistics")
+		local table_root, section = create_setting_section(player_data, player_gui.mining_transport_root, "logistics", {column_count=4, secondary=true})
 		local quality_root = append_quality_table(player_data, section, "logistics_quality", {column_count=10})
 	end
 
 	do -- Electric pole selection
-		local table_root, section = create_setting_section(player_data, shared, "pole")
-		section.style.natural_width = 260
+		local table_root, section = create_setting_section(player_data, pole_column, "pole", {column_count=4, secondary=true})
+		section.style.width = equipment_width
 		local quality_root = append_quality_table(player_data, section, "pole_quality", {column_count=10})
 	end
 	do -- Shared pipe selection
-		local table_root, section = create_setting_section(player_data, shared, "pipe")
-		section.style.natural_width = 260
-		append_quality_table(player_data, section, "pipe_quality", {column_count=10})
+		local table_root, section = create_setting_section(player_data, pipe_column, "pipe", {column_count=1, secondary=true})
+		section.style.width = secondary_width
 	end
 
 	do -- Blueprint settings
@@ -613,6 +651,7 @@ function gui.create_interface(player)
 
 	do -- Misc selection
 		local table_root, section = create_setting_section(player_data, body, "misc", {column_count=6})
+		create_setting_section(player_data, body, "terrain", {column_count=3})
 	end
 
 	do -- Debugging rendering options
@@ -620,11 +659,15 @@ function gui.create_interface(player)
 	end
 
 	local footer=frame.add{type="flow",direction="vertical",style="mpp_section"}
-	player_gui.preview_status=footer.add{type="label",caption={"mpp.preview_select"},style="mpp_preview_status"}
-	footer.add{type="label",caption={"mpp.preview_hint"},style="mpp_preview_hint"}
+	player_gui.preview_status=nil
+	local tools=footer.add{type="flow",direction="horizontal"}
+	player_gui.select_tool=tools.add{type="button",caption={"mpp.tool_select"},tooltip={"mpp.tool_select_tooltip"},tags={mpp_input_mode="select"}}
+	player_gui.output_tool=tools.add{type="button",caption={"mpp.icon_belt_planner"},tooltip={"mpp.choice_belt_planner"},enabled=false,tags={mpp_input_mode="output"}}
 	local actions=footer.add{type="flow",direction="horizontal"}
 	player_gui.preview_apply=actions.add{type="button",style="confirm_button",caption={"mpp.preview_apply"},enabled=false,tags={mpp_preview_apply=true}}
 	player_gui.preview_cancel=actions.add{type="button",style="back_button",caption={"mpp.preview_cancel"},enabled=false,tags={mpp_preview_cancel=true}}
+	player_gui.undo_button=actions.add{type="button",caption={"controls.undo"},tooltip=mpp_util.wrap_tooltip{"controls.undo"},
+		enabled=helper_undo_available(player_data),tags={mpp_undo=true}}
 end
 
 ---@param player_data PlayerData
@@ -701,13 +744,6 @@ local function update_miner_selection(player)
 		existing_choice_is_valid = true
 	elseif #values == 0 then
 		player_choices.miner_choice = "none"
-		values:push{
-			value="none",
-			tooltip={"mpp.msg_miner_err_3"},
-			icon="mpp_no_entity",
-			order="",
-			sort={1, 1}
-		}
 	end
 	
 	table.sort(values, function(a, b)
@@ -805,13 +841,6 @@ local function update_belt_selection(player)
 		existing_choice_is_valid = true
 	elseif #values == 0 then
 		player_data.choices.belt_choice = "none"
-		values:push{
-			value="none",
-			tooltip={"mpp.choice_none"},
-			icon="mpp_no_entity",
-			order="",
-			sort={1},
-		}
 	end
 	
 	table.sort(values, function(a, b)
@@ -820,18 +849,7 @@ local function update_belt_selection(player)
 	end)
 
 	local table_root = player_data.gui.tables["belt"]
-	create_setting_selector(player_data, table_root, "mpp_action", "belt", values,
-		{shown_quality=player_data.choices.belt_quality_choice}
-	)
-	
-	create_quality_selector(
-		player_data,
-		player_data.gui.tables["belt_quality"],
-		"mpp_action",
-		"belt_quality",
-		mpp_util.quality_list(),
-		{style_func = style_helper_quality, alternate_visibility=true}
-	)
+	create_setting_selector(player_data, table_root, "mpp_action", "belt", values)
 end
 
 ---@param player LuaPlayer
@@ -889,13 +907,7 @@ local function update_space_belt_selection(player)
 			choices.space_belt_choice = values[1].value
 		end
 	elseif #values == 0 then
-		player_data.choices.belt_choice = "none"
-		values:push{
-			value="none",
-			tooltip={"mpp.choice_none"},
-			icon="mpp_no_entity",
-			order="",
-		}
+		choices.space_belt_choice = "none"
 	end
 	
 	table.sort(values, function(a, b)
@@ -904,18 +916,7 @@ local function update_space_belt_selection(player)
 	end)
 
 	local table_root = player_data.gui.tables["space_belt"]
-	create_setting_selector(player_data, table_root, "mpp_action", "space_belt", values,
-		{shown_quality=player_data.choices.space_belt_quality_choice}
-	)
-	
-	create_quality_selector(
-		player_data,
-		player_data.gui.tables["space_belt_quality"],
-		"mpp_action",
-		"space_belt_quality",
-		mpp_util.quality_list(),
-		{style_func = style_helper_quality, alternate_visibility=true}
-	)
+	create_setting_selector(player_data, table_root, "mpp_action", "space_belt", values)
 end
 
 
@@ -964,13 +965,7 @@ local function update_logistics_selection(player_data)
 			choices.logistics_choice = values[1].value
 		end
 	elseif #values == 0 then
-		player_data.choices.belt_choice = "none"
-		values:push{
-			value="none",
-			tooltip={"mpp.choice_none"},
-			icon="mpp_no_entity",
-			order="",
-		}
+		choices.logistics_choice = "none"
 	end
 
 	local table_root = player_data.gui.tables["logistics"]
@@ -997,24 +992,6 @@ local function update_pole_selection(player_data)
 	player_data.gui.section["pole"].visible = true
 
 	local values = List() --[[@as List<SettingValueEntry>]]
-
-	if layout.restrictions.pole_zero_gap then
-		values:push{
-			value="zero_gap",
-			tooltip={"mpp.choice_none_zero"},
-			icon="mpp_no_entity_zero",
-			order="",
-			no_quality=true,
-		}
-	end
-
-	values:push{
-		value="none",
-		tooltip={"mpp.choice_none"},
-		icon="mpp_no_entity",
-		order="",
-		no_quality=true,
-	}
 
 	local existing_choice_is_valid = ("none" == choices.pole_choice or (layout.restrictions.pole_zero_gap and "zero_gap" == choices.pole_choice))
 	local poles = prototypes.get_entity_filtered{{filter="type", type="electric-pole"}}
@@ -1060,7 +1037,7 @@ local function update_pole_selection(player_data)
 
 	local table_root = player_data.gui.tables["pole"]
 	create_setting_selector(player_data, table_root, "mpp_action", "pole", values,
-		{shown_quality=player_data.choices.pole_quality_choice}
+		{shown_quality=player_data.choices.pole_quality_choice, optional=restrictions.pole_omittable}
 	)
 	
 	create_quality_selector(
@@ -1075,24 +1052,114 @@ end
 
 local function update_pipe_selection(player_data)
 	local choices = player_data.choices
+	local section = player_data.gui.section.pipe
+	section.visible = choices.layout_choice ~= "oil"
 	local values = {}
 	for _, proto in ipairs(oil_config.get_section("pipe").values) do
 		values[#values+1] = {value=proto.name, icon="entity/"..proto.name,
-			tooltip=mpp_util.entity_name_with_quality(proto.localised_name,choices.pipe_quality_choice)}
+			tooltip=proto.localised_name}
 	end
-	create_setting_selector(player_data,player_data.gui.tables.pipe,"mpp_action","pipe",values,
-		{shown_quality=choices.pipe_quality_choice})
-	create_quality_selector(player_data,player_data.gui.tables.pipe_quality,"mpp_action","pipe_quality",
-		mpp_util.quality_list(),{style_func=style_helper_quality,alternate_visibility=true})
+	create_setting_selector(player_data,player_data.gui.tables.pipe,"mpp_action","pipe",values)
 end
 
----@param player LuaPlayer
+---@param player_data PlayerData
+local function update_module_selection(player_data)
+	local is_oil = player_data.choices.layout_choice == "oil"
+	local data = is_oil and oil_config.get(player_data) or player_data
+	local choices = data.choices
+	local extractor = is_oil and oil_config.get_extractor_section(player_data)
+	local name = is_oil and extractor and choices[extractor.name.."_choice"] or choices.miner_choice
+	local quality = is_oil and extractor and data.qualities[extractor.name] or choices.miner_quality_choice
+	local drill = prototypes.entity[name or "none"]
+	local supported = (is_oil or algorithm.get_mining_layout(player_data).restrictions.module_available)
+		and drill and drill.get_inventory_size(defines.inventory.mining_drill_modules, quality) > 0
+	player_data.gui.section.module.visible = supported or false
+	if not supported then return end
+	local item = prototypes.item[choices.module_choice]
+	if not item or not beacons.module_allowed(drill, item) then choices.module_choice = "none"; item=nil end
+	if not prototypes.quality[choices.module_quality_choice] then choices.module_quality_choice = "normal" end
+	local value = item and {name=item.name, quality=choices.module_quality_choice} or nil
+	local tooltip = {"", {"gui.module"}, "\n", {"mpp.label_right_click_to_clear"}}
+	if item then
+		tooltip = {"", mpp_util.entity_name_with_quality(item.localised_name, choices.module_quality_choice),
+			"\n", {"description.module-slots"}, ": ", drill.get_inventory_size(defines.inventory.mining_drill_modules, quality),
+			"\n", {"mpp.label_right_click_to_clear"}}
+	end
+	local filters={}
+	for _, module in pairs(prototypes.get_item_filtered{{filter="type",type="module"}}) do
+		if beacons.module_allowed(drill,module) then filters[#filters+1]={filter="name",name=module.name,mode="or"} end
+	end
+	create_setting_selector(player_data, player_data.gui.tables.module, "mpp_action", "module", {
+		{action=is_oil and "mpp_oil_module" or "mpp_prototype", value="module", type="choose-elem-button", elem_type="item-with-quality",
+			elem_filters=filters, elem_value=value, icon="mpp_setting_module_disabled", tooltip=tooltip},
+	})
+	create_quality_selector(data,player_data.gui.tables.module_quality,is_oil and "mpp_oil_choice" or "mpp_action",
+		"module_quality",mpp_util.quality_list())
+end
+
+local function update_beacon_selection(player_data)
+	local is_oil=player_data.choices.layout_choice=="oil"
+	local data=is_oil and oil_config.get(player_data) or player_data
+	local choices=data.choices
+	choices.beacon_choice=choices.beacon_choice or "none"
+	choices.beacon_quality_choice=choices.beacon_quality_choice or "normal"
+	choices.beacon_module_choice=choices.beacon_module_choice or "speed-module-3"
+	choices.beacon_module_quality_choice=choices.beacon_module_quality_choice or "normal"
+	local values={}
+	local available=false
+	for _,proto in ipairs(oil_config.get_section("beacon").values) do
+		values[#values+1]={value=proto.name,icon="entity/"..proto.name,
+			tooltip=mpp_util.entity_name_with_quality(proto.localised_name,choices.beacon_quality_choice)}
+		if proto.name==choices.beacon_choice then available=true end
+	end
+	if not available then choices.beacon_choice="none" end
+	local drill=prototypes.entity[player_data.choices.miner_choice]
+	local supported=is_oil or (algorithm.get_mining_layout(player_data).restrictions.beacon_available
+		and drill~=nil and not (drill.effect_receiver and not drill.effect_receiver.uses_beacon_effects)
+	)
+	player_data.gui.section.beacon.visible=supported
+	player_data.gui.beacon_group.visible=supported
+	player_data.gui.section.beacon.section_label.tooltip=is_oil and {"mpp-oil.settings_beacon_utility_tooltip"} or mpp_util.wrap_tooltip{"mpp.choice_beacon"}
+	create_setting_selector(data,player_data.gui.tables.beacon,is_oil and "mpp_oil_choice" or "mpp_action","beacon",values,
+		{shown_quality=choices.beacon_quality_choice, optional=true})
+	create_quality_selector(data,player_data.gui.tables.beacon_quality,is_oil and "mpp_oil_choice" or "mpp_action","beacon_quality",
+		mpp_util.quality_list(),{style_func=style_helper_quality,alternate_visibility=true})
+	local proto=prototypes.entity[choices.beacon_choice]
+	local density=player_data.gui.beacon_density
+	if density and density.valid then density.destroy();player_data.gui.beacon_density=nil end
+	local arrangement=player_data.gui.beacon_arrangement
+	if not arrangement or not arrangement.valid then
+		arrangement=player_data.gui.beacon_group.add{type="label",caption={"mpp.beacon_rows"},
+			tooltip=mpp_util.wrap_tooltip{"mpp.choice_beacon"}}
+		player_data.gui.beacon_arrangement=arrangement
+	end
+	arrangement.visible=not is_oil and supported and proto~=nil
+	player_data.gui.beacon_utility.visible=is_oil and proto~=nil
+	local filters={}
+	if proto then
+		for _,item in pairs(prototypes.get_item_filtered{{filter="type",type="module"}}) do
+			if beacons.module_allowed(proto,item) then filters[#filters+1]={filter="name",name=item.name,mode="or"} end
+		end
+	end
+	table.sort(filters,function(a,b) return a.name<b.name end)
+	local item=prototypes.item[choices.beacon_module_choice]
+	if proto and item and not beacons.module_allowed(proto,item) then choices.beacon_module_choice="none";item=nil end
+	local value=item and {name=item.name,quality=choices.beacon_module_quality_choice} or nil
+	player_data.gui.section.beacon_module.visible=supported and proto~=nil and #filters>0
+	create_setting_selector(player_data,player_data.gui.tables.beacon_module,"mpp_action","beacon_module",{
+		{action=is_oil and "mpp_oil_module" or "mpp_prototype",value="beacon_module",type="choose-elem-button",elem_type="item-with-quality",
+			elem_filters=filters,elem_value=value,icon="mpp_setting_module_disabled",
+			tooltip={"",{"mpp.choice_beacon_module"},"\n",{"mpp.label_right_click_to_clear"}}},
+	})
+	create_quality_selector(data,player_data.gui.tables.beacon_module_quality,is_oil and "mpp_oil_choice" or "mpp_action",
+		"beacon_module_quality",mpp_util.quality_list())
+end
+
 local function update_misc_selection(player)
 	local player_data = storage.players[player.index]
 	local choices = player_data.choices
 	local layout = algorithm.get_mining_layout(player_data)
 	local values = List() --[[@as List<SettingValueEntry>]]
-	local drill_proto = prototypes.entity[choices.miner_choice]
 
 	values:push{
 		value="ore_filtering",
@@ -1102,35 +1169,20 @@ local function update_misc_selection(player)
 	}
 
 	values:push{
-		value="avoid_water",
-		tooltip={"mpp.choice_avoid_water"},
-		icon=setting_toggle_icon("avoid_water"),
-		icon_enabled=setting_toggle_icon("avoid_water", true),
+		action="mpp_terrain_mode", value="cliff_mode", selected=true,
+		caption={"mpp.icon_cliff_mode_"..choices.cliff_mode_choice},
+		tooltip={"mpp.choice_cliff_mode_"..choices.cliff_mode_choice},
+		icon=setting_toggle_icon("avoid_cliffs", choices.cliff_mode_choice=="avoid"),
 	}
 
 	values:push{
-		value="avoid_cliffs",
-		tooltip={"mpp.choice_avoid_cliffs"},
-		icon=setting_toggle_icon("avoid_cliffs"),
-		icon_enabled=setting_toggle_icon("avoid_cliffs", true),
+		action="mpp_terrain_mode", value="terrain_mode", selected=true,
+		caption_width=76,
+		caption={"mpp.icon_terrain_mode_"..choices.terrain_mode_choice},
+		tooltip={"mpp.choice_terrain_mode_"..choices.terrain_mode_choice},
+		icon=setting_toggle_icon("avoid_water", choices.terrain_mode_choice=="avoid"),
 	}
 
-	values:push{
-		value="avoid_obstacles",
-		tooltip={"mpp.choice_avoid_obstacles"},
-		icon=setting_toggle_icon("avoid_obstacles"),
-		icon_enabled=setting_toggle_icon("avoid_obstacles", true),
-	}
-
-	if layout.restrictions.belt_planner_available then
-		values:push{
-			value="belt_planner",
-			tooltip={"mpp.choice_belt_planner"},
-			icon=setting_toggle_icon("belt_planner"),
-			icon_enabled=setting_toggle_icon("belt_planner", true),
-		}
-	end
-	
 	if layout.restrictions.belt_merging_available then
 		values:push{
 			value="belt_merge",
@@ -1140,52 +1192,7 @@ local function update_misc_selection(player)
 		}
 	end
 
-	if layout.restrictions.module_available then
-		---@type string|nil
-		local existing_choice = choices.module_choice
-		local module_proto = prototypes.item[existing_choice]
-		if not module_proto then
-			existing_choice = nil
-			choices.module_choice = "none"
-		end
-		local existing_quality_choice = choices.module_quality_choice
-		if not prototypes.quality[existing_quality_choice] then
-			existing_quality_choice = "normal"
-			choices.module_quality_choice = existing_quality_choice
-		end
 
-		local tooltip = {"", {"gui.module"}, "\n", {"mpp.label_right_click_to_clear"}} --[[@as List<LocalisedString>]]
-		local elem_value
-		if existing_choice then
-			elem_value = {
-				name = existing_choice,
-				quality = existing_quality_choice,
-			}
-			local mult = drill_proto.module_inventory_size
-			-- tooltip = List{"", {"item-name."..elem_value.name}, "\n", {"mpp.label_right_click_to_clear"}}
-			tooltip = List{"", mpp_util.entity_name_with_quality(module_proto.localised_name, existing_quality_choice) --[[@as any]]}
-			tooltip:append("\n", {"mpp.label_right_click_to_clear"})
-			tooltip:append("\n[color=yellow]", {"description.module-slots"}, ":[/color] "..mult)
-			-- local module_effects = module_proto.get_module_effects(existing_quality_choice)
-			-- for effect, amount in pairs(module_effects) do
-			-- 	local plus = amount > 0 and "+" or ""
-			-- 	local percentage = amount * mult * 100
-			-- 	tooltip:append("\n[color=yellow]", {"description."..effect.."-bonus"}, ":[/color] "..plus..percentage.."%")
-			-- end
-		end
-		
-		values:push{
-			action="mpp_prototype",
-			value="module",
-			tooltip=tooltip --[[@as LocalisedString]],
-			icon="mpp_setting_module_disabled",
-			elem_type="item-with-quality",
-			elem_filters={{filter="type", type="module"}},
-			elem_value = elem_value,
-			type="choose-elem-button",
-		}
-	end
-	
 	if layout.restrictions.lamp_available then
 		values:push{
 			value="lamp",
@@ -1227,15 +1234,6 @@ local function update_misc_selection(player)
 		}
 	end
 
-	if layout.restrictions.landfill_omit_available then
-		values:push{
-			value="landfill",
-			tooltip={"mpp.choice_landfill"},
-			icon=setting_toggle_icon("landfill"),
-			icon_enabled=setting_toggle_icon("landfill", true),
-		}
-	end
-
 	if layout.restrictions.coverage_tuning then
 		values:push{
 			value="coverage",
@@ -1254,25 +1252,16 @@ local function update_misc_selection(player)
 		}
 	end
 
-	if layout.restrictions.placement_info_available then
+	if layout.restrictions.placement_info_available or layout.restrictions.lane_filling_info_available then
 		values:push{
-			value="print_placement_info",
-			tooltip={"mpp.choice_print_placement_info"},
+			value="statistics",
+			tooltip={"mpp.choice_statistics"},
 			icon=setting_toggle_icon("print_placement_info"),
 			icon_enabled=setting_toggle_icon("print_placement_info", true),
 		}
 	end
 
-	if layout.restrictions.lane_filling_info_available then
-		values:push{
-			value="display_lane_filling",
-			tooltip={"mpp.choice_display_lane_filling"},
-			icon=setting_toggle_icon("display_lane_filling"),
-			icon_enabled=setting_toggle_icon("display_lane_filling", true),
-		}
-	end
-
-	if player_data.advanced and layout.restrictions.pipe_available then
+	if layout.restrictions.pipe_available then
 		values:push{
 			value="force_pipe_placement",
 			tooltip={"mpp.choice_force_pipe_placement"},
@@ -1289,17 +1278,22 @@ local function update_misc_selection(player)
 		}
 	end
 
-	local misc_section = player_data.gui.section["misc"]
-	if choices.layout_choice=="oil" then
-		local shared={avoid_obstacles=true,deconstruction=true,landfill=true}
-		local filtered=List()
-		for _,value in ipairs(values) do if shared[value.value] then filtered:push(value) end end
-		values=filtered
+	local groups = {misc=List(), terrain=List(), power=List()}
+	for _, value in ipairs(values) do
+		if value.value=="cliff_mode" or value.value=="terrain_mode" or value.value=="deconstruction" or value.value=="space_landfill" then
+			groups.terrain:push(value)
+		elseif value.value=="lamp" then groups.power:push(value)
+		elseif choices.layout_choice~="oil" then groups.misc:push(value) end
 	end
-	misc_section.visible = #values > 0
-
-	local table_root = player_data.gui.tables["misc"]
-	create_setting_selector(player_data, table_root, "mpp_toggle", "misc", values)
+	player_data.gui.section.misc.visible = #groups.misc>0
+	player_data.gui.power_options.visible = choices.layout_choice~="oil" and #groups.power>0
+	local selections = {}
+	for _, group in ipairs{"misc", "terrain", "power"} do
+		local root = group=="power" and player_data.gui.power_options or player_data.gui.tables[group]
+		create_setting_selector(player_data, root, "mpp_toggle", "misc", groups[group])
+		for key, button in pairs(player_data.gui.selections.misc) do selections[key]=button end
+	end
+	player_data.gui.selections.misc = selections
 end
 
 ---@param player_data PlayerData
@@ -1422,47 +1416,13 @@ end
 
 ---@param player_data PlayerData
 local function update_quality_sections(player_data)
-	local shown = player_data.quality_pickers
-	local advanced = player_data.advanced
 	local quality_enabled = script.feature_flags.quality
-	player_data.gui.tables["miner_quality"].visible = shown and quality_enabled and player_data.choices.layout_choice~="oil"
+	player_data.gui.tables["miner_quality"].visible = quality_enabled and player_data.choices.layout_choice~="oil"
 		and algorithm.get_mining_layout(player_data).restrictions.miner_available
-	player_data.gui.tables.oil_extractor_quality.visible=shown and quality_enabled and player_data.choices.layout_choice=="oil"
-	player_data.gui.tables["belt_quality"].visible = shown and quality_enabled and advanced
-	player_data.gui.tables["space_belt_quality"].visible = shown and quality_enabled and advanced
-	player_data.gui.tables["pole_quality"].visible = shown and quality_enabled
-	player_data.gui.tables["pipe_quality"].visible = shown and quality_enabled
-	player_data.gui.tables["logistics_quality"].visible = shown and quality_enabled and advanced
-end
-function gui.update_quality_sections(player_data)
-	if table_size(player_data.gui.tables) == 0 then return end
-	local ql = mpp_util.quality_list()
-	local tables = player_data.gui.tables
-	if not tables.miner_quality then return end
-	for _, table in pairs(tables) do
-		if not table.valid then return end
+	player_data.gui.tables.oil_extractor_quality.visible=quality_enabled and player_data.choices.layout_choice=="oil"
+	for _, name in ipairs{"pole", "beacon", "logistics", "module", "beacon_module"} do
+		player_data.gui.tables[name.."_quality"].visible = quality_enabled
 	end
-	
-	local opts = {style_func = style_helper_quality, alternate_visibility=true}
-	create_quality_selector(
-		player_data, tables["miner_quality"], "mpp_action", "miner_quality", ql, opts
-	)
-	create_quality_selector(
-		player_data, tables["belt_quality"], "mpp_action", "belt_quality", ql, opts
-	)
-	create_quality_selector(
-		player_data, tables["space_belt_quality"], "mpp_action", "space_belt_quality", ql, opts
-	)
-	create_quality_selector(
-		player_data, tables["logistics_quality"], "mpp_action", "logistics_quality", ql, opts
-	)
-	create_quality_selector(
-		player_data, tables["pole_quality"], "mpp_action", "pole_quality", ql, opts
-	)
-	create_quality_selector(
-		player_data, tables["pipe_quality"], "mpp_action", "pipe_quality", ql, opts
-	)
-	update_quality_sections(player_data)
 end
 
 ---@param player LuaPlayer
@@ -1472,7 +1432,6 @@ local function update_oil_selection(player)
 	if not root or not root.valid then return end
 	oil_gui.update(player, player_data, root, {
 		entities=create_setting_selector,
-		quality_style=style_helper_quality,
 	})
 	local data=oil_config.get(player_data)
 	local section=oil_config.get_extractor_section(player_data)
@@ -1481,25 +1440,23 @@ local function update_oil_selection(player)
 		for _,quality in ipairs(mpp_util.quality_list()) do
 			if player.force.is_quality_unlocked(quality.value) then qualities[#qualities+1]=quality end
 		end
-		create_setting_selector(data,player_data.gui.tables.oil_extractor_quality,"mpp_oil_choice",
+		create_quality_selector(data,player_data.gui.tables.oil_extractor_quality,"mpp_oil_choice",
 			section.name.."_quality",qualities,{style_func=style_helper_quality,alternate_visibility=true})
 	end
 end
 
-gui.update_oil_settings = update_oil_selection
-
 local function update_selections(player)
 	---@type PlayerData
 	local player_data = storage.players[player.index]
+	player_data.gui.quality_selectors = {}
 	oil_config.get(player_data)
 	local is_oil=player_data.choices.layout_choice=="oil"
 	player_data.gui.mining_settings_root.visible=not is_oil
+	player_data.gui.mining_transport_root.visible=not is_oil
+	player_data.gui.oil_heat_root.visible=is_oil
+	player_data.gui.power_options.visible=not is_oil
+	player_data.gui.section.miner.section_label.caption={"mpp.settings_miner_mode_label", {is_oil and "mpp.mode_oil" or "mpp.mode_mining"}}
 	player_data.gui.oil_settings_root.visible=is_oil
-	-- Saved GUI elements can still refer to the previous icon set after a mod reload.
-	player_data.gui.quality_toggle.sprite = setting_toggle_icon("quality", player_data.quality_pickers)
-	player_data.gui.advanced_settings.sprite = setting_toggle_icon("advanced", player_data.advanced)
-	player_data.gui.filtering_settings.sprite = setting_toggle_icon("entity_filtering", player_data.entity_filtering_mode)
-	player_data.gui.undo_button.sprite = "mpp_setting_undo"
 	update_direction_section(player_data)
 	player_data.gui.section.direction.visible = true
 	if player_data.gui.layout_dropdown.valid then
@@ -1518,22 +1475,47 @@ local function update_selections(player)
 	update_logistics_selection(player_data)
 	update_pole_selection(player_data)
 	update_pipe_selection(player_data)
+	update_oil_selection(player)
+	update_module_selection(player_data)
+	update_beacon_selection(player_data)
 	update_blueprint_selection(player_data)
 	update_misc_selection(player)
 	update_debugging_selection(player_data)
 	update_quality_sections(player_data)
-	update_oil_selection(player)
 	preview.update_gui(player_data)
 end
 
+function gui.update_quality_sections(player_data)
+	local root = player_data.gui.tables.miner
+	if root and root.valid then
+		local player = game.get_player(root.player_index)
+		if player_data.gui.workflow_version ~= workflow_version then gui.show_interface(player)
+		else update_selections(player) end
+	end
+end
+
+function gui.update_oil_settings(player)
+	local data = storage.players[player.index]
+	local root = data.gui.oil_settings_root
+	if root and root.valid then
+		if data.gui.workflow_version ~= workflow_version then gui.show_interface(player)
+		else update_selections(player) end
+	end
+end
 
 ---@param player LuaPlayer
 function gui.show_interface(player)
 	---@type LuaGuiElement
 	local frame = player.gui.screen["mpp_settings_frame"]
 	local player_data = storage.players[player.index]
+	conf.migrate_statistics_choice(player_data.choices)
+	conf.migrate_terrain_choices(player_data.choices)
 	player_data.blueprint_add_mode = false
-	if frame and not player_data.gui.workflow_version then
+	player_data.entity_filtering_mode = false
+	if frame and player_data.gui.workflow_version ~= workflow_version then
+		for name, status in pairs(player_data.filtered_entities) do
+			if status == "user_hidden" then player_data.filtered_entities[name] = nil end
+		end
 		frame.destroy()
 		frame = nil
 	end
@@ -1543,7 +1525,6 @@ function gui.show_interface(player)
 		gui.create_interface(player)
 	end
 	update_selections(player)
-	player_data.gui.quality_toggle.visible = script.feature_flags.quality
 end
 
 ---@param player LuaPlayer
@@ -1555,7 +1536,7 @@ local function abort_blueprint_mode(player)
 	local cursor_stack = player.cursor_stack
 	if cursor_stack == nil then return end
 	player.clear_cursor()
-	cursor_stack.set_stack("mining-patch-planner")
+	input_mode.reconcile(player_data, player)
 end
 
 ---@param player LuaPlayer
@@ -1564,6 +1545,7 @@ function gui.hide_interface(player)
 	local frame = player.gui.screen["mpp_settings_frame"]
 	local player_data = storage.players[player.index]
 	player_data.blueprint_add_mode = false
+	input_mode.idle(player_data, player)
 	if frame then
 		frame.visible = false
 	end
@@ -1582,9 +1564,31 @@ local function on_gui_click(event)
 		if type(key)=="string" and key:sub(1,4)=="mpp_" then ours=true; break end
 	end
 	if not ours then return end
+	if evt_ele_tags.mpp_drop_down then return end
 	if player_data.preview and player_data.preview.applying then return end
+	if evt_ele_tags.mpp_input_mode then
+		abort_blueprint_mode(player)
+		local mode = evt_ele_tags.mpp_input_mode
+		if player_data.input_mode == mode or event.button == defines.mouse_button_type.right then
+			input_mode.idle(player_data, player)
+		elseif mode == "select" then input_mode.select(player_data, player)
+		elseif player_data.preview then preview.give_belt_planner(player_data)
+		else input_mode.output(player_data, player) end
+		return
+	end
 	if evt_ele_tags.mpp_preview_apply then preview.apply(player_data); return end
 	if evt_ele_tags.mpp_preview_cancel then preview.cancel(player_data); return end
+	if evt_ele_tags.mpp_quality then
+		abort_blueprint_mode(player)
+		local action, value = evt_ele_tags.mpp_quality, evt_ele_tags.value
+		if not event.element.enabled or not prototypes.quality[value] or not player.force.is_quality_unlocked(value) then return end
+		local data = evt_ele_tags.mpp_oil_quality and oil_config.get(player_data) or player_data
+		data.choices[action.."_choice"] = value
+		if evt_ele_tags.mpp_oil_quality then data.qualities[action:sub(1,-9)] = value end
+		update_selections(player)
+		preview.request(player_data)
+		return
+	end
 	if evt_ele_tags.mpp_oil_extractor then
 		local data=oil_config.get(player_data)
 		local section=oil_config.get_extractor_section(player_data)
@@ -1606,47 +1610,11 @@ local function on_gui_click(event)
 		abort_blueprint_mode(player)
 		oil_gui.on_click(event, player_data)
 		algorithm.clear_selection(player_data)
-		update_oil_selection(player)
+		update_selections(player)
 		preview.request(player_data)
 		return
 	end
-	if evt_ele_tags["mpp_advanced_settings"] then
-		abort_blueprint_mode(player)
-
-		if debugadapter and event.alt then
-			local setting = player.mod_settings["mpp-dump-heuristics-data"].value
-
-			player.mod_settings["mpp-dump-heuristics-data"] = {value = not setting}
-
-			player.print("Set dumping option to "..tostring(not setting))
-			return
-		end
-
-		local value = not player_data.advanced
-		player_data.advanced = value
-		update_selections(player)
-		player_data.gui["advanced_settings"].style = style_helper_advanced_toggle(value)
-		player_data.gui["advanced_settings"].sprite = setting_toggle_icon("advanced", value)
-	elseif evt_ele_tags["mpp_quality_pickers"] then
-		abort_blueprint_mode(player)
-		
-		local value = not player_data.quality_pickers
-		player_data.quality_pickers = value
-		
-		update_quality_sections(player_data)
-		update_oil_selection(player)
-		player_data.gui.quality_toggle.style = style_helper_advanced_toggle(value)
-		player_data.gui.quality_toggle.sprite = setting_toggle_icon("quality", value)
-	elseif evt_ele_tags["mpp_entity_filtering_mode"] then
-		abort_blueprint_mode(player)
-
-		local value = not player_data.entity_filtering_mode
-		player_data.entity_filtering_mode = value
-		update_selections(player)
-		player_data.gui["filtering_settings"].style = style_helper_advanced_toggle(value)
-		player_data.gui["filtering_settings"].sprite = setting_toggle_icon("entity_filtering", value)
-
-	elseif evt_ele_tags["mpp_action"] then
+	if evt_ele_tags["mpp_action"] then
 		abort_blueprint_mode(player)
 
 		local action = evt_ele_tags["mpp_action"]
@@ -1663,38 +1631,17 @@ local function on_gui_click(event)
 			player_data.gui.selections[action][last_value].style = style_helper_selection(false)
 		end
 
-		if event.shift and event.button == defines.mouse_button_type.right and evt_ele_tags.mpp_filterable then
-
-			local is_filtered = player_data.filtered_entities[entity]
-			
-			local visible_values = 0
-			for _, element in pairs(event.element.parent.children) do
-				---@cast element LuaGuiElement
-				if not element.filtered and element.enabled then
-					visible_values = visible_values + 1
-				end
-			end
-
-			if #event.element.parent.children < 2 then
-				player.print({"mpp.msg_print_cant_hide_last_choice"})
-			elseif value == last_value then
-				player.print({"mpp.msg_print_cant_hide_current_choice"})
-			elseif is_filtered then
-				player_data.filtered_entities[entity] = false
-			elseif visible_values > 1 then
-				player_data.filtered_entities[entity] = "user_hidden"
-			else
-				player.print({"mpp.msg_print_cant_hide_last_choice"})
-			end
-
-			update_selections(player)
-			return
-		end
-		
 		player_data.filtered_entities[entity] = false
-		event.element.style = style_helper_selection(true)
-		player_data.choices[choice] = value
+		local disabled = evt_ele_tags.mpp_optional and (last_value == value or event.button == defines.mouse_button_type.right)
+		player_data.choices[choice] = disabled and "none" or value
 		if action=="miner" then algorithm.select_miner(player_data,value) end
+		update_selections(player)
+	elseif evt_ele_tags["mpp_terrain_mode"] then
+		abort_blueprint_mode(player)
+		local value = evt_ele_tags.value
+		local key = value.."_choice"
+		local other = value == "cliff_mode" and "remove" or "fill"
+		player_data.choices[key] = player_data.choices[key] == "avoid" and other or "avoid"
 		update_selections(player)
 	elseif evt_ele_tags["mpp_toggle"] then
 		abort_blueprint_mode(player)
@@ -1703,17 +1650,6 @@ local function on_gui_click(event)
 		local value = evt_ele_tags["value"]
 		local last_value = player_data.choices[value.."_choice"]
 
-		if value == "belt_planner" and event.button == defines.mouse_button_type.right then
-			local last_state = player_data.last_state
-			if not last_state then
-				player.print({"mpp.msg_belt_planner_err_create_planner_no_previous_state"})
-				return
-			end
-			belt_planner.clear_belt_planner_stack(player_data)
-			common.give_belt_blueprint(last_state)
-			return
-		end
-		
 		if evt_ele_tags.mpp_icon_enabled then
 			if not last_value then
 				event.element.sprite = evt_ele_tags.mpp_icon_enabled --[[@as string]]
@@ -1724,13 +1660,16 @@ local function on_gui_click(event)
 
 		player_data.choices[value.."_choice"] = not last_value
 		event.element.style = style_helper_selection(not last_value)
+		if value == "statistics" and player_data.last_state then
+			for _, object in pairs(player_data.last_state._render_objects or {}) do
+				if object.valid and object.only_in_alt_mode then object.visible = not last_value end
+			end
+		end
 		if evt_ele_tags.refresh then update_selections(player) end
 	elseif evt_ele_tags["mpp_blueprint_add_mode"] then
 		player_data.blueprint_add_mode = not player_data.blueprint_add_mode
+		input_mode.idle(player_data, player)
 		player.clear_cursor()
-		if not player_data.blueprint_add_mode then
-			player.cursor_stack.set_stack("mining-patch-planner")
-		end
 		player_data.gui["blueprint_add_section"].visible = player_data.blueprint_add_mode
 		player_data.gui["blueprint_add_button"].style = style_helper_blueprint_toggle(player_data.blueprint_add_mode)
 		player_data.gui["blueprint_add_button"].sprite = setting_toggle_icon("blueprint_add", player_data.blueprint_add_mode)
@@ -1804,7 +1743,9 @@ local function on_gui_click(event)
 		if player_data.preview then preview.cancel(player_data); return end
 		local state = player_data.last_state
 		if not state then return end
+		input_mode.idle(player_data, player)
 		algorithm.cleanup_last_state(player_data)
+		preview.update_gui(player_data)
 		return
 	end
 	preview.request(player_data)
@@ -1828,8 +1769,8 @@ local function on_gui_selection_state_changed(event)
 	local value
 	if value_map == "layout" then
 		value = player_data.gui.layout_values[element.selected_index]
-	elseif value_map == "quality" then
-		value = mpp_util.quality_list()[element.selected_index].value
+	elseif value_map == "beacon_density" then
+		value = beacons.density_values[element.selected_index]
 	else
 		return
 	end
@@ -1853,7 +1794,15 @@ local function on_gui_elem_changed(event)
 	local player_data = storage.players[event.player_index]
 	if player_data.preview and player_data.preview.applying then return end
 	local evt_ele_tags = element.tags
-	if evt_ele_tags["mpp_prototype"] then
+	if evt_ele_tags.mpp_oil_module then
+		local choices = oil_config.get(player_data).choices
+		local action = evt_ele_tags.value
+		local value = element.elem_value
+		choices[action.."_choice"] = value and value.name or "none"
+		choices[action.."_quality_choice"] = value and value.quality or "normal"
+		update_selections(player)
+		preview.request(player_data)
+	elseif evt_ele_tags["mpp_prototype"] then
 		local action = evt_ele_tags.value
 		local old_choice = player_data.choices[action.."_choice"]
 		local old_quality_choice = player_data.choices[action.."_choice"]

@@ -4,6 +4,7 @@
 local _ENV = setmetatable({}, {__index = _ENV})
 local common = require("oil.vendor.common")
 local obstacles = require("mpp.obstacles")
+local terrain = require("mpp.terrain")
 
 local layout = {}
 
@@ -98,9 +99,11 @@ local function ForceGhostAt(args)
   end
 
   if args.preview_only then
-    args.on_preview{
+    local spec = {
       name="entity-ghost",inner_name=proto.name,position=position,direction=direction,quality=quality,
     }
+    spec.insert_plan = args.module_plan
+    args.on_preview(spec)
     return {valid=true,surface=surface,ghost_prototype=proto,
       bounding_box=obstacles.entity_box(proto.name,position,direction)}
   end
@@ -121,7 +124,7 @@ local function ForceGhostAt(args)
       -- exist.  Which can make later entities in this loop invalid.
       if entity.valid
       then
-        if not args.obstacles and (args.allow_removal or entity.force == game.forces.neutral) then
+        if not terrain.blocks_entity(entity, args.terrain_choices) then
           if args.on_deconstruction then args.on_deconstruction(entity) end
           entity.order_deconstruction(player.force, player)
         end
@@ -140,7 +143,7 @@ local function ForceGhostAt(args)
     if entity ~= new_entity
     then
       --args.debug("Removing ghost of "..entity.ghost_name.." due to "..proto.name)
-      if args.allow_removal and not args.obstacles then
+      if not terrain.blocks_entity(entity, args.terrain_choices) then
         if args.on_deconstruction then args.on_deconstruction(entity) end
         entity.order_deconstruction(player.force, player)
       end
@@ -160,6 +163,7 @@ local function ForceGhostAt(args)
   }
 
   if new_entity and args.on_created then args.on_created(new_entity) end
+  if new_entity and args.module_plan then new_entity.insert_plan=args.module_plan end
   if not new_entity and args.obstacles and args.on_blocked then args.on_blocked() end
 
   return new_entity
@@ -183,6 +187,7 @@ end
 local function AddLandfillUnder(args)
   local player = args.player
   local ghosts = args.ghosts
+  local filled = {}
 
   for _, ghost in pairs(ghosts)
   do
@@ -210,20 +215,23 @@ local function AddLandfillUnder(args)
 
       while true
       do
-        local cover_tile = tile_proto.default_cover_tile
+        local cover_tile = terrain.cover_tile({name=tile_proto.name,prototype=tile_proto}, args.terrain_choices or {})
 
         if not Collides(tile_proto, entity_proto)
         then
           break
         end
 
-        if cover_tile == nil
-        then
-          -- Hardcode concrete as the cover for meltable tiles for Aquilo; I
-          -- don't know how we're supposed to know that this is the 'correct'
-          -- tile for this surface.
-          cover_tile = prototypes.tile["concrete"]
+        if cover_tile == nil then
+          if tile_proto.collision_mask.layers.meltable then cover_tile = prototypes.tile["concrete"] end
+          if not cover_tile then
+            if args.on_blocked then args.on_blocked() end
+            break
+          end
         end
+        local fill_key = tile.position.x..","..tile.position.y..":"..cover_tile.name
+        if filled[fill_key] then break end
+        filled[fill_key] = true
 
         local tile_spec = {
           name="tile-ghost",
@@ -1591,6 +1599,8 @@ function layout.Plan(player, player_data, entities, selected_surface, observers)
     args.on_deconstruction = observers.on_deconstruction
     args.on_blocked = observers.on_blocked
     args.obstacles = observers.obstacles
+    args.terrain_choices = observers.terrain_choices or {deconstruction_choice=not player_data.remove_existing}
+    args.module_plan = observers.module_plan and observers.module_plan(args.proto,args.quality)
     args.preview_only = observers.preview_only
     args.on_preview = observers.on_preview
     return ForceGhostAt(args)
@@ -2019,6 +2029,8 @@ function layout.Plan(player, player_data, entities, selected_surface, observers)
       on_created=observers.on_created,
       preview_only=observers.preview_only,
       on_preview=observers.on_preview,
+      terrain_choices=observers.terrain_choices,
+      on_blocked=observers.on_blocked,
     }
   end
   return ghosts

@@ -1,5 +1,4 @@
 local config = require("oil.config")
-local mpp_util = require("mpp.mpp_util")
 
 local gui = {}
 
@@ -8,45 +7,23 @@ function gui.update(player, player_data, root, helpers)
 	root.clear()
 	data.gui.selections = {}
 	for _, section in ipairs(config.get_sections()) do
-		if section.category or section.name == "pipe" or section.name == "pole" then goto continue end
-		local group = root.add{type="flow", direction="vertical", style="mpp_section"}
-		group.add{type="label", caption=section.caption, style="subheader_caption_label"}
+		if section.name ~= "pipe-to-ground" and section.name ~= "heat-pipe" then goto continue end
+		local target = section.name == "heat-pipe" and player_data.gui.oil_heat_root or root
+		if section.name == "heat-pipe" then target.clear() end
+		local group = target.add{type="flow", direction="vertical", style="mpp_section"}
+		group.style.natural_width = 0
 		local values = {}
-		if section.allow_none then
-			values[#values + 1] = {
-				value="none", icon="mpp_no_entity", tooltip={"mpp.choice_none"}, no_quality=true,
-			}
-		end
 		for _, proto in ipairs(section.values) do
-			values[#values + 1] = {value=proto.name, icon="entity/"..proto.name, tooltip=proto.localised_name}
+			values[#values + 1] = {value=proto.name, icon="entity/"..proto.name,
+				tooltip=section.name=="heat-pipe" and {"", proto.localised_name, "\n", {"mpp-oil.settings_heat-pipe_tooltip"}} or proto.localised_name}
 		end
-		if #values == 0 then
-			values[1] = {value="none", icon="mpp_no_entity", tooltip={"mpp-oil.msg_no_valid_pumpjacks"}, disabled=true}
-		end
-		local row = group.add{type="table", style="filter_slot_table", column_count=6}
-		helpers.entities(data, row, "mpp_oil_choice", section.name, values,
-			{shown_quality=data.qualities[section.name]})
-
-		if player_data.quality_pickers and script.feature_flags.quality then
-			local qualities = {}
-			for _, value in ipairs(mpp_util.quality_list()) do
-				if player.force.is_quality_unlocked(value.value) then qualities[#qualities + 1] = value end
-			end
-			local quality_row = group.add{type="table", style="mpp_quality_table", column_count=10}
-			helpers.entities(data, quality_row, "mpp_oil_choice", section.name.."_quality", qualities,
-				{style_func=helpers.quality_style, alternate_visibility=true})
-		end
+		local selection_row = group.add{type="flow", direction="vertical"}
+		selection_row.style.vertical_spacing = 2
+		local row = selection_row.add{type="table", style="filter_slot_table", column_count=1}
+		helpers.entities(data, row, "mpp_oil_choice", section.name, values, {optional=section.allow_none})
 		::continue::
 	end
-	local utility = root.add{type="flow", direction="horizontal"}
-	utility.add{type="label", caption={"mpp-oil.settings_beacon_utility"},
-		tooltip={"mpp-oil.settings_beacon_utility_tooltip"}}
-	local field = utility.add{
-		type="textfield", text=tostring(data.min_beacon_utility), numeric=true,
-		allow_decimal=true, allow_negative=false, lose_focus_on_confirm=true,
-		tags={mpp_oil_utility=true},
-	}
-	field.style.width = 60
+	player_data.gui.beacon_utility_field.text = tostring(data.min_beacon_utility)
 end
 
 function gui.on_click(event, player_data)
@@ -55,7 +32,9 @@ function gui.on_click(event, player_data)
 	local data = config.get(player_data)
 	local value = event.element.tags.value
 	if data.gui.selections[action] and data.gui.selections[action][value] then
-		data.choices[action.."_choice"] = value
+		local disabled = event.element.tags.mpp_optional
+			and (data.choices[action.."_choice"] == value or event.button == defines.mouse_button_type.right)
+		data.choices[action.."_choice"] = disabled and "none" or value
 		if action:sub(-8) == "_quality" then data.qualities[action:sub(1, -9)] = value end
 	end
 	return true

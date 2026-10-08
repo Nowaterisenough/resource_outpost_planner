@@ -359,6 +359,7 @@ end
 ---@param target BaseBeltSpecification
 ---@param direction defines.direction.north | defines.direction.south
 function layout:_apply_belt_merge_strategy(state, source, target, direction)
+	local capacity = common.get_belt_capacity_multiplier(state)
 	local source_t1, source_t2 = source.throughput1, source.throughput2
 	local source_total = source_t1 + source_t2
 	local target_t1, target_t2 = target.merged_throughput1, target.merged_throughput2
@@ -374,14 +375,14 @@ function layout:_apply_belt_merge_strategy(state, source, target, direction)
 		or source_total > target_total
 	) then
 		return -- no op
-	elseif direction == SOUTH and source_t1 == 0 and source_total <= 1 - target_t1 then
+	elseif direction == SOUTH and source_t1 == 0 and source_total <= capacity - target_t1 then
 		source.merge_target = target
 		source.merge_direction = direction
 		source.is_output = false
 		source.merge_strategy = "side-merge"
 		target.merge_strategy = "target"
 		target.merged_throughput1 = target_t1 + source_total
-	elseif direction == NORTH and source_t2 == 0 and source_total <= 1 - target_t2 then
+	elseif direction == NORTH and source_t2 == 0 and source_total <= capacity - target_t2 then
 		source.merge_target = target
 		source.merge_direction = direction
 		source.is_output = false
@@ -390,8 +391,8 @@ function layout:_apply_belt_merge_strategy(state, source, target, direction)
 		target.merged_throughput2 = target_t2 + source_total
 	elseif (
 		source_total <= target_total
-		and (source_t1 + target_t2) <= 1
-		and (source_t2 + target_t1) <= 1
+		and (source_t1 + target_t2) <= capacity
+		and (source_t2 + target_t1) <= capacity
 		and target.merge_strategy ~= "target-back-merge"
 		and source.merge_strategy ~= "target"
 	)
@@ -404,14 +405,14 @@ function layout:_apply_belt_merge_strategy(state, source, target, direction)
 		target.merged_throughput2 = target_t2 + source_t1
 		target.merged_throughput1 = target_t1 + source_t2
 		target.merge_slave = true
-	elseif direction == SOUTH and source_total <= 1 - target_t1 then
+	elseif direction == SOUTH and source_total <= capacity - target_t1 then
 		source.merge_target = target
 		source.merge_direction = direction
 		source.is_output = false
 		source.merge_strategy = "side-merge"
 		target.merge_strategy = "target"
 		target.merged_throughput1 = target_t1 + source_total
-	elseif direction == NORTH and source_total <= 1 - target_t2 then
+	elseif direction == NORTH and source_total <= capacity - target_t2 then
 		source.merge_target = target
 		source.merge_direction = direction
 		source.is_output = false
@@ -419,6 +420,7 @@ function layout:_apply_belt_merge_strategy(state, source, target, direction)
 		target.merge_strategy = "target"
 		target.merged_throughput2 = target_t2 + source_total
 	end
+	common.record_beacon_merge(state,source,target,direction,WEST)
 end
 
 ---@param state SimpleState

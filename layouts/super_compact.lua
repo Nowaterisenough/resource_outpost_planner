@@ -29,6 +29,7 @@ layout.restrictions.module_available = true
 layout.restrictions.pipe_available = false
 
 layout.do_power_pole_joiners = false
+layout.throughput_direction = EAST
 
 ---@class SuperCompactState : SimpleState
 ---@field miner_bounds any
@@ -144,30 +145,29 @@ end
 ---@return number, number
 function layout:_calculate_belt_throughput(state, belt, direction)
 	local belt_speed = state.belt.speed
-	local multiplier = common.get_mining_drill_production_from_state(state)
 	local lane1, lane2 = belt.lane1, belt.lane2
 	
 	local lane1_sum, lane2_sum = 0, 0
 	---@param lane MinerPlacement[]
 	local function sum_miner_directions(lane)
-		local sum1 = function() lane1_sum = lane1_sum + 1 end
-		local sum2 = function() lane2_sum = lane2_sum + 1 end
+		local sum1 = function(drill) lane1_sum = lane1_sum + common.get_mining_drill_production_from_state(state,nil,drill) end
+		local sum2 = function(drill) lane2_sum = lane2_sum + common.get_mining_drill_production_from_state(state,nil,drill) end
 		if direction == EAST then
 			sum1, sum2 = sum2, sum1
 		end
 		for _, drill in ipairs(lane or {}) do
 			if drill.direction == NORTH then
-				sum1()
+				sum1(drill)
 			elseif drill.direction == SOUTH then
-				sum2()
+				sum2(drill)
 			elseif direction == EAST and  (drill.direction == EAST or drill.direction == WEST) and drill.mirror then
-				sum2()
+				sum2(drill)
 			elseif direction == EAST and  (drill.direction == EAST or drill.direction == WEST) then
-				sum1()
+				sum1(drill)
 			elseif (drill.direction == EAST or drill.direction == WEST) and drill.mirror then
-				sum1()
+				sum1(drill)
 			else
-				sum2()
+				sum2(drill)
 			end
 		end
 	end
@@ -175,10 +175,10 @@ function layout:_calculate_belt_throughput(state, belt, direction)
 	sum_miner_directions(lane2)
 	if direction == WEST then
 		-- return (dirs[SOUTH]) * multiplier / belt_speed, (dirs[NORTH] + dirs[EAST]) * multiplier / belt_speed
-		return lane2_sum * multiplier / belt_speed, lane1_sum * multiplier / belt_speed
+		return lane2_sum / belt_speed, lane1_sum / belt_speed
 	else
 		-- return (dirs[SOUTH] + dirs[EAST]) * multiplier / belt_speed, (dirs[NORTH]) * multiplier / belt_speed
-		return lane1_sum * multiplier / belt_speed, lane2_sum * multiplier / belt_speed
+		return lane1_sum / belt_speed, lane2_sum / belt_speed
 	end
 end
 
@@ -327,6 +327,8 @@ function layout:prepare_miner_layout(state)
 
 		-- used for deconstruction, not ghost placement
 		builder_miners[#builder_miners+1] = {
+			name=state.miner_choice,
+			direction=miner.direction,
 			thing="miner",
 			extent_=state.miner.size,
 			grid_x = miner.origin_x,
@@ -445,6 +447,7 @@ end
 ---@param target BaseBeltSpecification
 ---@param direction defines.direction.north | defines.direction.south
 function layout:_apply_belt_merge_strategy(state, source, target, direction)
+	local capacity = common.get_belt_capacity_multiplier(state)
 	local source_t1, source_t2 = source.throughput1, source.throughput2
 	local source_total = source_t1 + source_t2
 	local target_t1, target_t2 = target.merged_throughput1, target.merged_throughput2
@@ -460,7 +463,7 @@ function layout:_apply_belt_merge_strategy(state, source, target, direction)
 		or source_total > target_total
 	) then
 		return
-	elseif source_total <= target_total and (source_west1 + target_t2) <= 1 and (source_west2 + target_t1) <= 1 then
+	elseif source_total <= target_total and (source_west1 + target_t2) <= capacity and (source_west2 + target_t1) <= capacity then
 		source.merge_target = target
 		source.merge_direction = direction
 		source.is_output = false
@@ -472,14 +475,14 @@ function layout:_apply_belt_merge_strategy(state, source, target, direction)
 		target.merge_slave = true
 		target.merged_throughput2 = target_t2 + source_t1
 		target.merged_throughput1 = target_t1 + source_t2
-	elseif direction == SOUTH and source_total <= 1 - target_t1 then
+	elseif direction == SOUTH and source_total <= capacity - target_t1 then
 		source.merge_target = target
 		source.merge_direction = direction
 		source.is_output = false
 		source.merge_strategy = "side-merge"
 		target.merge_strategy = "target"
 		target.merged_throughput1 = target_t1 + source_total
-	elseif direction == NORTH and source_total <= 1 - target_t2 then
+	elseif direction == NORTH and source_total <= capacity - target_t2 then
 		source.merge_target = target
 		source.merge_direction = direction
 		source.is_output = false
@@ -548,7 +551,7 @@ function layout:placement_miners(state)
 
 	local M = state.miner
 	local grid = state.grid
-	local module_inv_size = state.miner.module_inventory_size --[[@as uint]]
+	local module_inv_size = common.get_mining_drill_module_count(state)
 
 	for _, miner in ipairs(state.best_attempt.miners) do
 		

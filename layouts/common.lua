@@ -1,6 +1,7 @@
 local mpp_util = require("mpp.mpp_util")
 local render_util = require("mpp.render_util")
 local belt_planner = require("mpp.belt_planner")
+local beacons = require("mpp.beacons")
 
 local common = {}
 
@@ -356,6 +357,15 @@ local alignment = {
 	south={"right", "left"},
 }
 
+---@param state State
+---@return number
+function common.get_belt_capacity_multiplier(state)
+	if state.miner.drops_full_belt_stacks then
+		return 1 + state.player.force.belt_stack_size_bonus
+	end
+	return 1
+end
+
 local bound_alignment = {
 	west="right",
 	east="left",
@@ -499,18 +509,15 @@ function common.draw_belt_stats(state, belt, belt_speed, speed1, speed2, stagger
 	end
 	local c1, c2, c3, c4 = {.9, .9, .9}, {0, 0, 0}, {1, .2, 0}, {.4, .4, .4}
 	x1 = x1 + stagger
-	local capacity_mult = 1
-	if state.miner.drops_full_belt_stacks then
-		capacity_mult = 1 + state.player.force.belt_stack_size_bonus
-	end
+	local capacity_mult = common.get_belt_capacity_multiplier(state)
 	
 	local ratio1 = speed1
 	local ratio2 = speed2
 	local function get_color(ratio)
-		return ratio > capacity_mult + .01 and c3 or ratio == 0 and c4 or c1
+		return ratio > capacity_mult + 1e-9 and c3 or ratio == 0 and c4 or c1
 	end
-	local function cap_prod(speed)
-		return min(capacity_mult, speed) * belt_speed, speed > capacity_mult and  "+" or ""
+	local function production_text(ratio)
+		return string.format("%.2f/s (%.0f%%)", ratio * belt_speed, ratio / capacity_mult * 100)
 	end
 	
 	r[#r+1] = rendering.draw_text{
@@ -518,14 +525,14 @@ function common.draw_belt_stats(state, belt, belt_speed, speed1, speed2, stagger
 		color=get_color(ratio1), time_to_live=ttl or 1,
 		alignment=alignment[state.direction_choice][1], vertical_alignment="middle",
 		target=l2w(x1-2, y1-.6), scale=1.6,
-		text=string.format("%.2f%s/s", cap_prod(ratio1))
+		text=production_text(ratio1)
 	}
 	r[#r+1] = rendering.draw_text{
 		surface=state.surface, players=player, only_in_alt_mode=true,
 		color=get_color(ratio2), time_to_live=ttl or 1,
 		alignment=alignment[state.direction_choice][2], vertical_alignment="middle",
 		target=l2w(x1-2, y1+.6), scale=1.6,
-		text=string.format("%.2f%s/s", cap_prod(ratio2))
+		text=production_text(ratio2)
 	}
 	local total_ratio = min(capacity_mult, ratio1) + min(capacity_mult, ratio2)
 	local total_color = c1
@@ -551,7 +558,7 @@ end
 ---@param capped2 number
 ---@param uncapped1 number
 ---@param uncapped2 number
-function common.draw_belt_total(state, pos_x, pos_y, speed, capped1, capped2, uncapped1, uncapped2)
+function common.draw_belt_total(state, pos_x, pos_y, speed, capped1, capped2, uncapped1, uncapped2, output_count)
 	local r = state._render_objects
 	local c, ttl, player = state.coords, 0, {state.player}
 	local function l2w(x, y, b) -- local to world
@@ -563,11 +570,6 @@ function common.draw_belt_total(state, pos_x, pos_y, speed, capped1, capped2, un
 	end
 	local c1 = {0.7, 0.7, 1.0}
 
-	-- local lower_bound = math.min(capped1, capped2)
-	local upper_bound = math.max(capped1, capped2)
-	if state.miner.drops_full_belt_stacks then
-		upper_bound = upper_bound / (1 + state.player.force.belt_stack_size_bonus)
-	end
 	local capped_total = capped1+capped2
 	local uncapped_total = uncapped1 + uncapped2
 	local unused_capacity = uncapped_total - capped_total
@@ -577,8 +579,7 @@ function common.draw_belt_total(state, pos_x, pos_y, speed, capped1, capped2, un
 		color=c1, time_to_live=ttl or 1,
 		alignment="center", vertical_alignment="middle",
 		target=l2w(pos_x-4, pos_y-.6, false), scale=2,
-		-- text={"mpp.msg_print_info_lane_saturation_belts", string.format("%.2fx", upper_bound), },
-		text = {"mpp.msg_print_info_lane_throuput_total", ("%.2f"):format(capped_total*speed), ceil(upper_bound)},
+		text = {"mpp.msg_print_info_lane_throuput_total", ("%.2f"):format(capped_total*speed), output_count},
 	})
 	if unused_capacity > 0 then
 		local color = unused_capacity > capped_total * .1 and {1, .2, 0} or {1, 1, 1}
@@ -595,31 +596,93 @@ end
 
 ---@param state State
 ---@return number
-function common.get_mining_drill_production_from_state(state)
-	local drill_speed = prototypes.entity[state.miner_choice].mining_speed
-	local belt_speed = prototypes.entity[state.belt_choice].belt_speed * 60 * 4
-	local dominant_resource = state.resource_counts[1].name
-	local resource_hardness = prototypes.entity[dominant_resource].mineable_properties.mining_time or 1
-	local drill_productivity, module_speed = 1, 1
-	if state.miner.uses_force_mining_productivity_bonus then
-		drill_productivity = drill_productivity + state.player.force.mining_drill_productivity_bonus
+function common.get_mining_drill_module_count(state)
+	return prototypes.entity[state.miner_choice].get_inventory_size(
+		defines.inventory.mining_drill_modules, state.miner_quality_choice or "normal") or 0
+end
+
+---@param state State
+---@param resource_name string?
+---@return number Items produced per second at full power
+function common.get_mining_drill_production_from_state(state, resource_name, miner)
+	local drill = prototypes.entity[state.miner_choice]
+	local receiver = drill.effect_receiver
+	local base_effect = receiver and receiver.base_effect or {}
+	local speed, productivity = base_effect.speed or 0, base_effect.productivity or 0
+	if drill.uses_force_mining_productivity_bonus then
+		productivity = productivity + state.player.force.mining_drill_productivity_bonus
 	end
-	local function quality_clamp(val, level) return floor((val + val * .3 * level) * 100)/100 end
-	if state.module_choice ~= "none" then
-		local mod = prototypes.item[state.module_choice]
-		local level = prototypes.quality[state.module_quality_choice].level
-		local speed = mod.module_effects.speed and mod.module_effects.speed or 0
-		local productivity = mod.module_effects.productivity and mod.module_effects.productivity or 0
-		if mod.category == "speed" then
-			speed = quality_clamp(speed, level)
-		elseif mod.category == "productivity" then
-			productivity = quality_clamp(productivity, level)
+	if receiver and receiver.uses_surface_effects then
+		local effect = state.surface.global_effect or {}
+		speed = speed + (effect.speed or 0)
+		productivity = productivity + (effect.productivity or 0)
+	end
+	if state.module_choice and state.module_choice ~= "none" and (not receiver or receiver.uses_module_effects) then
+		local effects = prototypes.item[state.module_choice].get_module_effects(state.module_quality_choice or "normal")
+		local count = common.get_mining_drill_module_count(state)
+		speed = speed + (effects.speed or 0) * count
+		productivity = productivity + (effects.productivity or 0) * count
+	end
+	local transmitted=beacons.effects(state,miner)
+	speed=speed+(transmitted.speed or 0)
+	productivity=productivity+(transmitted.productivity or 0)
+	-- The engine stores effect bonuses at four decimal places, including beacon profile scaling.
+	-- Preserve decimal half steps such as 9 * 0.3333 * 1.5 despite binary floating-point noise.
+	speed=math.floor(speed*10000+0.5+1e-8)/10000
+	productivity=math.floor(productivity*10000+0.5+1e-8)/10000
+	local function clamp_effect(value, limits, default_low)
+		return max(limits and limits.low or default_low, min(limits and limits.high or math.huge, value))
+	end
+	speed = clamp_effect(speed, receiver and receiver.speed_limits, -0.8)
+	productivity = clamp_effect(productivity, receiver and receiver.productivity_limits, 0)
+	local resource = prototypes.entity[resource_name or state.resource_counts[1].name].mineable_properties
+	local yield = 0
+	for _, product in pairs(resource.products or {}) do
+		if product.type == "item" then
+			local low, high = product.amount or product.amount_min, product.amount or product.amount_max
+			local extra = product.extra_count_fraction or 0
+			local amount = (low + high) / 2 + extra
+			local ignored = product.ignored_by_productivity or 0
+			-- Average only the part of each possible yield that receives productivity bonuses.
+			local eligible_low = max(low, ignored + 1)
+			local eligible = extra
+			if high >= eligible_low then
+				eligible = eligible + (eligible_low + high - 2 * ignored) / 2 * (high - eligible_low + 1) / (high - low + 1)
+			end
+			local shared = product.shared_probability
+			local probability = (product.independent_probability or product.probability or 1) * (shared and shared.max - shared.min or 1)
+			yield = yield + (amount + eligible * productivity) * probability
 		end
-		module_speed = module_speed + math.max(speed * state.miner.module_inventory_size, -0.8)
-		drill_productivity = drill_productivity + productivity * state.miner.module_inventory_size
 	end
-	local multiplier = drill_speed / resource_hardness * module_speed * drill_productivity
-	return multiplier
+	return drill.mining_speed / resource.mining_time * (1 + speed) * yield
+end
+
+function common.record_beacon_merge(state,source,target,direction,source_direction)
+	if not beacons.enabled(state) or source.merge_target~=target then return end
+	state._beacon_merges=state._beacon_merges or {}
+	state._beacon_merges[#state._beacon_merges+1]={source=source,target=target,source_direction=source_direction,
+		side=source.merge_strategy=="back-merge" and 0 or (direction==SOUTH and 1 or 2)}
+end
+
+function common.prepare_beacons(state,layout)
+	if beacons.prepare(state, common.get_mining_drill_production_from_state) then return true end
+	if not beacons.enabled(state) or not state.belt then return end
+	for _,belt in ipairs(state.belts or {}) do
+		local a,b=layout:_calculate_belt_throughput(state,belt,layout.throughput_direction or WEST)
+		belt.throughput1,belt.throughput2=a,b
+		belt.merged_throughput1,belt.merged_throughput2=a,b
+	end
+	for _,merge in ipairs(state._beacon_merges or {}) do
+		local source,target=merge.source,merge.target
+		local a,b=layout:_calculate_belt_throughput(state,source,merge.source_direction)
+		source.throughput1,source.throughput2=a,b
+		source.merged_throughput1,source.merged_throughput2=a,b
+		if merge.side==0 then
+			target.merged_throughput1=target.merged_throughput1+b
+			target.merged_throughput2=target.merged_throughput2+a
+		elseif merge.side==1 then target.merged_throughput1=target.merged_throughput1+a+b
+		else target.merged_throughput2=target.merged_throughput2+a+b end
+	end
 end
 
 ---@class BeltThroughput
@@ -1036,17 +1099,15 @@ end
 
 ---@param state SimpleState
 function common.display_lane_filling(state)
-	if not state.display_lane_filling_choice or not state.belts or not state.belt then return end
+	if not state.statistics_choice or not state.belts or not state.belt then return end
 
 	local belt_speed = state.belt.speed
-	local capacity_mult = 1
-	if state.miner.drops_full_belt_stacks then
-		capacity_mult = 1 + state.player.force.belt_stack_size_bonus
-	end
+	local capacity_mult = common.get_belt_capacity_multiplier(state)
 	
 	local belts = state.belts
 	local throughput_capped1, throughput_capped2 = 0, 0
 	local throughput_total1, throughput_total2 = 0, 0
+	local output_count = 0
 	local do_stagger, y_stagger = false, 0
 	if state.coords.is_vertical and #belts > 1 and belts[2].y - belts[1].y < 6 then
 		do_stagger, y_stagger = true, .4
@@ -1057,6 +1118,7 @@ function common.display_lane_filling(state)
 		if belt.merge_direction or (not belt.lane1 and not belt.lane2) then goto continue end
 
 		local speed1, speed2 = belt.merged_throughput1, belt.merged_throughput2
+		output_count = output_count + 1
 
 		throughput_capped1 = throughput_capped1 + math.min(capacity_mult, speed1)
 		throughput_capped2 = throughput_capped2 + math.min(capacity_mult, speed2)
@@ -1087,7 +1149,7 @@ function common.display_lane_filling(state)
 		common.draw_belt_total(
 			state, x, y - 3, belt_speed,
 			throughput_capped1, throughput_capped2,
-			throughput_total1, throughput_total2
+			throughput_total1, throughput_total2, output_count
 		)
 	end
 
@@ -1106,7 +1168,7 @@ function common.commit_built_tiles_to_grid(grid, things, typ)
 end
 
 ---@param state MinimumPreservedState
-function common.give_belt_blueprint(state)
+function common.create_belt_planner_specification(state)
 	local belts = state.belts
 	
 	if belts == nil or #belts == 0 then return end
@@ -1118,21 +1180,21 @@ function common.give_belt_blueprint(state)
 		coords = state.coords,
 		direction_choice = state.direction_choice,
 		belt_choice = state.belt_choice,
+		belt_quality_choice = state.belt_quality_choice,
 		count = 0,
 		ungrouped = true,
 		_renderables = {},
 	}
 	
-	table.sort(belts, function(a, b) return a.y < b.y end)
-	
 	local count = 0
-	for index, belt in pairs(belts) do
+	for _, belt in ipairs(belts) do
 		if belt.is_output == true then
 			count = count + 1
-			belt.index = count
 			belt_planner_spec[count] = table.deepcopy(belt)
 		end
 	end
+	if count == 0 then return end
+	table.sort(belt_planner_spec, function(a, b) return a.y < b.y end)
 	
 	local converter = mpp_util.reverter_delegate(state.coords, state.direction_choice)
 	
@@ -1163,10 +1225,44 @@ function common.give_belt_blueprint(state)
 	
 	belt_planner_spec.count = count
 	belt_planner_spec.ungrouped = true
+	return belt_planner_spec
+end
+
+function common.save_belt_specification(state)
+	belt_planner.clear_belt_planner_stack(storage.players[state.player.index])
+	local belt_planner_spec = common.create_belt_planner_specification(state)
+	if not belt_planner_spec then return end
 	
 	belt_planner.push_belt_planner_step(state.player.index, belt_planner_spec)
+	return belt_planner_spec
+end
 
-	return belt_planner.give_blueprint(state, belt_planner_spec)
+function common.prepare_belt_connection(state)
+	if not state.belt_planner_choice or not state.belt_target then return true end
+	local spec = common.create_belt_planner_specification(state)
+	if not spec then return true end
+	local connection, err = belt_planner.create_state(spec, state.belt_target, state)
+	if not connection then
+		if state.preview_only then state._preview_issues={{position=state.belt_target.position,reason=err}} end
+		return false, err
+	end
+	connection.preview_only=state.preview_only
+	connection.grid = state.grid
+	connection.planned = {}
+	for _, list in pairs{state.builder_miners or {}, state.builder_pipes or {}, state.builder_belts or {},
+		state.builder_power_poles or {}, state.builder_lamps or {}, state.builder_beacons or {}, state.builder_all or {}} do
+		for _, entity in ipairs(list) do connection.planned[#connection.planned+1] = entity end
+	end
+	local ok, entities, diagnostic = belt_planner.plan(connection)
+	if not ok then
+		if diagnostic then
+			state.builder_belt_connections=diagnostic.routes
+			state._preview_issues=diagnostic.issues
+		end
+		return false, entities
+	end
+	state.builder_belt_connections = entities
+	return true
 end
 
 function common.create_pipe_building_environment(state)

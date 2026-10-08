@@ -10,7 +10,8 @@ local render_util = require("mpp.render_util")
 local mpp_util = require("mpp.mpp_util")
 local task_runner = require("mpp.task_runner")
 local preview = require("mpp.preview")
-local coord_convert, coord_revert = mpp_util.coord_convert, mpp_util.coord_revert
+local belt_planner = require("mpp.belt_planner")
+local input_mode = require("mpp.input_mode")
 local EAST, NORTH, SOUTH, WEST, ROTATION = mpp_util.directions()
 local floor = math.floor
 
@@ -26,6 +27,7 @@ script.on_init(conf.initialize_storage)
 
 ---@param event EventData
 function task_runner_handler(event)
+	belt_planner.restore_cursors()
 	preview.tick()
 	if #storage.immediate_tasks > 0 then
 		local tasks = storage.immediate_tasks
@@ -49,14 +51,53 @@ function task_runner_handler(event)
 		task_runner.mining_patch_task(layout_task)
 	end
 	
-	if #storage.tasks == 0 and #storage.immediate_tasks == 0 and not preview.has_pending() then
+	if #storage.tasks == 0 and #storage.immediate_tasks == 0 and not preview.has_pending()
+		and not belt_planner.has_pending_cursor() then
 		return script.on_event(defines.events.on_tick, nil)
 	end
 end
 
+local function set_belt_target(player, surface, position, direction)
+	local data=storage.players[player.index]
+	if not data or (data.preview and data.preview.applying) then return end
+	local target={position=position,direction=direction}
+	if data.preview then
+		if data.preview.surface==surface and data.choices.belt_planner_choice then
+			preview.set_belt_target(data,target)
+		end
+		return
+	end
+	local spec=data.belt_planner_stack[#data.belt_planner_stack]
+	if not spec then player.print({"mpp.msg_belt_planner_err_no_previous_state"}); return end
+	if surface~=spec.surface then return end
+	local choices=table.deepcopy(data.choices)
+	choices._collected_ghosts=data.last_state and data.last_state._collected_ghosts
+	local state,err=belt_planner.create_state(spec,target,choices)
+	if not state then player.print(err); return end
+	table.insert(storage.immediate_tasks,state)
+	script.on_event(defines.events.on_tick,task_runner_handler)
+end
+
+script.on_event(defines.events.on_pre_build, function(event)
+	local player = game.get_player(event.player_index)
+	if not player then return end
+	local target = belt_planner.take_cursor_target(player, event)
+	if not target then return end
+	script.on_event(defines.events.on_tick, task_runner_handler)
+	set_belt_target(player, player.surface, target.position, target.direction)
+end)
+
 local function select_preview(event,append)
 	local player=game.get_player(event.player_index)
-	if not player or event.item~="mining-patch-planner" then return end
+	if not player then return end
+	if event.item=="mpp-belt-planner" then
+		local area=event.area
+		set_belt_target(player,event.surface,
+			{x=floor((area.left_top.x+area.right_bottom.x)/2)+0.5,y=floor((area.left_top.y+area.right_bottom.y)/2)+0.5},
+			storage.players[player.index].belt_planner_direction or NORTH)
+		return
+	end
+	if event.item~="mining-patch-planner" then return end
 	for _,task in ipairs(storage.tasks) do
 		if task.player==player and not task.preview_only then return end
 	end
@@ -130,7 +171,8 @@ script.on_load(function()
 		end
 	end
 
-	if storage.tasks and (#storage.tasks > 0 or preview.has_pending()) then
+	if storage.tasks and (#storage.tasks > 0 or #storage.immediate_tasks > 0 or preview.has_pending()
+		or belt_planner.has_pending_cursor()) then
 		script.on_event(defines.events.on_tick, task_runner_handler)
 		for _, task in ipairs(storage.tasks) do
 			---@type Layout
@@ -149,35 +191,42 @@ local function cursor_stack_check(e)
 	if not player_data then return end
 	local frame = player.gui.screen["mpp_settings_frame"]
 	if player_data.preview then
-		if player_data.preview.surface~=player.surface then preview.cancel(player_data)
-		else gui.show_interface(player); return end
+		if player_data.preview.surface~=player.surface then preview.cancel(player_data) end
 	end
+	input_mode.reconcile(player_data, player)
 	if player_data.blueprint_add_mode and frame and frame.visible then
 		return
 	end
 
-	local cursor_stack = player.cursor_stack
-	if (cursor_stack and
-		cursor_stack.valid and
-		cursor_stack.valid_for_read and
-		cursor_stack.name == "mining-patch-planner"
-	) then
+	if player_data.input_mode then
 		gui.show_interface(player)
 		algorithm.on_gui_open(player_data)
-	else
-		local duration = mpp_util.get_display_duration(e.player_index)
-		if e.tick < player_data.tick_expires then
-			player_data.tick_expires = e.tick + duration
-		end
-		gui.hide_interface(player)
-		algorithm.on_gui_close(player_data)
-		algorithm.clear_selection(player_data)
 	end
 end
 
 script.on_event(defines.events.on_player_cursor_stack_changed, cursor_stack_check)
 
 script.on_event(defines.events.on_player_changed_surface, cursor_stack_check)
+
+local function toggle_interface(event)
+	local player = game.get_player(event.player_index)
+	local data = storage.players[event.player_index]
+	if not player or not data then return end
+	local frame = player.gui.screen.mpp_settings_frame
+	if frame and frame.visible then
+		gui.hide_interface(player)
+		algorithm.on_gui_close(data)
+	else
+		input_mode.idle(data, player)
+		gui.show_interface(player)
+		algorithm.on_gui_open(data)
+	end
+end
+
+script.on_event("mining-patch-planner-keybind", toggle_interface)
+script.on_event(defines.events.on_lua_shortcut, function(event)
+	if event.prototype_name == "mining-patch-planner-shortcut" then toggle_interface(event) end
+end)
 
 script.on_event(defines.events.on_research_finished, function(event)
 	---@cast event EventData.on_research_finished
@@ -195,7 +244,6 @@ script.on_event(defines.events.on_research_finished, function(event)
 	conf.unhide_qualities_for_force(event.research.force, qualities_to_unhide)
 	for player_index, player_data in pairs(storage.players) do
 		gui.update_quality_sections(player_data)
-		gui.update_oil_settings(game.get_player(player_index))
 	end
 end)
 
@@ -206,72 +254,17 @@ do
 	end
 end
 
+-- Fallback for tagged markers built by older saves or other scripts.
 script.on_event(defines.events.on_built_entity, function(event)
-	local ent = event.entity
-	local tags = ent.tags
-	if tags == nil or tags.mpp_belt_planner == nil then return end
-	
-	local position = ent.position
-	local gx, gy = position.x, position.y
-	local world_direction = ent.direction
-	local player = game.get_player(event.player_index) --[[@as LuaPlayer]]
-	local surface = ent.surface
-	
-	ent.destroy()
-	
-	if tags.mpp_belt_planner ~= "main" then return end
-	
-	local belt_planner_stack = storage.players[event.player_index].belt_planner_stack
-	
-	if #belt_planner_stack == 0 then
-		game.get_player(event.player_index).print({"mpp.msg_belt_planner_err_no_previous_state"})
-		return
+	local entity=event.entity
+	local tags=event.tags or entity.tags
+	if not tags or not tags.mpp_belt_planner then return end
+	local position,surface,direction=entity.position,entity.surface,entity.direction
+	entity.destroy()
+	if tags.mpp_belt_planner=="main" then
+		local player=game.get_player(event.player_index)
+		if player then set_belt_target(player,surface,position,direction) end
 	end
-	
-	---@type BeltPlannerSpecification
-	local spec = belt_planner_stack[#belt_planner_stack]
-	
-	local coords = spec.coords
-	
-	do
-		if surface ~= spec.surface then
-			return
-		end
-		
-		local mid_x, mid_y = coords.gx + coords.w / 2, coords.gy + coords.h / 2
-		if math.abs(mid_x - gx) > 100 or math.abs(mid_y - gy) > 100 then
-			game.get_player(event.player_index).print({"mpp.msg_belt_planner_err_too_far"})
-			return
-		end
-	end
-	
-	local conv = coord_convert[spec.direction_choice]
-	-- local rot = mpp_util.bp_direction[state.direction_choice][direction]
-	-- local bump = state.direction_choice == "north" or state.direction_choice EAST
-	local belt_direction = mpp_util.clamped_rotation(((-defines.direction[spec.direction_choice]) % ROTATION)-EAST, world_direction)
-	local x, y = gx - coords.gx - .5, gy - coords.gy - .5
-	local tx, ty = conv(x, y, coords.w, coords.h)
-	tx, ty = floor(tx + 1), floor(ty + 1)
-	
-	---@type BeltinatorState
-	local beltinator_state = {
-		avoid_obstacles_choice = storage.players[event.player_index].choices.avoid_obstacles_choice,
-		type = "belt_planner",
-		surface = player.surface,
-		player = player,
-		coords = spec.coords,
-		direction_choice = spec.direction_choice,
-		belt_x = tx,
-		belt_y = ty,
-		belt_specification = spec,
-		belt_choice = spec.belt_choice,
-		belt_direction = belt_direction,
-		x_start = spec[1].x_start,
-	}
-	
-	table.insert(storage.immediate_tasks, beltinator_state)
-	script.on_event(defines.events.on_tick, task_runner_handler)
-	
 end, {{filter = "ghost_type", type = "transport-belt"}})
 
 ---@param player_data PlayerData
@@ -283,8 +276,23 @@ function rotate_direction(player_data, direction)
 	preview.request(player_data)
 end
 
+local function rotate_belt_target(event, reverse)
+	local player = game.get_player(event.player_index)
+	if player and belt_planner.rotate_cursor(player, event, reverse) then return true end
+	if not event.selected_prototype or event.selected_prototype.name~="mpp-belt-planner" then return false end
+	local data=storage.players[event.player_index]
+	local direction=((data.belt_planner_direction or NORTH)+(reverse and -EAST or EAST))%ROTATION
+	data.belt_planner_direction=direction
+	if data.preview and data.preview.belt_target then
+		preview.set_belt_target(data,{position=data.preview.belt_target.position,direction=direction})
+	end
+	game.get_player(event.player_index).play_sound{path="utility/rotated_medium"}
+	return true
+end
+
 script.on_event("mining-patch-planner-keybind-rotate", function(e)
 	---@cast e EventData.CustomInputEvent
+	if rotate_belt_target(e,false) then return end
 	if not e.selected_prototype or e.selected_prototype.name ~= "mining-patch-planner" then return end
 	local player_index = e.player_index
 	local ply = storage.players[player_index] --[[@as PlayerData]]
@@ -302,8 +310,19 @@ script.on_event("mining-patch-planner-keybind-rotate", function(e)
 	game.get_player(player_index).play_sound{path="utility/rotated_medium"}
 end)
 
+script.on_event("mining-patch-planner-keybind-flip-horizontal", function(e)
+	local player = game.get_player(e.player_index)
+	if player then belt_planner.flip_cursor(player, true) end
+end)
+
+script.on_event("mining-patch-planner-keybind-flip-vertical", function(e)
+	local player = game.get_player(e.player_index)
+	if player then belt_planner.flip_cursor(player, false) end
+end)
+
 script.on_event("mining-patch-planner-keybind-rotate-reversed", function(e)
 	---@cast e EventData.CustomInputEvent
+	if rotate_belt_target(e,true) then return end
 	if not e.selected_prototype or e.selected_prototype.name ~= "mining-patch-planner" then return end
 	
 	local player_index = e.player_index
