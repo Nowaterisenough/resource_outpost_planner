@@ -14,7 +14,7 @@ local conf = require("configuration")
 local layouts = algorithm.layouts
 
 local gui = {}
-local workflow_version = 9
+local workflow_version = 10
 
 local direction_sprites = {
 	north = "virtual-signal/up-arrow",
@@ -664,10 +664,14 @@ function gui.create_interface(player)
 	player_gui.select_tool=tools.add{type="button",caption={"mpp.tool_select"},tooltip={"mpp.tool_select_tooltip"},tags={mpp_input_mode="select"}}
 	player_gui.output_tool=tools.add{type="button",caption={"mpp.icon_belt_planner"},tooltip={"mpp.choice_belt_planner"},enabled=false,tags={mpp_input_mode="output"}}
 	local actions=footer.add{type="flow",direction="horizontal"}
-	player_gui.preview_apply=actions.add{type="button",style="confirm_button",caption={"mpp.preview_apply"},enabled=false,tags={mpp_preview_apply=true}}
-	player_gui.preview_cancel=actions.add{type="button",style="back_button",caption={"mpp.preview_cancel"},enabled=false,tags={mpp_preview_cancel=true}}
+	player_gui.preview_apply=actions.add{type="button",style="green_button",caption={"mpp.preview_apply"},enabled=false,tags={mpp_preview_apply=true}}
+	player_gui.preview_cancel=actions.add{type="button",style="button",caption={"mpp.preview_cancel"},enabled=false,tags={mpp_preview_cancel=true}}
 	player_gui.undo_button=actions.add{type="button",caption={"controls.undo"},tooltip=mpp_util.wrap_tooltip{"controls.undo"},
 		enabled=helper_undo_available(player_data),tags={mpp_undo=true}}
+	for _, button in ipairs{player_gui.select_tool, player_gui.output_tool, player_gui.preview_apply, player_gui.preview_cancel, player_gui.undo_button} do
+		button.style.width = 108
+		button.style.height = 28
+	end
 end
 
 ---@param player_data PlayerData
