@@ -5,19 +5,23 @@ Plan mining patches and oil outposts in one interface. Select resources, inspect
 ## Features
 
 - Select mining drills and pumpjacks directly from the equipment row. Space Age adds the big mining drill.
-- Preview the layout before placement. The preview creates no construction ghosts, landfill or demolition orders, so robots cannot build it.
+- Preview original-size blueprint artwork before placement, with green available positions and red blocked positions. The preview creates no construction ghosts, landfill or demolition orders, so robots cannot build it.
 - Change equipment, direction and shared settings to recalculate the preview.
-- Plan mining drills, belts, underground belts, poles, lamps, modules and fluid inputs, with mining blueprint templates.
+- Plan mining drills, belts, underground belts, poles, lamps, beacons, modules and fluid inputs, with mining blueprint templates.
 - Plan pumpjacks, pipe networks, poles, beacons, qualities and heating on cold surfaces.
-- Avoid lava, water, cliffs, trees, rocks and existing facilities. Required connections that cannot be routed safely stop the plan.
-- Apply the plan to place construction ghosts, or cancel the preview without changing the previously applied plan.
+- Place continuous beacon rows on both sides of drill columns, with independent drill and beacon modules.
+- Choose cliff avoidance or removal, and water/lava/lightning-pool avoidance or filling. Unsafe connections stay visible in red so you can adjust the plan.
+- Position belt outputs with a native blueprint cursor; rotate with **R / Shift+R**. Connections favor aligned runs and fewer bends.
+- Select equipment qualities with compact icons below each picker. **Statistics** combines placement reports and belt load overlays.
+- Apply the plan to place construction ghosts, or cancel the current preview. Reselecting resources clears the planner's latest unfinished plan and old overlays, retaining completed buildings and other plans.
 
 ## How To Use
 
 1. Press **Ctrl+M** or click the planner shortcut.
-2. Drag over resources. Use **Shift + left-drag** to add another area.
+2. Click **Select**, then drag over resources. Use **Shift + left-drag** to add another area. Click Select again or press **Q** to exit the tool.
 3. Inspect the preview and adjust the equipment and settings.
-4. Click **Apply** to place the construction plan, or **Cancel Preview** to discard the draft.
+4. Click **Output** to position or rotate belt outputs when needed. Click again or press **Q** to exit while keeping the target.
+5. Click **Apply** to place the construction plan, or **Cancel Preview** to discard the draft.
 
 ## Compatibility
 
@@ -40,19 +44,23 @@ Maintained by **Nowaterisenough**. Based on **Mining Patch Planner** by **Rimbas
 ## 主要功能
 
 - 在顶部直接选择矿机或抽油机；启用《太空时代》后可使用大矿机。
-- 预览阶段不生成建设蓝图、不填土、不下达拆除命令，机器人不会提前施工。
+- 预览采用原尺寸蓝图图像，可放置部分显示绿色，受阻位置显示红色；不生成建设蓝图、不填土、不下达拆除命令，机器人不会提前施工。
 - 修改设备、布局方向和共用配置后，预览实时更新。
-- 采矿支持矿机、传送带、地下传送带、电杆、灯光、插件、流体输入和蓝图模板。
-- 油田支持抽油机、管网、电杆、信标、实体品质和寒冷星球供热。
-- 避开岩浆、水域、悬崖、树木、岩石和已有设施；关键连接无法安全绕行时停止规划。
-- 点击应用后才生成建设蓝图；取消预览不影响之前已应用的布局。
+- 采矿支持矿机、传送带、地下传送带、电杆、灯光、插件塔、插件、流体输入和蓝图模板。
+- 油田支持抽油机、管网、电杆、插件塔、实体品质和寒冷星球供热。
+- 在矿机两侧摆放连续整排插件塔，设备内插件和塔内插件分别配置。
+- 悬崖可选择避让或拆除，水、岩浆、雷池可选择避让或填补；无法连通的位置保留红色预览，方便调整。
+- 用原生蓝图光标放置传送带出口，按 **R / Shift+R** 旋转；连接尽量规整，减少弯折。
+- 品质使用设备下方的小图标选择；**统计** 合并放置报告和传送带负载显示。
+- 点击应用后才生成建设蓝图；重新选区会清掉本规划器上次未施工的规划和旧叠层，保留已建成设备和其他规划。
 
 ## 使用方法
 
 1. 按 **Ctrl+M** 或点击规划器快捷按钮。
-2. 拖动框选资源；使用 **Shift + 鼠标左键拖动** 添加选区。
+2. 点击 **选区** 后拖动框选资源；使用 **Shift + 鼠标左键拖动** 添加选区。再次点击选区或按 **Q** 退出工具。
 3. 查看预览，选择设备并修改配置。
-4. 点击 **应用** 放置建设蓝图，或点击 **取消预览** 丢弃草稿。
+4. 需要时点击 **输出** 设置传送带出口并旋转；再次点击或按 **Q** 退出，保留出口位置。
+5. 点击 **应用** 放置建设蓝图，或点击 **取消预览** 丢弃草稿。
 
 ## 兼容说明
 

@@ -21,7 +21,7 @@
 
 需要 **Factorio 2.1**。《太空时代》为可选内容；大矿机、额外资源和寒冷星球功能需要对应的游戏内容。
 
-将 `resource-outpost-planner_1.9.3.zip` 放入 Factorio 的 mods 目录；也可将仓库放进名为 `resource-outpost-planner` 的文件夹。启用模组并重启游戏。
+将 `resource-outpost-planner_1.9.4.zip` 放入 Factorio 的 mods 目录；也可将仓库放进名为 `resource-outpost-planner` 的文件夹。启用模组并重启游戏。
 
 本独立发行版使用内部标识 `resource-outpost-planner`。启用前请停用原版 Mining Patch Planner，或此前沿用其内部标识的安装包。存档中已有建筑会保留；原规划器的数据和未应用预览不会自动导入，切换后请重新配置规划器。
 

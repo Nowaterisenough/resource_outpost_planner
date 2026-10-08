@@ -1,4 +1,21 @@
 ---------------------------------------------------------------------------------------------------
+Version: 1.9.4
+Date: 2026-10-08
+  Features:
+    - Activate resource selection and belt output placement explicitly from the footer.
+    - Preview original-size blueprint artwork with green placement colors and red blocked-position diagnostics.
+    - Arrange continuous beacon rows on both sides of mining drill columns, with separate beacon module choices.
+  Changes:
+    - Unify mining and oil equipment, module, quality and terrain controls in aligned columns.
+    - Use compact quality icons below equipment; omit quality controls for belts and pipes.
+    - Combine placement reports and belt load overlays into one Statistics option.
+    - Use matching rectangular footer buttons, with a green Apply button.
+  Bugfixes:
+    - Route parallel belt outputs with fewer bends and obstacle detours, preserving rotation after target clicks.
+    - Calculate lane load from native module effects, mining productivity, resource yields and belt stack capacity.
+    - Clear the latest unfinished plan and old overlays when reselecting resources, retaining completed buildings.
+    - Respect independent cliff avoidance/removal and water, lava or lightning-pool avoidance/filling settings.
+---------------------------------------------------------------------------------------------------
 Version: 1.9.3
 Date: 2026-10-07
   Changes:
