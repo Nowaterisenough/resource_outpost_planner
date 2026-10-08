@@ -12,6 +12,7 @@ Plan mining patches and oil outposts in one interface. Select resources, inspect
 - Place continuous beacon rows on both sides of drill columns, with independent drill and beacon modules.
 - Choose cliff avoidance or removal, and water/lava/lightning-pool avoidance or filling. Unsafe connections stay visible in red so you can adjust the plan.
 - Position belt outputs with a native blueprint cursor; rotate with **R / Shift+R**. Connections favor aligned runs and fewer bends.
+- Enable **Balance Outputs** when needed for railway loading. It starts disabled with **8** output belts for four cargo wagons loaded on both sides; choose 1 to 32 outputs and position the balancer with **Output**. Blocked sections turn red.
 - Select equipment qualities with compact icons below each picker. **Statistics** combines placement reports and belt load overlays.
 - Apply the plan to place construction ghosts, or cancel the current preview. Reselecting resources clears the planner's latest unfinished plan and old overlays, retaining completed buildings and other plans.
 
@@ -33,6 +34,8 @@ Disable the original **Mining Patch Planner**, or an earlier fork distributed un
 
 Maintained by **Nowaterisenough**. Based on **Mining Patch Planner** by **Rimbas**, with oil planning from **Oil Outpost Planner 1.7.0** by **Coppermine**. Distributed under the **MIT License**, with both original copyright notices retained.
 
+Belt balancer layouts use **Raynquist's** designs from [Dogmai's balancer collection](https://github.com/dogmaisea/factorio-balancers), retaining splitter priorities and underground belt connections.
+
 [Source code and issue tracker](https://github.com/Nowaterisenough/resource_outpost_planner)
 
 ---
@@ -51,6 +54,7 @@ Maintained by **Nowaterisenough**. Based on **Mining Patch Planner** by **Rimbas
 - 在矿机两侧摆放连续整排插件塔，设备内插件和塔内插件分别配置。
 - 悬崖可选择避让或拆除，水、岩浆、雷池可选择避让或填补；无法连通的位置保留红色预览，方便调整。
 - 用原生蓝图光标放置传送带出口，按 **R / Shift+R** 旋转；连接尽量规整，减少弯折。
+- 接火车时可开启 **均分输出**：默认关闭，路数默认 **8**，适合 4 节货厢双面上货；可修改为 1 至 32 路，用 **输出** 放置均分器，受阻部分显示红色。
 - 品质使用设备下方的小图标选择；**统计** 合并放置报告和传送带负载显示。
 - 点击应用后才生成建设蓝图；重新选区会清掉本规划器上次未施工的规划和旧叠层，保留已建成设备和其他规划。
 
@@ -71,5 +75,7 @@ Maintained by **Nowaterisenough**. Based on **Mining Patch Planner** by **Rimbas
 ## 来源与授权
 
 由 **Nowaterisenough** 维护，基于 **Rimbas** 的 **Mining Patch Planner**，集成 **Coppermine** 的 **Oil Outpost Planner 1.7.0** 规划引擎。采用 **MIT 许可证**，保留两位原作者的版权声明。
+
+传送带均分布局采用 [Dogmai 均分蓝图集](https://github.com/dogmaisea/factorio-balancers)中的 **Raynquist** 设计，保留分流器优先级和地下带连接。
 
 [源码与问题反馈](https://github.com/Nowaterisenough/resource_outpost_planner)
