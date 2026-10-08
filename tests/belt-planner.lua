@@ -567,4 +567,47 @@ do
 	cases=cases+1
 end
 
+do
+	local spec,data=fixture()
+	local saved_algorithm=algorithm
+	data.gui={}
+	local cleanups=0
+	algorithm={
+		cleanup_last_state=function(d) cleanups=cleanups+1; d.last_state=nil end,
+		clear_selection=function(d) d.selection_collection={} end,
+		select_resource_layout=function() end,
+	}
+	local function resource(x)
+		return {valid=true,type="resource",name="iron-ore",surface=spec.surface,position={x=x,y=0.5}}
+	end
+	local function marker()
+		local object={valid=true}
+		object.destroy=function() object.valid=false end
+		return object
+	end
+	local first,second=resource(0.5),resource(1.5)
+	local old_marker,pending_marker=marker(),marker()
+	data.preview={player_index=1,surface=spec.surface,revision=4,resources={first},renderings={old_marker}}
+	data.last_state={_collected_ghosts={}}
+	local previous=data.preview
+	local other_task={preview_only=true,player={index=2}}
+	storage.tasks={{preview_only=true,player=spec.player,_render_objects={pending_marker}},other_task}
+	local event={player_index=1,surface=spec.surface,entities={}}
+	assert(not preview.select(event,false) and data.preview==previous and cleanups==0,"empty selection clears the previous plan")
+	previous.applying=true;event.entities={second}
+	assert(not preview.select(event,false) and cleanups==0,"selection interrupts Apply")
+	previous.applying=false
+	assert(input_mode.select(data,spec.player))
+	assert(preview.select(event,false) and cleanups==1 and not data.last_state,"reselection keeps the previous unfinished plan")
+	assert(#data.preview.resources==1 and data.preview.resources[1]==second,"normal selection retains old resources")
+	assert(not old_marker.valid and not pending_marker.valid,"reselection leaks old preview or pending task renderings")
+	assert(#storage.tasks==1 and storage.tasks[1]==other_task,"reselection cancels another player's task")
+	assert(data.input_mode=="select" and spec.player.cursor_stack.name=="mining-patch-planner","reselection exits the selection tool")
+	event.entities={first,second}
+	assert(preview.select(event,true) and #data.preview.resources==2,"Shift selection fails to append or deduplicate resources")
+	preview.cancel(data)
+	storage.tasks={}
+	algorithm=saved_algorithm
+	cases=cases+3
+end
 print("Belt planner OK: "..cases.." route and preview cases")

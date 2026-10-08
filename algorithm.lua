@@ -522,7 +522,7 @@ function algorithm.cleanup_last_state(player_data)
 	
 	if type(state._collected_ghosts) == "table" then
 		for _, ghost in pairs(state._collected_ghosts) do
-			if ghost.valid then
+			if ghost.valid and (ghost.type == "entity-ghost" or ghost.type == "tile-ghost") then
 				ghost.order_deconstruction(force, ply)
 			end
 		end

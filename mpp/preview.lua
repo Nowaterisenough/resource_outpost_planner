@@ -113,6 +113,8 @@ function preview.select(event,append)
 	add(event.entities)
 	if #selected==0 then return false end
 	preview.cancel(data,false,true)
+	-- Remove our last unfinished plan before it can obstruct the new preview.
+	algorithm.cleanup_last_state(data)
 	algorithm.clear_selection(data)
 	algorithm.select_resource_layout(data,selected)
 	data.preview={player_index=event.player_index,surface=event.surface,resources=selected,revision=0,renderings={}}
