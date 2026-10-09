@@ -56,6 +56,21 @@ check(machine.ordered and #state._deconstruction_orders==2, "facility demolition
 terrain.deconstruct(state, {})
 check(#state._deconstruction_orders==2, "repeated footprints duplicate demolition orders")
 
+local own_rail,other_rail,own_stock=entity("entity-ghost"),entity("entity-ghost"),entity("entity-ghost")
+for i,ghost in ipairs{own_rail,other_rail,own_stock} do
+	ghost.unit_number=1000+i;ghost.ghost_prototype=ghost.prototype
+end
+local building={player={force=force},deconstruction_choice=false,_collected_ghosts={own_rail},
+	surface={find_entities_filtered=function() return {own_rail,other_rail} end}}
+terrain.deconstruct(building,{})
+check(not own_rail.ordered and other_rail.ordered,"stock placement demolishes its own rail ghost")
+check(#building._deconstruction_orders==1,"owned ghost added to demolition Undo")
+building._collected_ghosts[#building._collected_ghosts+1]=own_stock
+building.surface.find_entities_filtered=function() return {own_rail,other_rail,own_stock} end
+terrain.deconstruct(building,{})
+check(not own_stock.ordered,"ownership cache misses a newly created ghost")
+check(#building._deconstruction_orders==1,"repeated station placement duplicates demolition")
+
 package.loaded["util"] = {}
 package.loaded["mpp.preview"] = {}
 defines = {events={on_player_created=1,on_player_removed=2}}

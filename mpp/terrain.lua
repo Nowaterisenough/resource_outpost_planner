@@ -43,8 +43,20 @@ function terrain.deconstruct(state, area)
 	if state.preview_only then return end
 	local player = state.player
 	state._deconstruction_orders = state._deconstruction_orders or {}
+	-- Rails and rolling stock share space; demolition would instantly remove our own rail ghosts.
+	local collected=state._collected_ghosts or {}
+	local owned=state._owned_ghost_units
+	if not owned or state._owned_ghost_list~=collected or #collected<(state._owned_ghost_scan_length or 0) then
+		owned={};state._owned_ghost_units=owned
+		state._owned_ghost_list=collected;state._owned_ghost_scan_length=0
+	end
+	for i=(state._owned_ghost_scan_length or 0)+1,#collected do
+		local ghost=collected[i]
+		if ghost.valid and ghost.type=="entity-ghost" and ghost.unit_number then owned[ghost.unit_number]=true end
+	end
+	state._owned_ghost_scan_length=#collected
 	for _, entity in pairs(state.surface.find_entities_filtered{area=area, force={player.force, "neutral"}}) do
-		if entity.valid and not ignored[entity.type] and not terrain.blocks_entity(entity, state) then
+		if entity.valid and not owned[entity.unit_number] and not ignored[entity.type] and not terrain.blocks_entity(entity, state) then
 			local proto = entity.type == "entity-ghost" and entity.ghost_prototype or entity.prototype
 			local layers = proto.collision_mask.layers
 			if entity.type == "cliff" or layers.object or layers.player or layers.train then
