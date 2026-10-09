@@ -5,6 +5,8 @@ local cache = setmetatable({}, {__mode="k"})
 local floor, ceil = math.floor, math.ceil
 local ignored_types = {resource=true, character=true, unit=true, corpse=true,
 	["item-entity"]=true, ["entity-ghost"]=false, ["tile-ghost"]=true}
+local hazard_tiles
+local geometry_cache={}
 
 local function key(x, y) return x..","..y end
 
@@ -22,9 +24,17 @@ local function overlap(a, b)
 end
 
 function obstacles.collect(surface, area, ignored, choices)
-	local index = {tiles={}, cells={}, boxes={}}
+	local index = {tiles={}, cells={}, boxes={}, boxes_by_cell={}}
 	local function cell(x, y) index.cells[key(x,y)] = {x=x, y=y} end
-	for _, tile in pairs(surface.find_tiles_filtered{area=area}) do
+	if not hazard_tiles and prototypes.tile then
+		local names={}
+		for name,proto in pairs(prototypes.tile) do
+			if terrain.blocked_tile{name=name,prototype=proto} then names[#names+1]=name end
+		end
+		if #names>0 then table.sort(names);hazard_tiles=names end
+	end
+	-- Filter in the engine instead of materializing every grass tile in Lua.
+	for _, tile in pairs(surface.find_tiles_filtered{area=area,name=hazard_tiles}) do
 		if (not choices and terrain.blocked_tile(tile)) or (choices and terrain.blocks_tile(tile, choices)) then
 			local pos = tile.position
 			index.tiles[key(pos.x,pos.y)] = true
@@ -40,6 +50,13 @@ function obstacles.collect(surface, area, ignored, choices)
 			if selected and (entity.type == "cliff" or layers.object or layers.player or layers.train) then
 				local box = entity.bounding_box
 				index.boxes[#index.boxes + 1] = box
+				for x=floor(box.left_top.x),ceil(box.right_bottom.x)-1 do
+					for y=floor(box.left_top.y),ceil(box.right_bottom.y)-1 do
+						local k=key(x,y)
+						local bucket=index.boxes_by_cell[k] or {}
+						index.boxes_by_cell[k]=bucket;bucket[#bucket+1]=box
+					end
+				end
 				for x=floor(box.left_top.x + 0.001),ceil(box.right_bottom.x - 0.001)-1 do
 					for y=floor(box.left_top.y + 0.001),ceil(box.right_bottom.y - 0.001)-1 do cell(x,y) end
 				end
@@ -55,31 +72,53 @@ function obstacles.blocked_box(index, box)
 			if index.tiles[key(x,y)] then return true end
 		end
 	end
-	for _, other in ipairs(index.boxes) do if overlap(box, other) then return true end end
+	if index.boxes_by_cell then
+		for x=floor(box.left_top.x),ceil(box.right_bottom.x)-1 do
+			for y=floor(box.left_top.y),ceil(box.right_bottom.y)-1 do
+				local bucket=index.boxes_by_cell[key(x,y)]
+				if bucket then for _,other in ipairs(bucket) do if overlap(box,other) then return true end end end
+			end
+		end
+	else
+		for _, other in ipairs(index.boxes) do if overlap(box, other) then return true end end
+	end
 	return false
 end
 
 function obstacles.entity_box(name, position, direction)
 	local proto = prototypes.entity[name]
-	local box = proto.collision_box
-	local x1,y1,x2,y2 = box.left_top.x,box.left_top.y,box.right_bottom.x,box.right_bottom.y
-	if direction == defines.direction.east then x1,y1,x2,y2 = -y2,x1,-y1,x2
-	elseif direction == defines.direction.south then x1,y1,x2,y2 = -x2,-y2,-x1,-y1
-	elseif direction == defines.direction.west then x1,y1,x2,y2 = y1,-x2,y2,-x1 end
-	local px,py = position.x,position.y
-	if not proto.has_flag("placeable-off-grid") then
-		local width,height = proto.tile_width,proto.tile_height
-		if direction == defines.direction.east or direction == defines.direction.west then width,height = height,width end
-		-- Ghost creation snaps odd-sized buildings to tile centers and even sizes to edges.
-		local ox,oy = (width % 2)/2,(height % 2)/2
-		px,py = floor(px+0.5-ox)+ox,floor(py+0.5-oy)+oy
+	local k=name..":"..tostring(direction)
+	local shape=geometry_cache[k]
+	if not shape or shape.prototype~=proto then
+		local box=proto.collision_box
+		local x1,y1,x2,y2=box.left_top.x,box.left_top.y,box.right_bottom.x,box.right_bottom.y
+		local width,height=proto.tile_width,proto.tile_height
+		if direction==defines.direction.east then x1,y1,x2,y2=-y2,x1,-y1,x2
+		elseif direction==defines.direction.south then x1,y1,x2,y2=-x2,-y2,-x1,-y1
+		elseif direction==defines.direction.west then x1,y1,x2,y2=y1,-x2,y2,-x1 end
+		if direction==defines.direction.east or direction==defines.direction.west then width,height=height,width end
+		shape={prototype=proto,x1=x1,y1=y1,x2=x2,y2=y2,ox=(width%2)/2,oy=(height%2)/2,
+			off_grid=proto.has_flag("placeable-off-grid")}
+		geometry_cache[k]=shape
 	end
-	return {left_top={x=px+x1,y=py+y1},right_bottom={x=px+x2,y=py+y2}}
+	local px,py = position.x,position.y
+	if not shape.off_grid then
+		-- Ghost creation snaps odd-sized buildings to tile centers and even sizes to edges.
+		px,py = floor(px+0.5-shape.ox)+shape.ox,floor(py+0.5-shape.oy)+shape.oy
+	end
+	return {left_top={x=px+shape.x1,y=py+shape.y1},right_bottom={x=px+shape.x2,y=py+shape.y2}}
 end
 
 function obstacles.get(state)
 	local saved = cache[state]
-	if saved and saved.tick == game.tick and saved.margin >= (state._belt_search_margin or 0) then return saved.index end
+	local search_area=state._belt_search_area
+	if saved and saved.tick == game.tick then
+		if search_area then
+			local area=saved.area
+			if area[1][1]<=search_area[1][1] and area[1][2]<=search_area[1][2]
+				and area[2][1]>=search_area[2][1] and area[2][2]>=search_area[2][2] then return saved.index end
+		elseif not saved.explicit_area and saved.margin >= (state._belt_search_margin or 0) then return saved.index end
+	end
 	local c = state.coords
 	local margin = (state.miner and state.miner.area or 5) + 32
 	local x1,y1,x2,y2 = c.x1,c.y1,c.x2,c.y2
@@ -102,9 +141,9 @@ function obstacles.get(state)
 			if entity.valid and entity.unit_number then ignored[entity.unit_number] = true end
 		end
 	end
-	local index = obstacles.collect(state.surface,
-		{{x1-margin,y1-margin},{x2+margin,y2+margin}}, ignored, state)
-	cache[state] = {tick=game.tick,index=index,margin=margin}
+	local area=search_area or {{x1-margin,y1-margin},{x2+margin,y2+margin}}
+	local index = obstacles.collect(state.surface,area,ignored,state)
+	cache[state] = {tick=game.tick,index=index,margin=margin,area=area,explicit_area=search_area~=nil}
 	return index
 end
 
