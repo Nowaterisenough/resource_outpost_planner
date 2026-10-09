@@ -88,7 +88,7 @@ local function verify(state,specs)
 		assert(piece.quality=="legendary","belt quality lost")
 		by_position[k]=piece
 	end
-	for _,source in ipairs(state.belt_specification) do
+	for source_index,source in ipairs(state.belt_specification) do
 		local node=by_position[(source.x_start-1)..","..source.y]
 		assert(node,"source disconnected")
 		local seen={}
@@ -101,7 +101,10 @@ local function verify(state,specs)
 			local next=by_position[(node.grid_x+delta.x)..","..(node.grid_y+delta.y)]
 			if not next then
 				assert(node.direction==state.belt_direction,"wrong output direction")
-				if node.direction==N then
+				if state.belt_input_targets then
+					local destination=state.belt_input_targets[source_index]
+					assert(node.grid_x==destination.x and node.grid_y==destination.y,"route misses the balancer input")
+				elseif node.direction==N then
 					assert(node.grid_y==state.belt_y and node.grid_x>=state.belt_x
 						and node.grid_x<state.belt_x+state.belt_specification.count,"route misses the output band")
 				elseif node.direction==S then
@@ -224,6 +227,36 @@ local box=obstacles.entity_box("electric-mining-drill",{x=-3,y=4},N)
 for _,piece in ipairs(err) do
 	local pos=util.revert_world(state.coords.gx,state.coords.gy,"west",piece.grid_x,piece.grid_y,30,30)
 	assert(not obstacles.blocked_box({tiles={},boxes={box}},obstacles.entity_box(piece.name,{x=pos[1],y=pos[2]},piece.direction)),"route enters planned miner")
+end
+cases=cases+1
+
+spec=fixture("west",1)
+state=assert(planner.create_state(spec,target(spec,-12,5,W),{}))
+state.planned={}
+for y=-28,28 do state.planned[#state.planned+1]={name="transport-belt",grid_x=0,grid_y=y,direction=N} end
+ok,err=planner.plan(state)
+assert(ok,"ingress cannot detour around a station wider than the endpoint search window")
+verify(state,err)
+local around=false
+for _,piece in ipairs(err) do
+	assert(piece.grid_x~=0 or math.abs(piece.grid_y)>28,"ingress enters the planned station")
+	if math.abs(piece.grid_y)>28 then around=true end
+end
+assert(around,"station ingress did not reach the outside corridor")
+cases=cases+1
+
+spec=fixture("west",3)
+state=assert(planner.create_state(spec,target(spec,65,-42,W),{}))
+state.belt_input_targets={{x=87,y=-52},{x=87,y=-51},{x=87,y=-50}}
+state.planned={}
+for x=60,86 do for y=-85,-42 do
+	state.planned[#state.planned+1]={name="transport-belt",grid_x=x,grid_y=y,direction=N}
+end end
+ok,err=planner.plan(state)
+assert(ok,"parallel ingress is trapped by the compact station's inward-facing port band")
+verify(state,err)
+for _,piece in ipairs(err) do
+	assert(piece.grid_x<60 or piece.grid_x>86 or piece.grid_y<-85 or piece.grid_y>-42,"ingress crosses the compact station")
 end
 cases=cases+1
 

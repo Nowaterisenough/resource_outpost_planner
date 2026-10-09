@@ -325,7 +325,11 @@ local function route_bundle(state, reverse, negotiate)
 		for x=floor(box.left_top.x+0.001),math.ceil(box.right_bottom.x-0.001)-1 do
 			for y=floor(box.left_top.y+0.001),math.ceil(box.right_bottom.y-0.001)-1 do
 				local gx,gy=grid_position(state,{x=x+0.5,y=y+0.5})
-				occupied[key(floor(gx+0.5),floor(gy+0.5))]=true
+				gx,gy=floor(gx+0.5),floor(gy+0.5)
+				occupied[key(gx,gy)]=true
+				-- Allow ingress to go around the full station, even when its ports sit inside its bounds.
+				x1,y1=min(x1,gx),min(y1,gy)
+				x2,y2=max(x2,gx),max(y2,gy)
 			end
 		end
 	end
@@ -417,8 +421,10 @@ local function route_bundle(state, reverse, negotiate)
 				local above=state.belt_y<spec[1].y
 				local rank=above and i or spec.count-i+1
 				local column=source_left-rank-1
-				local row=above and min(top,spec[1].y)-rank or max(state.belt_y,spec[spec.count].y)+rank
-				local far_column=max(state.belt_x+1,source_left)+rank
+				local outer_top=state.belt_input_targets and y1 or top
+				local outer_bottom=state.belt_input_targets and y2 or state.belt_y
+				local row=above and min(top,spec[1].y,outer_top)-rank or max(state.belt_y,spec[spec.count].y,outer_bottom)+rank
+				local far_column=max(state.belt_x+1,source_left,state.belt_input_targets and x2+1 or state.belt_x+1)+rank
 				route=straight_segments({{x=start.x-1,y=start.y},{x=column,y=start.y},
 					{x=column,y=row},{x=far_column,y=row},{x=far_column,y=approach.y},approach},allowed)
 			end
