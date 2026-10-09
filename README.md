@@ -79,6 +79,8 @@ Run `lua tests/output-balancer.lua` to verify distribution through the generated
 
 Run `lua tests/train-station.lua` to check 256 train/side configurations, six-chest loading geometry, pole coverage, underground pairing and station transforms.
 
+Run `lua tests/obstacles.lua` to check filtered terrain queries, spatial collision indexing and cached placement geometry. See [output performance measurements](docs/output-performance.md) for the isolated native benchmark and before/after results.
+
 Run `lua tests/beacons.lua` to check beacon selection, permitted modules, qualities, profile attenuation, module requests, per-drill coverage differences and merged belt loads. `lua tests/beacon-rows.lua` checks both flanking rows, shared rows, continuity, rotated collision footprints, pipe channels, ore coverage, legacy density migration and blocked-row diagnostics.
 
 Validated in Factorio 2.1.21: robot-safe previews, live settings, exact mining placements, big drills, oil networks, terrain filling, obstacle avoidance, cancellation, undo and applying a preview after save/reload.
