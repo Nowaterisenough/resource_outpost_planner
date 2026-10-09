@@ -73,6 +73,10 @@ local terrain = require("mpp.terrain")
 ---@field belt_planner_choice boolean
 ---@field output_balance_choice boolean
 ---@field output_belt_count_choice number
+---@field output_station_choice boolean
+---@field output_locomotive_count_choice number
+---@field output_wagon_count_choice number
+---@field output_loading_side_choice "single"|"double"
 ---@field belt_merge_choice boolean
 
 ---@class PlayerGui
@@ -159,6 +163,10 @@ conf.default_config = {
 		belt_planner_choice = false,
 		output_balance_choice = false,
 		output_belt_count_choice = 8,
+		output_station_choice = false,
+		output_locomotive_count_choice = 2,
+		output_wagon_count_choice = 4,
+		output_loading_side_choice = "double",
 		belt_merge_choice = false,
 		balancer_choice = false,
 

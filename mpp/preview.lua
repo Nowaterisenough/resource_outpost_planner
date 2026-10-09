@@ -3,6 +3,7 @@ local belt_planner = require("mpp.belt_planner")
 local common = require("layouts.common")
 local diagnostics = require("mpp.preview_diagnostics")
 local input_mode = require("mpp.input_mode")
+local output_preview = require("mpp.output_preview")
 
 local preview = {}
 local render
@@ -35,8 +36,19 @@ function preview.update_gui(data)
 	ui.preview_apply.enabled=draft~=nil and draft.ready==true and not draft.applying
 	ui.preview_cancel.enabled=draft~=nil and not draft.applying
 	if ui.output_balance_toggle and ui.output_balance_toggle.valid then
-		ui.output_balance_toggle.enabled=not (draft and draft.applying)
-		ui.output_count.enabled=ui.output_balance_toggle.enabled and data.choices.output_balance_choice==true
+		local enabled=not (draft and draft.applying)
+		local train=data.choices.output_station_choice==true
+		ui.output_balance_toggle.enabled=enabled and not train
+		ui.output_count.enabled=enabled and not train and data.choices.output_balance_choice==true
+		if ui.output_station_toggle and ui.output_station_toggle.valid then
+			ui.output_station_toggle.enabled=enabled
+			for _,field in pairs(ui.output_train_fields) do field.enabled=enabled and train end
+			for side,button in pairs(ui.output_loading_buttons) do
+				button.enabled=enabled and train
+				button.style=side==(data.choices.output_loading_side_choice or "double") and "mpp_tool_button_active" or "button"
+				button.style.width=108;button.style.height=28
+			end
+		end
 	end
 	ui.undo_button.enabled=draft~=nil or (data.last_state and #data.last_state._collected_ghosts>0) or false
 	ui.preview_apply.tooltip=draft and draft.error
@@ -72,7 +84,10 @@ end
 function preview.request(data)
 	local draft=data.preview
 	if not draft or draft.applying then return end
-	if data.choices.output_balance_choice and data.output_count_invalid then
+	if data.choices.output_station_choice and data.output_station_count_invalid then
+		preview.invalidate(data,{"mpp.output_station_count_error",8,16});return
+	end
+	if not data.choices.output_station_choice and data.choices.output_balance_choice and data.output_count_invalid then
 		preview.invalidate(data,{"mpp.output_balance_count_error",32});return
 	end
 	if not data.choices.belt_planner_choice then
@@ -141,26 +156,37 @@ function preview.tick()
 		local draft=data.preview
 		if draft and draft.refresh_at and game.tick>=draft.refresh_at then
 			draft.refresh_at=nil
-			local resources={}
-			for _,entity in pairs(draft.resources) do if entity.valid then resources[#resources+1]=entity end end
-			draft.resources=resources
-			local state,err
-			if #resources>0 and draft.surface.valid then
-				local ok
-				ok,state,err=pcall(algorithm.on_player_selected_area,{
-					player_index=draft.player_index,entities=resources,surface=draft.surface,
-					preview_only=true,preview_revision=draft.revision,
-					belt_target=data.choices.belt_planner_choice and draft.belt_target or nil,
-				})
-				if not ok then log("Preview validation failed: "..tostring(state)); state=nil; err={"mpp.preview_failed"} end
-			end
-			if state then storage.tasks[#storage.tasks+1]=state
-			else
-				draft.error=err or {"mpp.msg_miner_err_0"}
-				draft.specs={}
-				draft.issues=diagnostics.resource_issues(resources,draft.error)
+			if draft.output_only then
+				local ok,err=pcall(output_preview.refresh,data)
+				if not ok then log("Output preview validation failed: "..tostring(err));draft.ready=false;draft.error={"mpp.preview_failed"} end
 				render(data,draft)
 				preview.update_gui(data)
+				if data.input_mode=="output" then
+					local spec=input_mode.output_specification(data,game.get_player(draft.player_index))
+					if spec then belt_planner.update_blueprint(game.get_player(draft.player_index),spec) end
+				end
+			else
+				local resources={}
+				for _,entity in pairs(draft.resources) do if entity.valid then resources[#resources+1]=entity end end
+				draft.resources=resources
+				local state,err
+				if #resources>0 and draft.surface.valid then
+					local ok
+					ok,state,err=pcall(algorithm.on_player_selected_area,{
+						player_index=draft.player_index,entities=resources,surface=draft.surface,
+						preview_only=true,preview_revision=draft.revision,
+						belt_target=data.choices.belt_planner_choice and draft.belt_target or nil,
+					})
+					if not ok then log("Preview validation failed: "..tostring(state)); state=nil; err={"mpp.preview_failed"} end
+				end
+				if state then storage.tasks[#storage.tasks+1]=state
+				else
+					draft.error=err or {"mpp.msg_miner_err_0"}
+					draft.specs={}
+					draft.issues=diagnostics.resource_issues(resources,draft.error)
+					render(data,draft)
+					preview.update_gui(data)
+				end
 			end
 		end
 	end
@@ -236,6 +262,10 @@ function preview.apply(data)
 	if not draft or not draft.ready or draft.applying or draft.refresh_at then return false end
 	local player=game.get_player(draft.player_index)
 	if not player or player.surface~=draft.surface then return false end
+	if draft.output_only then
+		if output_preview.apply(data) then input_mode.idle(data,player);preview.cancel(data);return true end
+		render(data,draft);preview.update_gui(data);return false
+	end
 	input_mode.idle(data, player)
 	local resources={}
 	for _,entity in ipairs(draft.resources) do if entity.valid then resources[#resources+1]=entity end end
@@ -257,5 +287,12 @@ function preview.applied(state)
 	local data=storage.players[state.player.index]
 	if data.preview then data.preview.applying=false; preview.cancel(data) end
 end
+
+input_mode.begin_output_preview=function(data,player)
+	local begun=output_preview.begin(data,player)
+	if begun then preview.update_gui(data) end
+	return begun
+end
+input_mode.invalidate_output=preview.invalidate
 
 return preview

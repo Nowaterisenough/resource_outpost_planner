@@ -643,4 +643,59 @@ do
 	algorithm=saved_algorithm
 	cases=cases+3
 end
+do
+	local station=require("mpp.train_station")
+	local original_geometry=station.geometry
+	local layout={locomotives=2,wagons=4,outputs=8,specs={
+		{name="straight-rail",x=0,y=0,direction=E,station_rail=true},
+		{name="train-stop",x=0,y=-2,direction=W,station_control=true},
+		{name="locomotive",x=3,y=0,direction=W,station_stock=true},
+	}}
+	station.geometry=function() return layout end
+	local spec,data=fixture("west",3)
+	spec.station_choices={}
+	local stack=spec.player.cursor_stack
+	local set_entities=stack.set_blueprint_entities
+	stack.set_blueprint_entities=function(entities)
+		set_entities(entities)
+		if #entities==0 then
+			stack.blueprint_snap_to_grid=nil;stack.blueprint_absolute_snapping=false
+			stack.blueprint_position_relative_to_grid=nil
+		end
+	end
+	local function snapped()
+		local grid,offset=stack.blueprint_snap_to_grid,stack.blueprint_position_relative_to_grid
+		return grid and grid.x==2 and grid.y==2 and stack.blueprint_absolute_snapping
+			and offset and offset.x==0 and offset.y==0
+	end
+	assert(planner.give_blueprint({player=spec.player},spec) and snapped(),"station cursor starts without rail grid alignment")
+	for _,base in ipairs{N,E,S,W} do
+		data.belt_cursor_direction=base
+		planner.update_blueprint(spec.player,spec)
+		for _,action in ipairs{"click","rotate","reverse","horizontal","vertical"} do
+			if action=="click" then planner.take_cursor_target(spec.player,{position={x=-10.2,y=10.7},direction=N})
+			elseif action=="rotate" then planner.rotate_cursor(spec.player,{cursor_direction=N},false)
+			elseif action=="reverse" then planner.rotate_cursor(spec.player,{cursor_direction=N},true)
+			else planner.flip_cursor(spec.player,action=="horizontal") end
+			assert(not snapped() and not stack.entities,"test did not reproduce native clearing of snap settings")
+			game.tick=game.tick+1;planner.restore_cursors()
+			assert(snapped() and #stack.entities==#layout.specs,"station restoration loses its absolute rail grid")
+			local expected=station.cursor_entities(layout,data.belt_cursor_direction,data.belt_cursor_mirror)
+			for i,entity in ipairs(stack.entities) do
+				assert(entity.position.x==expected[i].position.x and entity.position.y==expected[i].position.y,"cursor restoration changes the station origin")
+			end
+			cases=cases+1
+		end
+	end
+	planner.take_cursor_target(spec.player,{position={x=10,y=10},direction=N})
+	data.belt_cursor_restore.station=nil
+	game.tick=game.tick+1;planner.restore_cursors()
+	assert(snapped(),"old pending station cursor loses snapping after reload")
+	stack.blueprint_snap_to_grid=nil;stack.blueprint_absolute_snapping=false;stack.blueprint_position_relative_to_grid=nil
+	planner.update_blueprint(spec.player,spec)
+	assert(snapped(),"unchanged layout shortcut retains an already offset cursor")
+	planner.release_cursor(data,spec.player)
+	station.geometry=original_geometry
+	cases=cases+2
+end
 print("Belt planner OK: "..cases.." route and preview cases")

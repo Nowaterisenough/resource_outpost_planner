@@ -1,6 +1,7 @@
 local belt_planner = require("mpp.belt_planner")
 local common = require("layouts.common")
 local output_balancer = require("mpp.output_balancer")
+local train_station = require("mpp.train_station")
 
 local input_mode = {}
 local changing = {}
@@ -23,14 +24,17 @@ end
 
 function input_mode.output_specification(data, player)
 	if data.choices.layout_choice == "oil" then return end
-	if data.choices.output_balance_choice and data.output_count_invalid then return end
+	if data.choices.output_station_choice and (data.output_station_count_invalid or not train_station.valid_choices(data.choices)) then return end
+	if not data.choices.output_station_choice and data.choices.output_balance_choice and data.output_count_invalid then return end
 	local draft = data.preview
 	local spec = draft and draft.belt_specification or nil
 	if not draft then
 		spec = data.last_state and common.create_belt_planner_specification(data.last_state)
 	end
 	if spec and (not player or spec.surface == player.surface) then
-		spec.output_count=data.choices.output_balance_choice and output_balancer.output_count(spec,data.choices) or nil
+		spec.station_choices=data.choices.output_station_choice and train_station.choices(data.choices) or nil
+		spec.output_count=spec.station_choices and train_station.output_count(data.choices)
+			or data.choices.output_balance_choice and output_balancer.output_count(spec,data.choices) or nil
 		return spec
 	end
 end
@@ -74,9 +78,19 @@ end
 function input_mode.output(data, player)
 	local spec = input_mode.output_specification(data, player)
 	if not spec or (data.preview and data.preview.applying) then return false end
+	if not data.preview and data.choices.output_station_choice then
+		if not input_mode.begin_output_preview or not input_mode.begin_output_preview(data,player) then return false end
+		data.choices.belt_planner_choice=true
+		spec=input_mode.output_specification(data,player)
+	end
 	if not data.preview then common.save_belt_specification(data.last_state) end
 	changing[player.index] = true
-	local given = belt_planner.give_blueprint({player=player}, spec) ~= nil
+	local blueprint,err=belt_planner.give_blueprint({player=player},spec)
+	local given=blueprint~=nil
+	if err then
+		player.print(err)
+		if data.preview and input_mode.invalidate_output then input_mode.invalidate_output(data,err) end
+	end
 	if given then data.input_mode = "output" end
 	changing[player.index] = nil
 	input_mode.update_gui(data)

@@ -2,6 +2,7 @@ local mpp_util = require("mpp.mpp_util")
 local render_util = require("mpp.render_util")
 local belt_planner = require("mpp.belt_planner")
 local beacons = require("mpp.beacons")
+local train_station = require("mpp.train_station")
 
 local common = {}
 
@@ -1186,7 +1187,9 @@ function common.create_belt_planner_specification(state)
 		direction_choice = state.direction_choice,
 		belt_choice = state.belt_choice,
 		belt_quality_choice = state.belt_quality_choice,
-		output_count = state.output_balance_choice and state.output_belt_count_choice or nil,
+		output_count = state.output_station_choice and train_station.output_count(state)
+			or state.output_balance_choice and state.output_belt_count_choice or nil,
+		station_choices = state.output_station_choice and train_station.choices(state) or nil,
 		count = 0,
 		ungrouped = true,
 		_renderables = {},

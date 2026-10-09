@@ -11,12 +11,13 @@ local preview = require("mpp.preview")
 local beacons = require("mpp.beacons")
 local output_balancer = require("mpp.output_balancer")
 local belt_planner = require("mpp.belt_planner")
+local train_station = require("mpp.train_station")
 local conf = require("configuration")
 
 local layouts = algorithm.layouts
 
 local gui = {}
-local workflow_version = 11
+local workflow_version = 13
 
 local direction_sprites = {
 	north = "virtual-signal/up-arrow",
@@ -516,6 +517,7 @@ function gui.create_interface(player)
 	player_gui.mining_transport_root.style.width = equipment_width
 	local pipe_column = create_settings_column(transport_row, secondary_width)
 	player_gui.oil_settings_root = pipe_column.add{type="flow", direction="vertical"}
+	player_gui.output_settings_root=body.add{type="flow",direction="vertical",style="mpp_section"}
 	local power = body.add{type="flow", direction="vertical", style="mpp_section"}
 	power.add{type="label", caption={"mpp.settings_power_label"}, style="subheader_caption_label"}
 	local power_row = power.add{type="flow", direction="horizontal", style="mpp_settings_columns"}
@@ -581,14 +583,6 @@ function gui.create_interface(player)
 	do -- Space belt selection
 		local table_root, section = create_setting_section(player_data, player_gui.mining_transport_root, "space_belt", {column_count=4, secondary=true})
 	end
-	player_gui.output_balance_root=player_gui.mining_transport_root.add{type="flow",direction="horizontal"}
-	player_gui.output_balance_toggle=player_gui.output_balance_root.add{type="checkbox",state=false,
-		caption={"mpp.output_balance_label"},tooltip={"mpp.output_balance_tooltip"},tags={mpp_output_balance=true}}
-	player_gui.output_count=player_gui.output_balance_root.add{type="textfield",text="8",numeric=true,
-		allow_decimal=false,allow_negative=false,lose_focus_on_confirm=true,tags={mpp_output_count=true}}
-	player_gui.output_count.style.width=44
-	player_gui.output_count.style.height=28
-	player_gui.output_balance_root.add{type="label",caption={"mpp.output_balance_unit"}}
 	do -- Shared beacon controls
 		local group = player_gui.beacon_group
 		local row = group.add{type="flow", direction="horizontal"}
@@ -667,12 +661,43 @@ function gui.create_interface(player)
 	do -- Debugging rendering options
 		local table_root, section = create_setting_section(player_data, body, "debugging")
 	end
+	local output=player_gui.output_settings_root
+	output.add{type="label",caption={"mpp.output_settings_label"},style="subheader_caption_label"}
+	local output_row=output.add{type="flow",direction="horizontal"}
+	player_gui.output_tool=output_row.add{type="button",caption={"mpp.icon_belt_planner"},
+		tooltip={"mpp.output_tool_tooltip"},enabled=false,tags={mpp_input_mode="output"}}
+	player_gui.output_balance_root=output_row.add{type="flow",direction="horizontal"}
+	player_gui.output_balance_toggle=player_gui.output_balance_root.add{type="checkbox",state=false,
+		caption={"mpp.output_balance_label"},tooltip={"mpp.output_balance_tooltip"},tags={mpp_output_balance=true}}
+	player_gui.output_count=player_gui.output_balance_root.add{type="textfield",text="8",numeric=true,
+		allow_decimal=false,allow_negative=false,lose_focus_on_confirm=true,tags={mpp_output_count=true}}
+	player_gui.output_count.style.width=44
+	player_gui.output_count.style.height=28
+	player_gui.output_balance_root.add{type="label",caption={"mpp.output_balance_unit"}}
+	player_gui.output_station_toggle=output.add{type="checkbox",state=false,caption={"mpp.output_station_label"},
+		tooltip={"mpp.output_station_tooltip"},tags={mpp_output_station=true}}
+	local train_row=output.add{type="flow",direction="horizontal"}
+	player_gui.output_train_fields={}
+	for _,field in ipairs{{"locomotive",2},{"wagon",4}} do
+		train_row.add{type="label",caption={"mpp.output_"..field[1].."_label"}}
+		local input=train_row.add{type="textfield",text=tostring(field[2]),numeric=true,allow_decimal=false,
+			allow_negative=false,lose_focus_on_confirm=true,tags={mpp_output_train_count=field[1]}}
+		input.style.width=44;input.style.height=28
+		player_gui.output_train_fields[field[1]]=input
+	end
+	local loading_row=output.add{type="flow",direction="horizontal"}
+	loading_row.add{type="label",caption={"mpp.output_loading_label"}}
+	player_gui.output_loading_buttons={}
+	for _,side in ipairs{"single","double"} do
+		local button=loading_row.add{type="button",caption={"mpp.output_loading_"..side},tags={mpp_output_loading=side}}
+		button.style.width=108;button.style.height=28
+		player_gui.output_loading_buttons[side]=button
+	end
 
 	local footer=frame.add{type="flow",direction="vertical",style="mpp_section"}
 	player_gui.preview_status=nil
 	local tools=footer.add{type="flow",direction="horizontal"}
 	player_gui.select_tool=tools.add{type="button",caption={"mpp.tool_select"},tooltip={"mpp.tool_select_tooltip"},tags={mpp_input_mode="select"}}
-	player_gui.output_tool=tools.add{type="button",caption={"mpp.icon_belt_planner"},tooltip={"mpp.choice_belt_planner"},enabled=false,tags={mpp_input_mode="output"}}
 	local actions=footer.add{type="flow",direction="horizontal"}
 	player_gui.preview_apply=actions.add{type="button",style="green_button",caption={"mpp.preview_apply"},enabled=false,tags={mpp_preview_apply=true}}
 	player_gui.preview_cancel=actions.add{type="button",style="button",caption={"mpp.preview_cancel"},enabled=false,tags={mpp_preview_cancel=true}}
@@ -1496,11 +1521,21 @@ local function update_selections(player)
 	update_misc_selection(player)
 	local can_output=not is_oil and algorithm.get_mining_layout(player_data).restrictions.belt_available
 	local choices=player_data.choices
+	if choices.output_station_choice==nil then choices.output_station_choice=false end
+	if not train_station.valid_choices(choices) then
+		choices.output_locomotive_count_choice=2;choices.output_wagon_count_choice=4
+	end
+	choices.output_loading_side_choice=choices.output_loading_side_choice or "double"
 	if choices.output_balance_choice==nil then choices.output_balance_choice=false end
 	if not output_balancer.valid_count(choices.output_belt_count_choice) then choices.output_belt_count_choice=8 end
-	player_data.gui.output_balance_root.visible=can_output
-	player_data.gui.output_balance_toggle.state=choices.output_balance_choice
-	player_data.gui.output_count.text=tostring(choices.output_belt_count_choice)
+	player_data.gui.output_settings_root.visible=can_output
+	player_data.gui.output_station_toggle.state=choices.output_station_choice
+	player_data.gui.output_balance_toggle.state=choices.output_station_choice or choices.output_balance_choice
+	player_data.gui.output_count.text=tostring(choices.output_station_choice and train_station.output_count(choices) or choices.output_belt_count_choice)
+	player_data.gui.output_train_fields.locomotive.text=tostring(choices.output_locomotive_count_choice or 2)
+	player_data.gui.output_train_fields.wagon.text=tostring(choices.output_wagon_count_choice or 4)
+	player_data.output_station_invalid_fields={}
+	player_data.output_station_count_invalid=false
 	player_data.output_count_invalid=false
 	player_data.gui.output_count.enabled=can_output and choices.output_balance_choice
 	update_debugging_selection(player_data)
@@ -1601,6 +1636,14 @@ local function on_gui_click(event)
 	end
 	if evt_ele_tags.mpp_preview_apply then preview.apply(player_data); return end
 	if evt_ele_tags.mpp_preview_cancel then preview.cancel(player_data); return end
+	if evt_ele_tags.mpp_output_loading then
+		player_data.choices.output_loading_side_choice=evt_ele_tags.mpp_output_loading
+		player_data.gui.output_count.text=tostring(train_station.output_count(player_data.choices))
+		preview.request(player_data)
+		preview.update_gui(player_data)
+		if player_data.input_mode=="output" then input_mode.output(player_data,player) end
+		return
+	end
 	if evt_ele_tags.mpp_quality then
 		abort_blueprint_mode(player)
 		local action, value = evt_ele_tags.mpp_quality, evt_ele_tags.value
@@ -1852,7 +1895,7 @@ end
 script.on_event(defines.events.on_gui_elem_changed, on_gui_elem_changed)
 
 local function update_output_cursor(player,data)
-	input_mode.update_gui(data)
+	preview.update_gui(data)
 	if data.input_mode=="output" and not data.preview then
 		local spec=input_mode.output_specification(data,player)
 		if spec then belt_planner.update_blueprint(player,spec) end
@@ -1860,9 +1903,18 @@ local function update_output_cursor(player,data)
 end
 
 script.on_event(defines.events.on_gui_checked_state_changed,function(event)
-	if not event.element.tags.mpp_output_balance then return end
 	local data=storage.players[event.player_index]
 	if not data or (data.preview and data.preview.applying) then return end
+	if event.element.tags.mpp_output_station then
+		data.choices.output_station_choice=event.element.state
+		data.gui.output_balance_toggle.state=event.element.state or data.choices.output_balance_choice
+		data.gui.output_count.text=tostring(event.element.state and train_station.output_count(data.choices) or data.choices.output_belt_count_choice)
+		preview.request(data)
+		update_output_cursor(game.get_player(event.player_index),data)
+		if data.input_mode=="output" then input_mode.output(data,game.get_player(event.player_index)) end
+		return
+	end
+	if not event.element.tags.mpp_output_balance or data.choices.output_station_choice then return end
 	data.choices.output_balance_choice=event.element.state
 	data.gui.output_count.enabled=event.element.state
 	if event.element.state and data.output_count_invalid then
@@ -1873,6 +1925,24 @@ end)
 
 script.on_event(defines.events.on_gui_text_changed, function(event)
 	local data = storage.players[event.player_index]
+	if data and event.element.tags.mpp_output_train_count and not (data.preview and data.preview.applying) then
+		local field=event.element.tags.mpp_output_train_count
+		local value=tonumber(event.element.text)
+		local maximum=field=="locomotive" and train_station.max_locomotives or train_station.max_wagons
+		local valid=value and value==math.floor(value) and value>=1 and value<=maximum
+		data.output_station_invalid_fields=data.output_station_invalid_fields or {}
+		data.output_station_invalid_fields[field]=not valid or nil
+		data.output_station_count_invalid=next(data.output_station_invalid_fields)~=nil
+		if valid then data.choices["output_"..field.."_count_choice"]=value end
+		event.element.tooltip=valid and {"mpp.output_station_tooltip"} or {"mpp.output_station_count_error",8,16}
+		if data.choices.output_station_choice then
+			data.gui.output_count.text=tostring(train_station.output_count(data.choices))
+			preview.request(data)
+			update_output_cursor(game.get_player(event.player_index),data)
+			if not data.output_station_count_invalid and data.input_mode=="output" then input_mode.output(data,game.get_player(event.player_index)) end
+		end
+		return
+	end
 	if data and event.element.tags.mpp_output_count and not (data.preview and data.preview.applying) then
 		local count=tonumber(event.element.text)
 		if output_balancer.valid_count(count) then

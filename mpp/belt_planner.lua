@@ -5,8 +5,10 @@ local EAST, NORTH, SOUTH, WEST, ROTATION = util.directions()
 local floor, min, max, abs = math.floor, math.min, math.max, math.abs
 local terrain = require("mpp.terrain")
 local output_balancer = require("mpp.output_balancer")
+local train_station = require("mpp.train_station")
 local belt_planner = {}
 local blueprint_name = "mpp-blueprint-belt-planner"
+local station_cursor_version = 4
 
 ---@class BeltinatorState : TaskState
 ---@field belt_specification BeltPlannerSpecification
@@ -60,6 +62,28 @@ local function cursor_direction(entities, event)
 	return (direction + (event.direction or NORTH)) % ROTATION
 end
 
+local function configure_station_grid(stack)
+	stack.blueprint_snap_to_grid={x=2,y=2}
+	stack.blueprint_absolute_snapping=true
+	stack.blueprint_position_relative_to_grid={x=0,y=0}
+end
+
+local function station_grid_matches(stack)
+	local grid=stack.blueprint_snap_to_grid
+	local offset=stack.blueprint_position_relative_to_grid
+	return grid and grid.x==2 and grid.y==2 and stack.blueprint_absolute_snapping
+		and offset and offset.x==0 and offset.y==0
+end
+
+local function queue_station_cursor(data,stack)
+	local layout=data.belt_cursor_station_layout
+	if not layout then return end
+	data.belt_cursor_restore={entities=train_station.cursor_entities(layout,data.belt_cursor_direction,
+		data.belt_cursor_mirror),tick=game.tick+1,station=true,label=stack.label}
+	stack.set_blueprint_entities({})
+	script.on_event(defines.events.on_tick,task_runner_handler)
+end
+
 function belt_planner.rotate_cursor(player, event, reverse)
 	local stack = player.cursor_stack
 	if not stack or not stack.valid_for_read or stack.name ~= blueprint_name then return false end
@@ -68,6 +92,7 @@ function belt_planner.rotate_cursor(player, event, reverse)
 	local direction = data.belt_cursor_direction
 		or ((entities[1] and entities[1].direction or NORTH) + (event.cursor_direction or NORTH)) % ROTATION
 	data.belt_cursor_direction = (direction + (reverse and -EAST or EAST)) % ROTATION
+	if data.belt_cursor_station_layout then queue_station_cursor(data,stack) end
 	return true
 end
 
@@ -78,17 +103,44 @@ function belt_planner.flip_cursor(player, horizontal)
 	local entities = stack.get_blueprint_entities() or {}
 	local direction = data.belt_cursor_direction or (entities[1] and entities[1].direction) or NORTH
 	data.belt_cursor_direction = ((horizontal and 0 or SOUTH)-direction) % ROTATION
+	if data.belt_cursor_station_layout then
+		data.belt_cursor_mirror=not data.belt_cursor_mirror
+		queue_station_cursor(data,stack)
+	end
+	return true
 end
 
 function belt_planner.update_blueprint(player, spec)
 	local stack = player.cursor_stack
 	if not stack or not stack.valid_for_read or stack.name ~= blueprint_name then return end
 	local entities = stack.get_blueprint_entities() or {}
+	local data = storage.players[player.index]
+	if spec.station_choices then
+		local layout,err=train_station.geometry(spec.count,spec.station_choices,spec.belt_choice)
+		if not layout then player.print(err);return end
+		local direction=data.belt_cursor_direction or NORTH
+		local signature=table.concat({station_cursor_version,spec.count,layout.locomotives,layout.wagons,layout.outputs,spec.belt_choice,
+			direction,tostring(data.belt_cursor_mirror)},":")
+		if data.belt_cursor_station_signature==signature and #entities==#layout.specs and station_grid_matches(stack) then return stack end
+		data.belt_cursor_station_signature=signature
+		data.belt_cursor_station_layout=layout
+		data.belt_cursor_restore=nil
+		stack.set_blueprint_entities({})
+		stack.set_blueprint_entities(train_station.cursor_entities(layout,direction,data.belt_cursor_mirror))
+		configure_station_grid(stack)
+		stack.label=layout.locomotives.." [item=locomotive] + "..layout.wagons.." [item=cargo-wagon] | "..layout.outputs.." [item="..spec.belt_choice.."]"
+		return stack
+	end
+	if data.belt_cursor_station_layout then
+		stack.set_blueprint_entities({});entities={}
+		stack.blueprint_snap_to_grid=nil
+		stack.blueprint_absolute_snapping=false
+		data.belt_cursor_station_layout=nil;data.belt_cursor_station_signature=nil
+	end
 	local quality = spec.belt_quality_choice or "normal"
 	local count = spec.output_count or spec.count
 	if #entities == count and entities[1].name == spec.belt_choice
 		and (entities[1].quality or "normal") == quality then return stack end
-	local data = storage.players[player.index]
 	local direction = data.belt_cursor_direction or (entities[1] and entities[1].direction) or NORTH
 	entities = {}
 	for i=1,count do
@@ -105,6 +157,10 @@ end
 
 function belt_planner.give_blueprint(state, spec)
 	local player = state.player
+	if spec.station_choices then
+		local layout,err=train_station.geometry(spec.count,spec.station_choices,spec.belt_choice)
+		if not layout then return nil,err end
+	end
 	local stack = player.cursor_stack
 	if not stack or not stack.valid_for_read or stack.name ~= blueprint_name then
 		if not player.clear_cursor() then return end
@@ -123,6 +179,15 @@ function belt_planner.take_cursor_target(player, event)
 	if not stack or not stack.valid_for_read or stack.name ~= blueprint_name then return end
 	local entities = stack.get_blueprint_entities()
 	if not entities or #entities == 0 then return end
+	local data = storage.players[player.index]
+	if data.belt_cursor_station_layout then
+		local direction=((data.belt_cursor_direction or NORTH)+(event.direction or NORTH))%ROTATION
+		data.belt_cursor_direction=direction
+		data.belt_planner_direction=direction
+		queue_station_cursor(data,stack)
+		return {position={x=floor(event.position.x/2)*2+1,y=floor(event.position.y/2)*2+1},
+			direction=direction,mirror=data.belt_cursor_mirror==true}
+	end
 	local direction = cursor_direction(entities, event)
 	local delta = util.direction_coord[direction]
 	if not delta then return end
@@ -130,7 +195,6 @@ function belt_planner.take_cursor_target(player, event)
 	local position = {x=floor(event.position.x+delta.y*half_width)+0.5,
 		y=floor(event.position.y-delta.x*half_width)+0.5}
 	-- Empty the blueprint before construction so blocked clicks also select a target without issuing orders.
-	local data = storage.players[player.index]
 	data.belt_cursor_direction = direction
 	data.belt_planner_direction = direction
 	-- Clearing resets the engine's held rotation, so bake the visible direction into the restored entities.
@@ -155,7 +219,14 @@ function belt_planner.restore_cursors()
 			local stack = player and player.cursor_stack
 			if stack and stack.valid_for_read and stack.name == blueprint_name
 				and not stack.get_blueprint_entities() then
+				local station=pending.station or data.belt_cursor_station_layout
 				stack.set_blueprint_entities(pending.entities)
+				if station then
+					-- Clearing entities also clears the blueprint's absolute rail grid.
+					configure_station_grid(stack)
+					if pending.label then stack.label=pending.label end
+					player.cursor_stack_temporary=true
+				end
 			end
 		end
 	end
@@ -175,7 +246,7 @@ end
 ---@return BeltinatorState?, LocalisedString?
 function belt_planner.create_state(spec, target, choices)
 	local c, pos = spec.coords, target.position
-	local range = choices.output_balance_choice and 512 or 100
+	local range = (choices.output_balance_choice or choices.output_station_choice) and 512 or 100
 	if abs(c.gx + c.w/2 - pos.x) > range or abs(c.gy + c.h/2 - pos.y) > range then
 		return nil, {"mpp.msg_belt_planner_err_too_far"}
 	end
@@ -189,6 +260,10 @@ function belt_planner.create_state(spec, target, choices)
 		belt_target=target, _belt_routing=true,
 		output_balance_choice=choices.output_balance_choice==true,
 		output_belt_count_choice=choices.output_belt_count_choice or output_balancer.default_count,
+		output_station_choice=choices.output_station_choice==true,
+		output_locomotive_count_choice=choices.output_locomotive_count_choice or 2,
+		output_wagon_count_choice=choices.output_wagon_count_choice or 4,
+		output_loading_side_choice=choices.output_loading_side_choice or "double",
 		cliff_mode_choice=choices.cliff_mode_choice, terrain_mode_choice=choices.terrain_mode_choice,
 		space_landfill_choice=choices.space_landfill_choice,
 		avoid_obstacles_choice=choices.avoid_obstacles_choice,
@@ -555,6 +630,7 @@ local function plan_routes(state)
 end
 
 function belt_planner.plan(state)
+	if state.output_station_choice then return train_station.plan(state,plan_routes) end
 	if state.output_balance_choice then return output_balancer.plan(state,plan_routes) end
 	return plan_routes(state)
 end

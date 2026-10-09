@@ -19,7 +19,7 @@ function builder.record_preview(state, spec)
 				and proto.type~="beacon" and proto.type~="pipe" and proto.type~="heat-pipe"
 				and proto.type~="container" and proto.type~="logistic-container" and proto.type~="furnace" end
 		end
-		if not directional[proto.name] then spec.direction=direction.north end
+		if not directional[proto.name] and not spec.station_stock then spec.direction=direction.north end
 		local pos = spec.position
 		local x,y = pos.x or pos[1],pos.y or pos[2]
 		if not proto.has_flag("placeable-off-grid") then
@@ -90,7 +90,9 @@ function builder.create_entity_builder(state, opts)
 		---@diagnostic disable-next-line: assign-type-mismatch
 		ghost.position = position
 		ghost.direction=direction_conv[ghost.direction or defines.direction.north]
-		if not obstacles.can_place(state,ghost.inner_name,
+		local shared=obstacles.shared_entity(state,ghost.inner_name,{x=position[1],y=position[2]},ghost.direction,ghost.quality)
+		ghost.preview_existing=shared~=nil or nil
+		if not shared and not obstacles.can_place(state,ghost.inner_name,
 			{x=position[1],y=position[2]},ghost.direction) then
 			state._obstacle_skipped = (state._obstacle_skipped or 0) + 1
 			if not (opts.diagnostic and state.preview_only) then return end
@@ -123,24 +125,26 @@ function builder.create_entity_builder(state, opts)
 			return
 		end
 		
-		if opts.do_deconstruction then
+		if opts.do_deconstruction and not shared then
 			terrain.deconstruct(state, obstacles.entity_box(ghost.inner_name,
 				{x=position[1], y=position[2]}, ghost.direction))
 		end
 
 		local result
 		if state.preview_only then result = builder.record_preview(state,ghost)
+		elseif shared then result=shared
 		else result = surface.create_entity(ghost) end
 		if result then
 			if not state.preview_only then
 				if ghost.input_priority then result.splitter_input_priority=ghost.input_priority end
 				if ghost.output_priority then result.splitter_output_priority=ghost.output_priority end
+				if ghost.station_name then result.backer_name=ghost.station_name;result.trains_limit=1 end
 			end
 			if ghost.thing and grid and not opts.diagnostic then
 				grid:build_specification(ghost)
 			end
 			
-			if collected_ghosts and not state.preview_only then
+			if collected_ghosts and not state.preview_only and not shared then
 				collected_ghosts[#collected_ghosts+1] = result
 			end
 		end

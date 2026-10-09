@@ -137,7 +137,7 @@ function renderer.render(draft,choices)
 		if spec.mirror and helpers.is_valid_sprite_path(base.."-flipped-1") then base=base.."-flipped"; sx,sy=1,1 end
 		if not helpers.is_valid_sprite_path(base.."-1") then base=prefix..(names[spec.direction] or "north") end
 		local tint=spec.preview_blocked and blocked or allowed
-		if not tile and (selected_obstacles and obstacles.blocked_box(selected_obstacles,
+		if not tile and not spec.preview_existing and (selected_obstacles and obstacles.blocked_box(selected_obstacles,
 			obstacles.entity_box(spec.inner_name,{x=x,y=y},spec.direction))
 			or draft.surface.can_place_entity and not draft.surface.can_place_entity{
 			name=spec.inner_name,position={x=x,y=y},direction=spec.direction,force=player.force,
@@ -157,6 +157,15 @@ function renderer.render(draft,choices)
 			local sprite="entity/"..spec.inner_name
 			if helpers.is_valid_sprite_path(sprite) then
 				draw(sprite,target,tint,sx*(box.right_bottom.x-box.left_top.x)/2,sy*(box.right_bottom.y-box.left_top.y)/2)
+			end
+		end
+		if not tile and prototypes.entity[spec.inner_name].type=="inserter" then
+			local prefix="mpp-preview-"..spec.inner_name.."-hand-"
+			local layer=1
+			while helpers.is_valid_sprite_path(prefix..layer) do
+				objects[#objects+1]=rendering.draw_sprite{surface=draft.surface,players={player},sprite=prefix..layer,
+					target=target,tint=tint,orientation=(spec.direction or N)/16,render_layer="cursor",light_mode="glow"}
+				layer=layer+1
 			end
 		end
 	end

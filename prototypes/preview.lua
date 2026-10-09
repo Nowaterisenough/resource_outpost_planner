@@ -1,7 +1,7 @@
 local directions={"north","east","south","west"}
 local types={"mining-drill","transport-belt","underground-belt","electric-pole","pipe","pipe-to-ground",
 	"heat-pipe","beacon","lamp","container","logistic-container","inserter","assembling-machine","furnace",
-	"splitter","storage-tank"}
+	"splitter","storage-tank","straight-rail","train-stop","rail-signal","rail-chain-signal","locomotive","cargo-wagon"}
 local belt_indexes={east=1,west=2,north=3,south=4,east_to_north=5,north_to_east=6,
 	west_to_north=7,north_to_west=8,south_to_east=9,east_to_south=10,south_to_west=11,west_to_south=12,
 	starting_south=13,ending_south=14,starting_west=15,ending_west=16,
@@ -13,6 +13,7 @@ local connections={single="straight_vertical_single",straight_vertical="straight
 
 local function collect(source,layers,direction_index,row_index,sheet_count,inherited)
 	if not source then return end
+	if source.rotated then collect(source.rotated,layers,direction_index,row_index,sheet_count);return end
 	if source.layers then
 		for _,layer in ipairs(source.layers) do collect(layer,layers,direction_index,row_index,sheet_count,source) end
 		return
@@ -27,7 +28,9 @@ local function collect(source,layers,direction_index,row_index,sheet_count,inher
 	if type(width)~="number" or type(height)~="number" or source.draw_as_shadow or source.draw_as_light then return end
 	local frames=source.frame_count or inherited and inherited.frame_count or 1
 	local count=source.direction_count or inherited and inherited.direction_count or sheet_count or 1
-	local row=row_index or math.floor((direction_index or 0)*count/4)
+	local facing=direction_index or 0
+	if source.back_equals_front then facing=(facing%2)*2 end
+	local row=row_index or math.floor(facing*count/4)
 	if count==1 and not row_index then row=0 end
 	local frame=row*frames
 	local length=source.line_length or inherited and inherited.line_length
@@ -95,7 +98,16 @@ for _,entity_type in ipairs(types) do
 			register(name,"north",layers)
 		else
 			for direction_index,direction in ipairs(directions) do
-				if entity_type=="splitter" then
+				if entity_type=="straight-rail" then
+					local layers={}
+					local facing=(direction=="north" or direction=="south") and "north" or "east"
+					local pictures=proto.pictures and proto.pictures[facing] or {}
+					for _,part in ipairs{"stone_path_lower","stone_path","tie","screw","metal"} do collect(pictures[part],layers,0) end
+					register(name,direction,layers)
+				elseif entity_type=="inserter" then
+					local layers={};collect(proto.platform_picture,layers,direction_index-1)
+					register(name,direction,layers)
+				elseif entity_type=="splitter" then
 					local layers={}
 					local belt=proto.belt_animation_set or {}
 					for _,sign in ipairs{-1,1} do
@@ -128,6 +140,10 @@ for _,entity_type in ipairs(types) do
 						register(name,direction.."-flipped",machine_layers(proto,proto.graphics_set_flipped,direction,direction_index-1))
 					end
 				end
+			end
+			if entity_type=="inserter" then
+				local layers={};collect(proto.hand_base_picture,layers,0);collect(proto.hand_closed_picture,layers,0)
+				register(name,"hand",layers)
 			end
 		end
 	end

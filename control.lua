@@ -57,11 +57,12 @@ function task_runner_handler(event)
 	end
 end
 
-local function set_belt_target(player, surface, position, direction)
+local function set_belt_target(player, surface, position, direction, mirror)
 	local data=storage.players[player.index]
 	if not data or (data.preview and data.preview.applying) then return end
-	if data.choices.output_balance_choice and data.output_count_invalid then return end
-	local target={position=position,direction=direction}
+	if data.choices.output_station_choice and data.output_station_count_invalid then return end
+	if not data.choices.output_station_choice and data.choices.output_balance_choice and data.output_count_invalid then return end
+	local target={position=position,direction=direction,mirror=mirror}
 	if data.preview then
 		if data.preview.surface==surface and data.choices.belt_planner_choice then
 			preview.set_belt_target(data,target)
@@ -85,7 +86,7 @@ script.on_event(defines.events.on_pre_build, function(event)
 	local target = belt_planner.take_cursor_target(player, event)
 	if not target then return end
 	script.on_event(defines.events.on_tick, task_runner_handler)
-	set_belt_target(player, player.surface, target.position, target.direction)
+	set_belt_target(player, player.surface, target.position, target.direction,target.mirror)
 end)
 
 local function select_preview(event,append)
@@ -279,7 +280,14 @@ end
 
 local function rotate_belt_target(event, reverse)
 	local player = game.get_player(event.player_index)
-	if player and belt_planner.rotate_cursor(player, event, reverse) then return true end
+	if player and belt_planner.rotate_cursor(player, event, reverse) then
+		local data=storage.players[player.index]
+		if data.preview and data.preview.belt_target then
+			preview.set_belt_target(data,{position=data.preview.belt_target.position,
+				direction=data.belt_cursor_direction,mirror=data.belt_cursor_mirror})
+		end
+		return true
+	end
 	if not event.selected_prototype or event.selected_prototype.name~="mpp-belt-planner" then return false end
 	local data=storage.players[event.player_index]
 	local direction=((data.belt_planner_direction or NORTH)+(reverse and -EAST or EAST))%ROTATION
@@ -313,12 +321,20 @@ end)
 
 script.on_event("resource-outpost-planner-keybind-flip-horizontal", function(e)
 	local player = game.get_player(e.player_index)
-	if player then belt_planner.flip_cursor(player, true) end
+	if player and belt_planner.flip_cursor(player, true) then
+		local data=storage.players[player.index]
+		if data.preview and data.preview.belt_target then preview.set_belt_target(data,{position=data.preview.belt_target.position,
+			direction=data.belt_cursor_direction,mirror=data.belt_cursor_mirror}) end
+	end
 end)
 
 script.on_event("resource-outpost-planner-keybind-flip-vertical", function(e)
 	local player = game.get_player(e.player_index)
-	if player then belt_planner.flip_cursor(player, false) end
+	if player and belt_planner.flip_cursor(player, false) then
+		local data=storage.players[player.index]
+		if data.preview and data.preview.belt_target then preview.set_belt_target(data,{position=data.preview.belt_target.position,
+			direction=data.belt_cursor_direction,mirror=data.belt_cursor_mirror}) end
+	end
 end)
 
 script.on_event("resource-outpost-planner-keybind-rotate-reversed", function(e)

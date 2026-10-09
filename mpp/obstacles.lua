@@ -108,8 +108,20 @@ function obstacles.get(state)
 	return index
 end
 
+function obstacles.shared_entity(state,name,position,direction,quality)
+	if not state.output_only or not state.surface.find_entities_filtered then return end
+	local proto=prototypes.entity[name]
+	if not proto or (proto.type~="transport-belt" and proto.type~="straight-rail") then return end
+	for _,entity in pairs(state.surface.find_entities_filtered{position=position,radius=.05,force=state.player.force}) do
+		local matches=entity.name==name or entity.type=="entity-ghost" and entity.ghost_name==name
+		if matches and entity.direction==direction and (not entity.quality or entity.quality.name==(quality or "normal"))
+			and math.abs(entity.position.x-position.x)<.001 and math.abs(entity.position.y-position.y)<.001 then return entity end
+	end
+end
+
 function obstacles.can_place(state, name, position, direction)
 	if not obstacles.active(state) then return true end
+	if obstacles.shared_entity(state,name,position,direction,state.belt_quality_choice) then return true end
 	return not obstacles.blocked_box(obstacles.get(state), obstacles.entity_box(name,position,direction))
 end
 
