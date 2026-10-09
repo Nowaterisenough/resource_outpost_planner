@@ -9,6 +9,7 @@ local train_station = require("mpp.train_station")
 local belt_planner = {}
 local blueprint_name = "mpp-blueprint-belt-planner"
 local station_cursor_version = 4
+local search_directions={WEST,NORTH,SOUTH,EAST}
 
 ---@class BeltinatorState : TaskState
 ---@field belt_specification BeltPlannerSpecification
@@ -285,7 +286,22 @@ local function path(start, finish, finish_direction, allowed, bounds, penalty, b
 	local heap, best = {}, {}
 	local turn_cost = 8
 	local sequence = 0
-	local function node_key(node) return key(node.x,node.y)..","..node.direction end
+	local stride=math.ceil(bounds.x2-bounds.x1)+3
+	local function node_key(x,y,direction)
+		return ((y-bounds.y1)*stride+x-bounds.x1)*4+direction/4
+	end
+	local function estimate(x,y,direction)
+		local dx,dy=finish.x-x,finish.y-y
+		local distance=abs(dx)+abs(dy)
+		if distance==0 then return 0 end
+		local horizontal=dx>0 and EAST or WEST
+		local vertical=dy>0 and SOUTH or NORTH
+		local turns
+		if dx==0 then turns=direction==vertical and 0 or 1
+		elseif dy==0 then turns=direction==horizontal and 0 or 1
+		else turns=(direction==horizontal or direction==vertical) and 1 or 2 end
+		return distance+turns*turn_cost
+	end
 	local function before(a,b)
 		if a.score~=b.score then return a.score<b.score end
 		if a.turns~=b.turns then return a.turns<b.turns end
@@ -320,13 +336,14 @@ local function path(start, finish, finish_direction, allowed, bounds, penalty, b
 	start.turns=0
 	start.distance=abs(start.x-finish.x)+abs(start.y-finish.y)
 	start.cost=start.distance==0 and start.direction~=finish_direction and turn_cost or 0
-	start.score=start.cost+start.distance
-	best[node_key(start)]=start.cost
+	start.score=start.cost+estimate(start.x,start.y,start.direction)
+	start.key=node_key(start.x,start.y,start.direction)
+	best[start.key]=start.cost
 	push(start)
 	local visits=0
 	while #heap>0 and visits<131072 and (not budget or budget.remaining>0) do
 		local node=pop()
-		if node.cost==best[node_key(node)] then
+		if node.cost==best[node.key] then
 			visits=visits+1
 			if budget then budget.remaining=budget.remaining-1 end
 			if node.x==finish.x and node.y==finish.y then
@@ -336,12 +353,12 @@ local function path(start, finish, finish_direction, allowed, bounds, penalty, b
 				for i=#result,1,-1 do ordered[#ordered+1]=result[i] end
 				return ordered
 			end
-			for _, dir in ipairs{WEST,NORTH,SOUTH,EAST} do
+			for _, dir in ipairs(search_directions) do
 				if dir==(node.direction+SOUTH)%ROTATION then goto continue end
 				local delta=util.direction_coord[dir]
 				local x,y=node.x+delta.x,node.y+delta.y
 				if x==finish.x and y==finish.y and dir==(finish_direction+SOUTH)%ROTATION then goto continue end
-				local k=key(x,y)..","..dir
+				local k=node_key(x,y,dir)
 				local turns=node.turns+(dir~=node.direction and 1 or 0)
 				local cost=node.cost+1+(dir~=node.direction and turn_cost or 0)+(penalty and penalty(x,y) or 0)
 				if x==finish.x and y==finish.y and dir~=finish_direction then
@@ -352,7 +369,7 @@ local function path(start, finish, finish_direction, allowed, bounds, penalty, b
 				if x>=bounds.x1 and x<=bounds.x2 and y>=bounds.y1 and y<=bounds.y2
 					and (not best[k] or cost<best[k]) and allowed(x,y) then
 					best[k]=cost
-					push{x=x,y=y,direction=dir,turns=turns,cost=cost,score=cost+distance,distance=distance,previous=node}
+					push{x=x,y=y,key=k,direction=dir,turns=turns,cost=cost,score=cost+estimate(x,y,dir),distance=distance,previous=node}
 				end
 				::continue::
 			end
@@ -389,6 +406,8 @@ local function route_bundle(state, reverse, negotiate)
 	local spec, dir = state.belt_specification, state.belt_direction
 	local occupied, reserved, sources, outputs, result = {}, {}, {}, {}, {}
 	local x1,y1,x2,y2 = state.belt_x,state.belt_y,state.belt_x,state.belt_y
+	local exit_x,exit_y=state.belt_x,state.belt_y
+	local output_y1,output_y2=math.huge,-math.huge
 	local source_left=math.huge
 	local function reserve(x,y,lane)
 		local k=key(x,y)
@@ -427,6 +446,15 @@ local function route_bundle(state, reverse, negotiate)
 		elseif dir==NORTH then finish.x=finish.x+spec.count-i
 		else finish.x=finish.x-spec.count+i end
 		sources[i],outputs[i]=start,finish
+		output_y1,output_y2=min(output_y1,finish.y),max(output_y2,finish.y)
+		if state.belt_input_targets then
+			-- The station anchor is a rail stop, not the balancer's input band.
+			if i==1 then exit_x,exit_y=finish.x,finish.y
+			elseif dir==NORTH then exit_x=min(exit_x,finish.x)
+			elseif dir==SOUTH then exit_x=max(exit_x,finish.x)
+			elseif dir==WEST then exit_y=max(exit_y,finish.y)
+			else exit_y=min(exit_y,finish.y) end
+		end
 		source_left=min(source_left,start.x)
 		if not negotiate and start.x==finish.x and start.y==finish.y then
 			return false,{"mpp.msg_obstacle_route_failed"},{routes=result,failed_lane=i,reason="overlap"}
@@ -448,6 +476,9 @@ local function route_bundle(state, reverse, negotiate)
 	local padding=max(negotiate and 48 or 16,spec.count+4)
 	local bounds={x1=x1-padding,y1=y1-padding,x2=x2+padding,y2=y2+padding}
 	state._belt_search_margin=padding+max(0,-x1,-y1,x2-state.coords.tw,y2-state.coords.th)+2
+	local corner1,corner2=world(state,bounds.x1,bounds.y1),world(state,bounds.x2,bounds.y2)
+	state._belt_search_area={{min(corner1.x,corner2.x)-1,min(corner1.y,corner2.y)-1},
+		{max(corner1.x,corner2.x)+1,max(corner1.y,corner2.y)+1}}
 	local safe_cache={}
 	local function safe(x,y)
 		local k=key(x,y)
@@ -458,7 +489,7 @@ local function route_bundle(state, reverse, negotiate)
 	end
 	local order={}
 	for i=1,spec.count do order[i]=i end
-	if dir==SOUTH or (dir==EAST and state.belt_y>=spec[spec.count].y) then
+	if dir==SOUTH or (dir==EAST and exit_y>=spec[spec.count].y) then
 		for i=1,floor(spec.count/2) do order[i],order[spec.count-i+1]=order[spec.count-i+1],order[i] end
 	end
 	if reverse then
@@ -490,34 +521,43 @@ local function route_bundle(state, reverse, negotiate)
 			if not negotiate then occupied[key(finish.x,finish.y)]=true end
 			routing=true
 			local route
+			if not negotiate and dir==WEST and exit_x<source_left
+				and (output_y2<spec[1].y or output_y1>spec[spec.count].y) then
+				local rank=output_y2<spec[1].y and i or spec.count-i+1
+				local column=source_left-rank-1
+				if approach.x<=column then
+					route=straight_segments({{x=start.x-1,y=start.y},{x=column,y=start.y},
+						{x=column,y=approach.y},approach},allowed)
+				end
+			end
 			-- Outputs behind the mine need nested U-shaped corridors rather than one lane enclosing the others.
-			local top=state.belt_y-spec.count+1
-			if not negotiate and dir==WEST and state.belt_x>=source_left and (state.belt_y<spec[1].y or top>spec[spec.count].y) then
-				local above=state.belt_y<spec[1].y
+			local top=output_y1
+			if not negotiate and dir==WEST and exit_x>=source_left and (output_y2<spec[1].y or top>spec[spec.count].y) then
+				local above=output_y2<spec[1].y
 				local rank=above and i or spec.count-i+1
 				local column=source_left-rank-1
 				local outer_top=state.belt_input_targets and y1 or top
-				local outer_bottom=state.belt_input_targets and y2 or state.belt_y
-				local row=above and min(top,spec[1].y,outer_top)-rank or max(state.belt_y,spec[spec.count].y,outer_bottom)+rank
-				local far_column=max(state.belt_x+1,source_left,state.belt_input_targets and x2+1 or state.belt_x+1)+rank
+				local outer_bottom=state.belt_input_targets and y2 or exit_y
+				local row=above and min(top,spec[1].y,outer_top)-rank or max(exit_y,spec[spec.count].y,outer_bottom)+rank
+				local far_column=max(exit_x+1,source_left,state.belt_input_targets and x2+1 or exit_x+1)+rank
 				route=straight_segments({{x=start.x-1,y=start.y},{x=column,y=start.y},
 					{x=column,y=row},{x=far_column,y=row},{x=far_column,y=approach.y},approach},allowed)
 			end
 			-- Opposite-facing exits use nested, parallel corridors when the output band is outside the rows.
-			if not negotiate and dir==EAST and (state.belt_y+spec.count-1<spec[1].y or state.belt_y>spec[spec.count].y) then
-				local column=source_left-(state.belt_y<spec[1].y and i or spec.count-i+1)
+			if not negotiate and dir==EAST and (output_y2<spec[1].y or output_y1>spec[spec.count].y) then
+				local column=source_left-(exit_y<spec[1].y and i or spec.count-i+1)
 				if approach.x>=column then
 					route=straight_segments({{x=start.x-1,y=start.y},{x=column,y=start.y},
 						{x=column,y=approach.y},approach},allowed)
 				end
 			end
 			-- A perpendicular outlet needs nested bends; the nearest lane must leave room for the outer lanes.
-			if not negotiate and state.belt_x>=source_left and
-				((dir==SOUTH and state.belt_y-spec.count>spec[spec.count].y)
-				or (dir==NORTH and state.belt_y+spec.count<spec[1].y)) then
+			if not negotiate and exit_x>=source_left and
+				((dir==SOUTH and exit_y-spec.count>spec[spec.count].y)
+				or (dir==NORTH and exit_y+spec.count<spec[1].y)) then
 				local rank=dir==SOUTH and spec.count-i+1 or i
 				local column=source_left-rank
-				local row=dir==SOUTH and state.belt_y-i or state.belt_y+spec.count-i+1
+				local row=dir==SOUTH and exit_y-i or exit_y+spec.count-i+1
 				route=straight_segments({{x=start.x-1,y=start.y},{x=column,y=start.y},
 					{x=column,y=row},{x=approach.x,y=row},approach},allowed)
 			end

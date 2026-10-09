@@ -246,6 +246,23 @@ assert(around,"station ingress did not reach the outside corridor")
 cases=cases+1
 
 spec=fixture("west",3)
+state=assert(planner.create_state(spec,target(spec,151,-177,N),{output_balance_choice=true}))
+state.output_balance_choice=false
+state.belt_input_targets={{x=145,y=-145},{x=144,y=-145},{x=143,y=-145}}
+local can_place,probes=obstacles.can_place,0
+obstacles.can_place=function(...)
+	probes=probes+1
+	return can_place(...)
+end
+ok,err=planner.plan(state)
+obstacles.can_place=can_place
+assert(ok,"offset station input band cannot be routed")
+verify(state,err)
+assert(probes<2000,"open station ingress falls back to an expansive search")
+for _,stat in ipairs(route_stats(state,err)) do assert(stat.turns<=3,"offset input band adds unnecessary bends") end
+cases=cases+1
+
+spec=fixture("west",3)
 state=assert(planner.create_state(spec,target(spec,65,-42,W),{}))
 state.belt_input_targets={{x=87,y=-52},{x=87,y=-51},{x=87,y=-50}}
 state.planned={}
