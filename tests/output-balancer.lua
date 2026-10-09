@@ -29,10 +29,14 @@ local N,E,S,W=defines.direction.north,defines.direction.east,defines.direction.s
 local cases=0
 local priority_cases=0
 local function key(x,y) return x..","..y end
-local function verify(n,m,belt_name)
+local function verify(n,m,belt_name,preference)
 	belt_name=belt_name or "express-transport-belt"
-	local layout,err=balancer.geometry(n,m,belt_name)
+	local layout,err=balancer.geometry(n,m,belt_name,preference)
 	assert(layout,"cannot generate "..n.." -> "..m..": "..tostring(err and err[1]))
+	if belt_name=="express-transport-belt" and n<=8 and m<=8 and math.max(n,m)>2 then
+		local rn,rm=layout.source_label:match("^(%d+)_(%d+)")
+		assert(tonumber(rn)==n and tonumber(rm)==m,"matrix substituted "..n.." -> "..m.." with "..layout.source_label)
+	end
 	local cells,nodes,exits={}, {},{}
 	local function kind(entity) return entity and prototypes.entity[entity.name].type end
 	local function ports(entity)
@@ -124,10 +128,17 @@ end
 for n=1,8 do for m=1,8 do verify(n,m) end end
 for n=1,8 do verify(n,8,"transport-belt") end
 for _,pair in ipairs{{1,16},{4,16},{8,16},{16,8},{16,16},{3,12},{12,6},{9,8},{8,9},{1,32},{32,8}} do verify(pair[1],pair[2]) end
+for n=1,8 do for m=10,32,2 do verify(n,m,"express-transport-belt","matrix") end end
 assert(not balancer.valid_count(0) and not balancer.valid_count(33) and not balancer.valid_count(1.5))
 assert(balancer.output_count({count=5},{output_balance_choice=false})==5)
 assert(balancer.output_count({count=5},{output_balance_choice=true})==8)
 local compact=assert(balancer.geometry(6,8,"transport-belt"))
 assert(compact.source_label=="6_8_alt_yellow" and compact.reference_count==77,"6-to-8 reference blueprint was replaced by a generated matrix")
 assert(#compact.specs==85,"reference layout acquired unnecessary stages")
+local three_to_eight=assert(balancer.geometry(3,8,"transport-belt"))
+assert(three_to_eight.source_label=="3_8" and three_to_eight.reference_count==44,
+	"3-to-8 output does not match the matrix blueprint")
+local three_to_ten=assert(balancer.geometry(3,10,"express-transport-belt","matrix"))
+assert(three_to_ten.source_label=="3_5 + 1_2" and #three_to_ten.specs<150,
+	"five double-sided wagons use an oversized feedback adapter")
 print("Output balancer OK: "..cases.." physical flow shares, tunnel pairing, rotations-ready geometry and configurable outputs")

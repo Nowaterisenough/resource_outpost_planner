@@ -36,25 +36,54 @@ local function equipment(name)
 end
 
 local reference_layouts = require("mpp.balancer_blueprints")
-local function choose_reference(inputs,outputs,reach)
+local function choose_reference(inputs,outputs,reach,matrix)
 	local best,best_score
 	for _,entry in ipairs(reference_layouts) do
 		if not entry.disabled and entry.n>=inputs and entry.m==outputs and entry.reach<=reach then
 			local min_x,max_x,min_y,max_y=math.huge,-math.huge,math.huge,-math.huge
 			for _,e in ipairs(entry.entities) do min_x=math.min(min_x,e[2]);max_x=math.max(max_x,e[2]);min_y=math.min(min_y,e[3]);max_y=math.max(max_y,e[3]) end
-			local score=(entry.n-inputs)*1000000+(entry.tu and 0 or 100000)+(max_x-min_x+1)*(max_y-min_y+1)*100+#entry.entities
+			local area=(max_x-min_x+1)*(max_y-min_y+1)
+			local score=matrix and (entry.n-inputs)*1000000+area*100+#entry.entities+(entry.tu and 0 or .1)
+				or (entry.n-inputs)*1000000+(entry.tu and 0 or 100000)+area*100+#entry.entities
 			if not best_score or score<best_score then best,best_score=entry,score end
 		end
 	end
 	return best
 end
 
-local function geometry(inputs, outputs, belt_name)
+local function geometry(inputs, outputs, belt_name, preference)
 	local splitter, underground, reach = equipment(belt_name)
 	if not splitter or not reach or reach<2 then return nil,{"mpp.output_balance_equipment"} end
-	local cache_key = inputs..":"..outputs..":"..belt_name
+	local matrix=preference=="matrix" or inputs<=8 and outputs<=8
+	local cache_key = inputs..":"..outputs..":"..belt_name..":"..tostring(matrix)
 	if cache[cache_key] then return cache[cache_key] end
-	local entry=choose_reference(inputs,outputs,reach)
+	local entry=choose_reference(inputs,outputs,reach,matrix)
+	-- Extend the small matrix with equal two-way branches instead of oversized feedback loops.
+	if matrix and inputs<=8 and outputs>8 and outputs%2==0 and (not entry or entry.n~=inputs) then
+		local core,err=geometry(inputs,outputs/2,belt_name,"matrix")
+		if not core then return nil,err end
+		local specs,keepout={},{}
+		for _,piece in ipairs(core.specs) do specs[#specs+1]=piece end
+		for _,p in ipairs(core.keepout) do keepout[#keepout+1]=p end
+		local channels=outputs/2
+		local start_y=core.output_y
+		for _,piece in ipairs(core.specs) do start_y=math.max(start_y,math.ceil(piece.y)) end
+		local branch_y=start_y+channels
+		for i=0,channels-1 do
+			local row=start_y+channels-i
+			for y=core.output_y+1,row-1 do specs[#specs+1]={name=belt_name,x=i,y=y,direction=S} end
+			for x=i,2*i-1 do specs[#specs+1]={name=belt_name,x=x,y=row,direction=E} end
+			for y=row,branch_y do specs[#specs+1]={name=belt_name,x=2*i,y=y,direction=S} end
+			specs[#specs+1]={name=splitter,x=2*i+.5,y=branch_y+1,direction=S}
+			for x=2*i,2*i+1 do specs[#specs+1]={name=belt_name,x=x,y=branch_y+2,direction=S} end
+		end
+		local output_y=branch_y+2
+		local result={specs=specs,inputs=core.inputs,output_y=output_y,width=outputs,keepout=keepout,
+			source_label=core.source_label.." + 1_2",reference_count=core.reference_count+channels,
+			extent=math.max(core.extent+output_y-core.output_y,outputs)}
+		cache[cache_key]=result
+		return result
+	end
 	local basic=math.max(inputs,outputs)<=2
 	if basic then
 		if inputs==1 and outputs==1 then
@@ -64,11 +93,15 @@ local function geometry(inputs, outputs, belt_name)
 			local exits=outputs==1 and {{0,1}} or {{0,1},{1,1}}
 			entry={label="single-splitter",n=inputs,m=outputs,entities={{"splitter",0.5,0,S}},inputs=ports,outputs=exits}
 		end
+	elseif inputs==1 and outputs==4 then
+		entry={label="1_4",n=1,m=4,entities={{"belt",1,0,S},{"splitter",1.5,1,S},
+			{"splitter",.5,2,S},{"splitter",2.5,2,S},{"belt",0,3,S},{"belt",1,3,S},
+			{"belt",2,3,S},{"belt",3,3,S}},inputs={{1,-1}},outputs={{0,4},{1,4},{2,4},{3,4}}}
 	end
 	local adapting=entry==nil
 	local width=1
 	while width<math.max(inputs,outputs) do width=width*2 end
-	if adapting then entry=choose_reference(width,width,reach) end
+	if adapting then entry=choose_reference(width,width,reach,matrix) end
 	if not entry then return nil,{"mpp.output_balance_reference_equipment",inputs,outputs} end
 	local specs,occupied,keepout={},{},{}
 	local names={belt=belt_name,splitter=splitter,underground=underground}

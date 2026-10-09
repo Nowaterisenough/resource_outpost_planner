@@ -13,9 +13,15 @@ and splitter priorities. Positions are normalized around the output interface;
 Factorio 1.1 direction values are converted to Factorio 2.1 values. Belt names
 are substituted at planning time to match the chosen belt tier.
 
-Directly matching layouts are preferred. Compatible larger input layouts may
-leave unused inputs disconnected. Counts without a direct template use a
-standard square reference layout with additional merging or feedback connections.
+The 1-to-8 input/output matrix prefers matching counts and then the smallest
+compatible reference footprint. The trivial one/two-way splits and 1-to-4
+binary tree complete its small entries. In particular, 3-to-8 retains the
+3-to-8 reference rather than leaving an input of a 4-to-8 reference unused.
+
+For larger loading stations, even output counts without a matching reference
+can extend a smaller matrix with equal two-way branches. For example, 3-to-10
+uses the 3-to-5 reference followed by five 1-to-2 splits. Other counts without a
+direct template use a standard square reference with merging or feedback.
 
 Regenerate the normalized data with:
 
