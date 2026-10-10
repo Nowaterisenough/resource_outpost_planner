@@ -1,4 +1,22 @@
 ---------------------------------------------------------------------------------------------------
+Version: 1.9.6
+Date: 2026-10-10
+  Features:
+    - Add a separate Output section with configurable train loading stations, defaulting to two locomotives, four cargo wagons and both loading sides.
+    - Generate rails, a train stop, entry and exit signals, rolling stock, six buffer chests per wagon side, inserters and power poles.
+    - Support R / Shift+R rotation and H / V mirroring for the complete station preview, including output from an already applied mining plan.
+  Changes:
+    - Match actual input and output counts in the 1-to-8 balancer matrix; extend larger stations with equal branches where suitable.
+    - Place the balancer beside the wagons and shorten loading branches, allowing locomotives and the stop to extend beyond the belt module.
+  Optimizations:
+    - Use actual balancer inputs for fast parallel routing and restrict obstacle scans to the search rectangle.
+    - Filter hazard tiles in the engine, index nearby collision boxes and cache prototype placement geometry.
+    - Reduce grid-search allocation and include a lower bound on remaining turns in the search heuristic.
+  Bugfixes:
+    - Keep station cursor previews aligned with clicked positions across repeated placements, rotation and mirroring.
+    - Preserve newly created rail construction ghosts when placing overlapping rolling stock.
+    - Route incoming belts around the full station footprint when inputs face inward.
+---------------------------------------------------------------------------------------------------
 Version: 1.9.5
 Date: 2026-10-09
   Features:
