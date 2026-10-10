@@ -1,2 +1,2 @@
 -- current migration version
-return 010906
+return 010907

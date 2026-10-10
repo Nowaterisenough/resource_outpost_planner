@@ -1,4 +1,15 @@
 ---------------------------------------------------------------------------------------------------
+Version: 1.9.7
+Date: 2026-10-10
+  Bugfixes:
+    - Use fixed blueprints for the full 1-to-8 input/output matrix, selecting the exact count pair instead of leaving surplus inputs unused.
+    - Preserve original lane-balancing structures, underground endpoints, splitter priorities and filters through preview, construction and station rotation or mirroring.
+    - Use the original 21-entity blueprint for two incoming belts and eight outputs.
+    - Resolve loading-station splitter equipment directly instead of assuming that the first entity of a two-to-two balancer is a splitter.
+  Changes:
+    - Support all 64 matrix combinations with red and blue belts, and 60 with yellow belts.
+    - Require a higher belt tier for yellow 5-to-8, 6-to-5, 7-to-5 and 8-to-7 rather than silently substituting another input count; exclude the unequal-flow legacy yellow 5-to-8 blueprint.
+---------------------------------------------------------------------------------------------------
 Version: 1.9.6
 Date: 2026-10-10
   Features:
