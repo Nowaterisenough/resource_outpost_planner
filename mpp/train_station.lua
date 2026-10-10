@@ -57,7 +57,7 @@ function station.geometry(inputs,choices,belt_name)
 	local function belt(x,y,direction) return add(belt_name,x,y,direction) end
 	for _,piece in ipairs(reference.specs) do
 		add(piece.name,bx+piece.x,by+piece.y-reference.output_y,piece.direction,
-			{type=piece.type,input_priority=piece.input_priority,output_priority=piece.output_priority})
+			{type=piece.type,input_priority=piece.input_priority,output_priority=piece.output_priority,filter=piece.filter})
 	end
 	for _,p in ipairs(reference.keepout) do keepout[#keepout+1]={x=bx+p.x,y=by+p.y-reference.output_y} end
 	local ports={}
@@ -84,7 +84,7 @@ function station.geometry(inputs,choices,belt_name)
 			for y=row,7.5,-1 do belt(first,y,N) end
 		end
 	end
-	local splitter=assert(balancer.geometry(2,2,belt_name)).specs[1].name
+	local splitter=assert(balancer.equipment(belt_name))
 	local loading_inputs={}
 	for _,side in ipairs(double and {-1,1} or {-1}) do
 		for wagon=1,wagons do
@@ -166,7 +166,7 @@ function station.cursor_entities(layout,direction,mirror)
 		local p=station.transform_piece(piece,direction,mirror)
 		-- Rail blueprint coordinates use odd tile centers within the absolute two-tile grid.
 		entities[i]={entity_number=i,name=p.name,position={x=p.x+1,y=p.y+1},direction=p.direction,
-			orientation=p.orientation,type=p.type,input_priority=p.input_priority,output_priority=p.output_priority,
+			orientation=p.orientation,type=p.type,input_priority=p.input_priority,output_priority=p.output_priority,filter=p.filter,
 			tags={mpp_station_cursor=true}}
 	end
 	return entities
@@ -190,7 +190,7 @@ function station.plan(state,route)
 		local x,y=grid(anchor.x+p.x,anchor.y+p.y)
 		local spec={name=p.name,grid_x=x,grid_y=y,direction=world_direction(p.direction),
 			type=p.type,orientation=p.orientation,thing=p.thing,input_priority=p.input_priority,
-			output_priority=p.output_priority,station_name=p.station_name,station_stock=p.station_stock,station_rail=p.station_rail}
+			output_priority=p.output_priority,filter=p.filter,station_name=p.station_name,station_stock=p.station_stock,station_rail=p.station_rail}
 		if not obstacles.can_place(state,p.name,{x=anchor.x+p.x,y=anchor.y+p.y},p.direction) then
 			spec.preview_blocked=true
 			issues[#issues+1]={position={x=anchor.x+p.x,y=anchor.y+p.y},reason={"mpp.output_station_blocked"}}

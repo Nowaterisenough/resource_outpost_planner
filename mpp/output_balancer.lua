@@ -36,6 +36,12 @@ local function equipment(name)
 end
 
 local reference_layouts = require("mpp.balancer_blueprints")
+local matrix_layouts = require("mpp.balancer_matrix")
+local function choose_matrix(inputs,outputs,reach)
+	for _,entry in ipairs(matrix_layouts[inputs][outputs]) do
+		if entry.reach<=reach then return entry end
+	end
+end
 local function choose_reference(inputs,outputs,reach,matrix)
 	local best,best_score
 	for _,entry in ipairs(reference_layouts) do
@@ -57,7 +63,11 @@ local function geometry(inputs, outputs, belt_name, preference)
 	local matrix=preference=="matrix" or inputs<=8 and outputs<=8
 	local cache_key = inputs..":"..outputs..":"..belt_name..":"..tostring(matrix)
 	if cache[cache_key] then return cache[cache_key] end
-	local entry=choose_reference(inputs,outputs,reach,matrix)
+	local exact=inputs<=8 and outputs<=8
+	local entry
+	if exact then entry=choose_matrix(inputs,outputs,reach)
+	else entry=choose_reference(inputs,outputs,reach,matrix) end
+	if exact and not entry then return nil,{"mpp.output_balance_reference_equipment",inputs,outputs} end
 	-- Extend the small matrix with equal two-way branches instead of oversized feedback loops.
 	if matrix and inputs<=8 and outputs>8 and outputs%2==0 and (not entry or entry.n~=inputs) then
 		local core,err=geometry(inputs,outputs/2,belt_name,"matrix")
@@ -84,20 +94,6 @@ local function geometry(inputs, outputs, belt_name, preference)
 		cache[cache_key]=result
 		return result
 	end
-	local basic=math.max(inputs,outputs)<=2
-	if basic then
-		if inputs==1 and outputs==1 then
-			entry={label="straight",n=1,m=1,entities={{"belt",0,0,S}},inputs={{0,-1}},outputs={{0,1}}}
-		else
-			local ports=inputs==1 and {{0,-1}} or {{0,-1},{1,-1}}
-			local exits=outputs==1 and {{0,1}} or {{0,1},{1,1}}
-			entry={label="single-splitter",n=inputs,m=outputs,entities={{"splitter",0.5,0,S}},inputs=ports,outputs=exits}
-		end
-	elseif inputs==1 and outputs==4 then
-		entry={label="1_4",n=1,m=4,entities={{"belt",1,0,S},{"splitter",1.5,1,S},
-			{"splitter",.5,2,S},{"splitter",2.5,2,S},{"belt",0,3,S},{"belt",1,3,S},
-			{"belt",2,3,S},{"belt",3,3,S}},inputs={{1,-1}},outputs={{0,4},{1,4},{2,4},{3,4}}}
-	end
 	local adapting=entry==nil
 	local width=1
 	while width<math.max(inputs,outputs) do width=width*2 end
@@ -105,8 +101,8 @@ local function geometry(inputs, outputs, belt_name, preference)
 	if not entry then return nil,{"mpp.output_balance_reference_equipment",inputs,outputs} end
 	local specs,occupied,keepout={},{},{}
 	local names={belt=belt_name,splitter=splitter,underground=underground}
-	local function add(name,x,y,direction,kind,input_priority,output_priority)
-		local spec={name=name,x=x,y=y,direction=direction or S,type=kind,input_priority=input_priority,output_priority=output_priority}
+	local function add(name,x,y,direction,kind,input_priority,output_priority,filter)
+		local spec={name=name,x=x,y=y,direction=direction or S,type=kind,input_priority=input_priority,output_priority=output_priority,filter=filter}
 		local cells={{x,y}}
 		if name==splitter then
 			cells=(spec.direction==N or spec.direction==S) and {{x-.5,y},{x+.5,y}} or {{x,y-.5},{x,y+.5}}
@@ -119,7 +115,7 @@ local function geometry(inputs, outputs, belt_name, preference)
 	local function tunnel(x1,y1,x2,y2,dir)
 		add(underground,x1,y1,dir,"input");add(underground,x2,y2,dir,"output")
 	end
-	for _,e in ipairs(entry.entities) do add(names[e[1]],e[2],e[3],e[4],e[5],e[6],e[7]) end
+	for _,e in ipairs(entry.entities) do add(names[e[1]],e[2],e[3],e[4],e[5],e[6],e[7],e[8]) end
 	local y=entry.outputs[1][2]
 	local output_y=y
 	local power=outputs
@@ -220,7 +216,7 @@ local function geometry(inputs, outputs, belt_name, preference)
 			for y1=top,target.y do belt(target.x,y1) end
 		end
 	end
-	if basic and outputs==1 and inputs==2 then keepout[#keepout+1]={x=1,y=1} end
+	if outputs==1 and inputs==2 then keepout[#keepout+1]={x=1,y=1} end
 	-- Reserve the reference footprint so ingress routes cannot enter an empty splitter outlet.
 	local min_x,max_x,min_y,max_y=math.huge,-math.huge,math.huge,-math.huge
 	for _,piece in ipairs(specs) do min_x=math.min(min_x,math.floor(piece.x));max_x=math.max(max_x,math.ceil(piece.x));min_y=math.min(min_y,math.floor(piece.y));max_y=math.max(max_y,math.ceil(piece.y)) end
@@ -230,7 +226,8 @@ local function geometry(inputs, outputs, belt_name, preference)
 		if not occupied[key(x,row)] then keepout[#keepout+1]={x=x,y=row} end
 	end end
 	local extent=math.max(math.abs(min_x),math.abs(max_x),math.abs(min_y-output_y),math.abs(max_y-output_y))
-	local result={specs=specs,inputs=input_ports,output_y=output_y,width=width,keepout=keepout,source_label=entry.label,reference_count=#entry.entities,extent=extent}
+	local result={specs=specs,inputs=input_ports,output_y=output_y,width=width,keepout=keepout,source_label=entry.label,
+		source=entry.source,lane=entry.lane,reference_count=#entry.entities,extent=extent}
 	cache[cache_key]=result
 	return result
 end
@@ -256,7 +253,7 @@ function balancer.plan(state, route)
 	for _,piece in ipairs(layout.specs) do
 		local x,y=grid(piece.x,piece.y)
 		local dir=(piece.direction+state.belt_direction-S)%16
-		local spec={name=piece.name,quality=state.belt_quality_choice,grid_x=x,grid_y=y,direction=dir,type=piece.type,thing="belt",input_priority=piece.input_priority,output_priority=piece.output_priority}
+		local spec={name=piece.name,quality=state.belt_quality_choice,grid_x=x,grid_y=y,direction=dir,type=piece.type,thing="belt",input_priority=piece.input_priority,output_priority=piece.output_priority,filter=piece.filter}
 		local c=state.coords
 		local pos=util.revert_world(c.gx,c.gy,state.direction_choice,x,y,c.tw,c.th)
 		local world_direction=util.bp_direction[state.direction_choice][dir]
@@ -295,4 +292,5 @@ function balancer.plan(state, route)
 end
 
 balancer.geometry = geometry
+balancer.equipment = equipment
 return balancer

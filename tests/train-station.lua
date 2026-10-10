@@ -94,9 +94,20 @@ end end end
 assert(station.output_count({})==8 and station.output_count({output_loading_side_choice="single"})==4)
 assert(not station.valid_choices({output_locomotive_count_choice=0}) and not station.valid_choices({output_wagon_count_choice=17}))
 local compact=assert(station.geometry(4,{},"express-transport-belt"))
-assert(compact.reference=="4_8" and #compact.specs<=610,"default station acquired a large balancer or long loader loops")
+assert(compact.reference=="4_8_balancer" and #compact.specs<=610,"default station acquired a large balancer or long loader loops")
 local three_to_eight=assert(station.geometry(3,{},"express-transport-belt"))
-assert(three_to_eight.reference=="3_8","3-to-8 station does not match the matrix blueprint")
+assert(three_to_eight.reference=="3_8_balancer","3-to-8 station does not match the matrix blueprint")
+local filtered=assert(station.geometry(4,{output_wagon_count_choice=3,output_loading_side_choice="single"},"express-transport-belt"))
+local filters=0
+for _,direction in ipairs{0,4,8,12} do for _,mirror in ipairs{false,true} do
+	local cursor=station.cursor_entities(filtered,direction,mirror)
+	for i,piece in ipairs(filtered.specs) do if piece.filter then
+		filters=filters+1
+		assert(cursor[i].filter==piece.filter,"station cursor lost splitter filter")
+		assert(cursor[i].output_priority==(mirror and "right" or "left"),"mirrored filter outlet is wrong")
+	end end
+end end
+assert(filters==8,"4-to-3 filter blueprint was not retained")
 local min_belt_x=math.huge
 for _,piece in ipairs(compact.specs) do
 	if piece.name=="express-transport-belt" or piece.name=="express-underground-belt" or piece.name=="express-splitter" then

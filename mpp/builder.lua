@@ -138,6 +138,7 @@ function builder.create_entity_builder(state, opts)
 			if not state.preview_only then
 				if ghost.input_priority then result.splitter_input_priority=ghost.input_priority end
 				if ghost.output_priority then result.splitter_output_priority=ghost.output_priority end
+				if ghost.filter and prototypes.entity[ghost.inner_name].type=="splitter" then result.splitter_filter=ghost.filter end
 				if ghost.station_name then result.backer_name=ghost.station_name;result.trains_limit=1 end
 			end
 			if ghost.thing and grid and not opts.diagnostic then
