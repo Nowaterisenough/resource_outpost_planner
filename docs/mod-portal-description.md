@@ -13,6 +13,9 @@ Plan mining patches and oil outposts in one interface. Select resources, inspect
 - Choose cliff avoidance or removal, and water/lava/lightning-pool avoidance or filling. Unsafe connections stay visible in red so you can adjust the plan.
 - Position belt outputs with a native blueprint cursor; rotate with **R / Shift+R**. Connections favor aligned runs and fewer bends.
 - Enable **Balance Outputs** when needed for railway loading. It starts disabled with **8** output belts for four cargo wagons loaded on both sides; choose 1 to 32 outputs and position the balancer with **Output**. Blocked sections turn red.
+- Generate a complete **loading station** from the Output section: choose 1 to 8 locomotives, 1 to 16 cargo wagons and one-sided or two-sided loading. Defaults to **2 locomotives, 4 wagons and both sides**; balanced output count follows the wagon configuration.
+- Include rails, a train stop, signals, rolling stock, buffer chests, inserters and poles in the station preview. **R / Shift+R** rotate and **H / V** mirror it. The belt module sits close to the wagons, with locomotives extending beyond the loading area.
+- Match the 1-to-8 balancer matrix to incoming and outgoing belts. Faster routing and obstacle queries reduce pauses when positioning outputs, including distant stations.
 - Select equipment qualities with compact icons below each picker. **Statistics** combines placement reports and belt load overlays.
 - Apply the plan to place construction ghosts, or cancel the current preview. Reselecting resources clears the planner's latest unfinished plan and old overlays, retaining completed buildings and other plans.
 
@@ -21,7 +24,7 @@ Plan mining patches and oil outposts in one interface. Select resources, inspect
 1. Press **Ctrl+M** or click the planner shortcut.
 2. Click **Select**, then drag over resources. Use **Shift + left-drag** to add another area. Click Select again or press **Q** to exit the tool.
 3. Inspect the preview and adjust the equipment and settings.
-4. Click **Output** to position or rotate belt outputs when needed. Click again or press **Q** to exit while keeping the target.
+4. Configure balanced belts or **Generate loading station** in the Output section, then click **Output** to position the preview. Rotate with **R / Shift+R**, or mirror a station with **H / V**. Click again or press **Q** to exit while keeping the target.
 5. Click **Apply** to place the construction plan, or **Cancel Preview** to discard the draft.
 
 ## Compatibility
@@ -55,6 +58,9 @@ Belt balancer layouts use **Raynquist's** designs from [Dogmai's balancer collec
 - 悬崖可选择避让或拆除，水、岩浆、雷池可选择避让或填补；无法连通的位置保留红色预览，方便调整。
 - 用原生蓝图光标放置传送带出口，按 **R / Shift+R** 旋转；连接尽量规整，减少弯折。
 - 接火车时可开启 **均分输出**：默认关闭，路数默认 **8**，适合 4 节货厢双面上货；可修改为 1 至 32 路，用 **输出** 放置均分器，受阻部分显示红色。
+- 在独立的输出区域启用 **生成装货站**，可设置 1 至 8 个车头、1 至 16 节货厢及单边或双边装货。默认 **2 车头、4 货厢、双边装货**，均分路数随编组自动计算。
+- 装货站预览包含铁路、车站、信号灯、列车、缓存箱、机械臂和电杆；**R / Shift+R** 旋转，**H / V** 镜像。输送模块靠近货厢，允许车头伸出装货区。
+- 按实际进出带数匹配 1 至 8 路矩阵均分蓝图；优化寻路和障碍查询，减少放置输出及远处车站时的卡顿。
 - 品质使用设备下方的小图标选择；**统计** 合并放置报告和传送带负载显示。
 - 点击应用后才生成建设蓝图；重新选区会清掉本规划器上次未施工的规划和旧叠层，保留已建成设备和其他规划。
 
@@ -63,7 +69,7 @@ Belt balancer layouts use **Raynquist's** designs from [Dogmai's balancer collec
 1. 按 **Ctrl+M** 或点击规划器快捷按钮。
 2. 点击 **选区** 后拖动框选资源；使用 **Shift + 鼠标左键拖动** 添加选区。再次点击选区或按 **Q** 退出工具。
 3. 查看预览，选择设备并修改配置。
-4. 需要时点击 **输出** 设置传送带出口并旋转；再次点击或按 **Q** 退出，保留出口位置。
+4. 在输出区域配置均分传送带或启用 **生成装货站**，再点击 **输出** 放置预览。**R / Shift+R** 旋转，装货站还可用 **H / V** 镜像；再次点击或按 **Q** 退出，保留出口位置。
 5. 点击 **应用** 放置建设蓝图，或点击 **取消预览** 丢弃草稿。
 
 ## 兼容说明
