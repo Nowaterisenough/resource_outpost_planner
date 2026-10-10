@@ -15,7 +15,9 @@ Plan mining patches and oil outposts in one interface. Select resources, inspect
 - Enable **Balance Outputs** when needed for railway loading. It starts disabled with **8** output belts for four cargo wagons loaded on both sides; choose 1 to 32 outputs and position the balancer with **Output**. Blocked sections turn red.
 - Generate a complete **loading station** from the Output section: choose 1 to 8 locomotives, 1 to 16 cargo wagons and one-sided or two-sided loading. Defaults to **2 locomotives, 4 wagons and both sides**; balanced output count follows the wagon configuration.
 - Include rails, a train stop, signals, rolling stock, buffer chests, inserters and poles in the station preview. **R / Shift+R** rotate and **H / V** mirror it. The belt module sits close to the wagons, with locomotives extending beyond the loading area.
-- Match the 1-to-8 balancer matrix to incoming and outgoing belts. Faster routing and obstacle queries reduce pauses when positioning outputs, including distant stations.
+- Use fixed, exact-count blueprints for the 1-to-8 input/output balancer matrix, preserving lane structure, underground connections, splitter priorities and filters. Two incoming belts and eight outputs use the original 2-to-8 template.
+- Red and blue belts support all 64 matrix combinations; yellow supports 60. Yellow 5-to-8, 6-to-5, 7-to-5 and 8-to-7 require a higher belt tier. Larger stations retain their extended output layouts.
+- Faster routing and obstacle queries reduce pauses when positioning outputs, including distant stations.
 - Select equipment qualities with compact icons below each picker. **Statistics** combines placement reports and belt load overlays.
 - Apply the plan to place construction ghosts, or cancel the current preview. Reselecting resources clears the planner's latest unfinished plan and old overlays, retaining completed buildings and other plans.
 
@@ -37,7 +39,7 @@ Disable the original **Mining Patch Planner**, or an earlier fork distributed un
 
 Maintained by **Nowaterisenough**. Based on **Mining Patch Planner** by **Rimbas**, with oil planning from **Oil Outpost Planner 1.7.0** by **Coppermine**. Distributed under the **MIT License**, with both original copyright notices retained.
 
-Belt balancer layouts use **Raynquist's** designs from [Dogmai's balancer collection](https://github.com/dogmaisea/factorio-balancers), retaining splitter priorities and underground belt connections.
+Belt balancer layouts use **Raynquist's** designs from [Dogmai's balancer collection](https://github.com/dogmaisea/factorio-balancers), retaining splitter priorities, filters and underground belt connections.
 
 [Source code and issue tracker](https://github.com/Nowaterisenough/resource_outpost_planner)
 
@@ -60,7 +62,9 @@ Belt balancer layouts use **Raynquist's** designs from [Dogmai's balancer collec
 - 接火车时可开启 **均分输出**：默认关闭，路数默认 **8**，适合 4 节货厢双面上货；可修改为 1 至 32 路，用 **输出** 放置均分器，受阻部分显示红色。
 - 在独立的输出区域启用 **生成装货站**，可设置 1 至 8 个车头、1 至 16 节货厢及单边或双边装货。默认 **2 车头、4 货厢、双边装货**，均分路数随编组自动计算。
 - 装货站预览包含铁路、车站、信号灯、列车、缓存箱、机械臂和电杆；**R / Shift+R** 旋转，**H / V** 镜像。输送模块靠近货厢，允许车头伸出装货区。
-- 按实际进出带数匹配 1 至 8 路矩阵均分蓝图；优化寻路和障碍查询，减少放置输出及远处车站时的卡顿。
+- 1 至 8 路输入、1 至 8 路输出使用固定矩阵中的同规格蓝图，保留双车道结构、地下带连接、分流器优先级和过滤设置；两条来带接八路输出时直接使用原始 2 进 8 出模板。
+- 红带、蓝带支持全部 64 种矩阵组合，黄带支持 60 种；黄带的 5 进 8 出、6 进 5 出、7 进 5 出、8 进 7 出需要升级传送带。较大装货站继续使用扩展输出布局。
+- 优化寻路和障碍查询，减少放置输出及远处车站时的卡顿。
 - 品质使用设备下方的小图标选择；**统计** 合并放置报告和传送带负载显示。
 - 点击应用后才生成建设蓝图；重新选区会清掉本规划器上次未施工的规划和旧叠层，保留已建成设备和其他规划。
 
@@ -82,6 +86,6 @@ Belt balancer layouts use **Raynquist's** designs from [Dogmai's balancer collec
 
 由 **Nowaterisenough** 维护，基于 **Rimbas** 的 **Mining Patch Planner**，集成 **Coppermine** 的 **Oil Outpost Planner 1.7.0** 规划引擎。采用 **MIT 许可证**，保留两位原作者的版权声明。
 
-传送带均分布局采用 [Dogmai 均分蓝图集](https://github.com/dogmaisea/factorio-balancers)中的 **Raynquist** 设计，保留分流器优先级和地下带连接。
+传送带均分布局采用 [Dogmai 均分蓝图集](https://github.com/dogmaisea/factorio-balancers)中的 **Raynquist** 设计，保留分流器优先级、过滤设置和地下带连接。
 
 [源码与问题反馈](https://github.com/Nowaterisenough/resource_outpost_planner)
