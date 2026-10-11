@@ -210,6 +210,7 @@ function station.plan(state,route)
 		connection.planned[#connection.planned+1]={name=state.belt_choice,grid_x=gx,grid_y=gy,direction=N}
 	end
 	connection.belt_input_targets={}
+	connection.interchangeable_belt_inputs=true
 	for i,p in ipairs(layout.inputs) do
 		local x,y=station.transform(p.x,p.y,direction,mirror)
 		local gx,gy=grid(anchor.x+x,anchor.y+y)

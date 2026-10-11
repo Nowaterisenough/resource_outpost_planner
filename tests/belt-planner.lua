@@ -82,6 +82,10 @@ local function target(spec,x,y,dir)
 end
 local function verify(state,specs)
 	local by_position={}
+	local destinations,used_destinations={},{}
+	if state.interchangeable_belt_inputs then
+		for _,p in ipairs(state.belt_input_targets) do destinations[p.x..","..p.y]=true end
+	end
 	for _,piece in ipairs(specs) do
 		local k=piece.grid_x..","..piece.grid_y
 		assert(not by_position[k],"lanes overlap at "..k)
@@ -101,7 +105,11 @@ local function verify(state,specs)
 			local next=by_position[(node.grid_x+delta.x)..","..(node.grid_y+delta.y)]
 			if not next then
 				assert(node.direction==state.belt_direction,"wrong output direction")
-				if state.belt_input_targets then
+				if state.interchangeable_belt_inputs then
+					local k=node.grid_x..","..node.grid_y
+					assert(destinations[k] and not used_destinations[k],"route misses or shares an interchangeable input")
+					used_destinations[k]=true
+				elseif state.belt_input_targets then
 					local destination=state.belt_input_targets[source_index]
 					assert(node.grid_x==destination.x and node.grid_y==destination.y,"route misses the balancer input")
 				elseif node.direction==N then
@@ -276,6 +284,75 @@ for _,piece in ipairs(err) do
 	assert(piece.grid_x<60 or piece.grid_x>86 or piece.grid_y<-85 or piece.grid_y>-42,"ingress crosses the compact station")
 end
 cases=cases+1
+
+for _,rotation in ipairs{"west","north","east","south"} do
+	for _,dir in ipairs{N,S} do
+		local spec=fixture(rotation,13)
+		local port_y=dir==N and 17 or 41
+		local state=assert(planner.create_state(spec,target(spec,65,port_y,dir),{}))
+		state.belt_input_targets={};state.planned={}
+		for i=1,spec.count do
+			state.belt_input_targets[i]={x=dir==N and 95-i or 81+i,y=port_y}
+		end
+		local station_top,station_bottom=dir==N and -5 or 42,dir==N and 16 or 70
+		for x=6,29 do for y=2,56 do
+			state.planned[#state.planned+1]={name="transport-belt",grid_x=x,grid_y=y,direction=W}
+		end end
+		for x=80,96 do for y=station_top,station_bottom do
+			state.planned[#state.planned+1]={name="transport-belt",grid_x=x,grid_y=y,direction=W}
+		end end
+		local ok,route=planner.plan(state)
+		assert(ok,"inward-facing station ports trap the large mining bundle: "..rotation.."/"..dir)
+		verify(state,route)
+		for _,piece in ipairs(route) do
+			local x,y=piece.grid_x,piece.grid_y
+			assert(not (x>=6 and x<=29 and y>=2 and y<=56),"outer corridor crosses the mine")
+			assert(not (x>=80 and x<=96 and y>=station_top and y<=station_bottom),"outer corridor crosses the station")
+		end
+		local finish=state.belt_input_targets[1]
+		state.grid={get_tile=function(_,x,y)
+			if x==finish.x and y==finish.y then return {built_thing="obstacle"} end
+		end}
+		assert(not planner.plan(state),"outer corridor bypasses a blocked station port")
+		cases=cases+2
+	end
+end
+
+for _,rotation in ipairs{"west","north","east","south"} do
+	local spec=fixture(rotation,13)
+	for i,belt in ipairs(spec) do belt.x_start=0;belt.y=3+(i-1)*8 end
+	local state=assert(planner.create_state(spec,target(spec,63,1,E),{}))
+	local targets={}
+	for i=1,13 do targets[i]={x=63,y=2-i} end
+	state.belt_input_targets=targets
+	local blocked_port
+	state.grid={get_tile=function(_,x,y)
+		if (x>=0 and x<=46 and y>=0 and y<=99) or (x>=64 and x<=95 and y>=-11 and y<=4)
+			or (blocked_port and x==blocked_port.x and y==blocked_port.y) then return {built_thing="obstacle"} end
+	end}
+	assert(not planner.plan(state),"fixed input assignments were silently changed")
+	state.interchangeable_belt_inputs=true
+	local ok,route=planner.plan(state)
+	assert(ok,"split bundle cannot reach interchangeable station inputs: "..rotation)
+	verify(state,route)
+	assert(state.belt_input_targets==targets,"routing replaced the caller's target array")
+	for i,p in ipairs(targets) do assert(p.x==63 and p.y==2-i,"routing reordered the caller's inputs") end
+	for _,piece in ipairs(route) do
+		assert(not state.grid:get_tile(piece.grid_x,piece.grid_y),"backward ingress crosses an obstacle")
+	end
+	if rotation=="west" then
+		local again,repeated=planner.plan(state)
+		assert(again and #route==#repeated,"repeated split routing changed length")
+		for i,p in ipairs(route) do
+			local q=repeated[i]
+			assert(p.grid_x==q.grid_x and p.grid_y==q.grid_y and p.direction==q.direction,"input reassignment is nondeterministic")
+		end
+		cases=cases+1
+	end
+	blocked_port=targets[5]
+	assert(not planner.plan(state),"input reassignment bypasses a blocked station port")
+	cases=cases+3
+end
 
 spec,data=fixture()
 local resource={valid=true}

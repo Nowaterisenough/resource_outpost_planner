@@ -446,8 +446,9 @@ local function straight_segments(points, allowed)
 	return route
 end
 
-local function route_bundle(state, reverse, negotiate, context)
+local function route_bundle(state, reverse, negotiate, outer_corridor, backward_budget, context)
 	local spec, dir = state.belt_specification, state.belt_direction
+	local corners=negotiate or backward_budget
 	context=context or {}
 	local key=context.key
 	if not key then
@@ -521,15 +522,15 @@ local function route_bundle(state, reverse, negotiate, context)
 			else exit_y=min(exit_y,finish.y) end
 		end
 		source_left=min(source_left,start.x)
-		if not negotiate and start.x==finish.x and start.y==finish.y then
+		if not corners and start.x==finish.x and start.y==finish.y then
 			return false,{"mpp.msg_obstacle_route_failed"},{routes=result,failed_lane=i,reason="overlap"}
 		end
-		if not reserve(start.x,start.y,i) or (not negotiate and not reserve(start.x-1,start.y,i)) then
+		if not reserve(start.x,start.y,i) or (not corners and not reserve(start.x-1,start.y,i)) then
 			return false,{"mpp.msg_obstacle_route_failed"},{routes=result,failed_lane=i,reason="overlap"}
 		end
 		local delta=util.direction_coord[dir]
 		for step=-1,1 do
-			if negotiate and step==-1 then goto next_reservation end
+			if corners and step==-1 then goto next_reservation end
 			if not reserve(finish.x+delta.x*step,finish.y+delta.y*step,step==1 and -i or i) then
 				return false,{"mpp.msg_obstacle_route_failed"},{routes=result,failed_lane=i,reason="overlap"}
 			end
@@ -562,7 +563,7 @@ local function route_bundle(state, reverse, negotiate, context)
 	end
 	local completed={}
 	local lane_routes, usage, history = {}, {}, {}
-	local budget=negotiate and {remaining=262144} or nil
+	local budget=backward_budget or negotiate and {remaining=262144} or nil
 	for pass=1,negotiate and 32 or 1 do
 		result,completed={},{}
 		for _, i in ipairs(order) do
@@ -586,15 +587,15 @@ local function route_bundle(state, reverse, negotiate, context)
 				return safe(x,y,k)
 			end
 			if not allowed(start.x,start.y) or not allowed(finish.x,finish.y)
-				or (not negotiate and (not allowed(start.x-1,start.y) or not allowed(approach.x,approach.y))) then
+				or (not corners and (not allowed(start.x-1,start.y) or not allowed(approach.x,approach.y))) then
 				return false,{"mpp.msg_obstacle_route_failed"},{routes=result,completed=completed,failed_lane=i,reason="blocked"}
 			end
 			-- The fast pass uses straight endpoints; replanning also permits endpoint corners.
 			occupied[key(start.x,start.y)]=true
-			if not negotiate then occupied[key(finish.x,finish.y)]=true end
+			if not corners then occupied[key(finish.x,finish.y)]=true end
 			routing=true
 			local route
-			if not negotiate and dir==WEST and exit_x<source_left
+			if not corners and dir==WEST and exit_x<source_left
 				and (output_y2<spec[1].y or output_y1>spec[spec.count].y) then
 				local rank=output_y2<spec[1].y and i or spec.count-i+1
 				local column=source_left-rank-1
@@ -605,7 +606,7 @@ local function route_bundle(state, reverse, negotiate, context)
 			end
 			-- Outputs behind the mine need nested U-shaped corridors rather than one lane enclosing the others.
 			local top=output_y1
-			if not negotiate and dir==WEST and exit_x>=source_left and (output_y2<spec[1].y or top>spec[spec.count].y) then
+			if not corners and dir==WEST and exit_x>=source_left and (output_y2<spec[1].y or top>spec[spec.count].y) then
 				local above=output_y2<spec[1].y
 				local rank=above and i or spec.count-i+1
 				local column=source_left-rank-1
@@ -617,7 +618,7 @@ local function route_bundle(state, reverse, negotiate, context)
 					{x=column,y=row},{x=far_column,y=row},{x=far_column,y=approach.y},approach},allowed)
 			end
 			-- Opposite-facing exits use nested, parallel corridors when the output band is outside the rows.
-			if not negotiate and dir==EAST and (output_y2<spec[1].y or output_y1>spec[spec.count].y) then
+			if not corners and dir==EAST and (output_y2<spec[1].y or output_y1>spec[spec.count].y) then
 				local column=source_left-(exit_y<spec[1].y and i or spec.count-i+1)
 				if approach.x>=column then
 					route=straight_segments({{x=start.x-1,y=start.y},{x=column,y=start.y},
@@ -625,12 +626,20 @@ local function route_bundle(state, reverse, negotiate, context)
 				end
 			end
 			-- A perpendicular outlet needs nested bends; the nearest lane must leave room for the outer lanes.
-			if not negotiate and exit_x>=source_left and
+			if not corners and exit_x>=source_left and
 				((dir==SOUTH and exit_y-spec.count>spec[spec.count].y)
 				or (dir==NORTH and exit_y+spec.count<spec[1].y)) then
 				local rank=dir==SOUTH and spec.count-i+1 or i
 				local column=source_left-rank
 				local row=dir==SOUTH and exit_y-i or exit_y+spec.count-i+1
+				route=straight_segments({{x=start.x-1,y=start.y},{x=column,y=start.y},
+					{x=column,y=row},{x=approach.x,y=row},approach},allowed)
+			end
+			if outer_corridor then
+				-- Inward-facing ports need nested bends beyond the entire mine and station.
+				local rank=dir==NORTH and spec.count-i+1 or i
+				local column=source_left-rank
+				local row=dir==NORTH and y2+rank or y1-rank
 				route=straight_segments({{x=start.x-1,y=start.y},{x=column,y=start.y},
 					{x=column,y=row},{x=approach.x,y=row},approach},allowed)
 			end
@@ -644,16 +653,24 @@ local function route_bundle(state, reverse, negotiate, context)
 					local k=key(x,y)
 					return (history[k] or 0)+(usage[k] or 0)*(8+pass*4)
 				end,budget)
-			else
+			elseif backward_budget then
+				-- East-facing inputs can be searched westward from the constrained port.
+				route=path(finish,start,EAST,function(x,y)
+					return (x==start.x and y==start.y) or allowed(x,y)
+				end,bounds,nil,budget)
+				if route then
+					for j=1,floor(#route/2) do route[j],route[#route-j+1]=route[#route-j+1],route[j] end
+				end
+			elseif not outer_corridor then
 				route=route or path({x=start.x-1,y=start.y},approach,dir,allowed,bounds)
 			end
 			if not route then
 				return false,{"mpp.msg_obstacle_route_failed"},{routes=result,completed=completed,failed_lane=i,reason="route"}
 			end
-			if not negotiate then
+			if not corners then
 				table.insert(route,1,start)
 				route[#route+1]=finish
-			else
+			elseif negotiate then
 				lane_routes[i]=route
 			end
 			for index, node in ipairs(route) do
@@ -688,16 +705,34 @@ end
 local function plan_routes(state)
 	-- Share only immutable cells within this synchronous call; lane reservations remain local to each attempt.
 	local context={}
-	local ok, result, diagnostic = route_bundle(state, false, nil, context)
+	local ok, result, diagnostic = route_bundle(state, false, nil, nil, nil, context)
 	if ok then return ok, result end
 	-- A greedy lane can close a corridor needed by the next lane; try the opposite order before failing.
 	if state.belt_specification.count>1 and diagnostic.reason~="overlap" then
-		local reversed, routes, other = route_bundle(state, true, nil, context)
+		local reversed, routes, other = route_bundle(state, true, nil, nil, nil, context)
 		if reversed then return true, routes end
 		if #other.routes>#diagnostic.routes then diagnostic=other end
 	end
-	local rerouted, routes = route_bundle(state, false, true, context)
+	if state.belt_direction==NORTH or state.belt_direction==SOUTH then
+		local wrapped, routes = route_bundle(state, false, false, true, nil, context)
+		if wrapped then return true, routes end
+	end
+	local rerouted, routes = route_bundle(state, false, true, nil, nil, context)
 	if rerouted then return true, routes end
+	if state.interchangeable_belt_inputs and state.belt_direction==EAST then
+		local targets=state.belt_input_targets
+		local alternate={}
+		for k,v in pairs(state) do alternate[k]=v end
+		alternate.belt_input_targets={}
+		local budget={remaining=65536}
+		-- A bundle split around the mine may need a cyclic input assignment.
+		for offset=1,min(#targets-1,8) do
+			for i=1,#targets do alternate.belt_input_targets[i]=targets[(i+offset-1)%#targets+1] end
+			local ok, result = route_bundle(alternate, false, false, false, budget, context)
+			if ok then return true, result end
+			if budget.remaining<=0 then break end
+		end
+	end
 	if not state.preview_only then return false, result end
 	local spec, dir = state.belt_specification, state.belt_direction
 	local delta=util.direction_coord[dir]
