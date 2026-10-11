@@ -99,11 +99,20 @@ for _,entity_type in ipairs(types) do
 		else
 			for direction_index,direction in ipairs(directions) do
 				if entity_type=="straight-rail" then
-					local layers={}
 					local facing=(direction=="north" or direction=="south") and "north" or "east"
 					local pictures=proto.pictures and proto.pictures[facing] or {}
-					for _,part in ipairs{"stone_path_lower","stone_path","tie","screw","metal"} do collect(pictures[part],layers,0) end
-					register(name,direction,layers)
+					for _,part in ipairs{
+						{"rail-stone-path-lower","stone_path_background","stone_path_lower"},
+						{"rail-stone-path","stone_path"},{"rail-tie","ties","tie"},
+						{"rail-screw","backplates","screw"},{"rail-metal","metals","metal"},
+					} do
+						local layers={};collect(pictures[part[2]] or pictures[part[3]],layers,0)
+						register(name,direction.."-"..part[1],layers)
+					end
+					-- Keep older saved preview handles valid until their next refresh.
+					local previous={}
+					for _,part in ipairs{"stone_path_lower","stone_path","tie","screw","metal"} do collect(pictures[part],previous,0) end
+					register(name,direction,previous)
 				elseif entity_type=="inserter" then
 					local layers={};collect(proto.platform_picture,layers,direction_index-1)
 					register(name,direction,layers)

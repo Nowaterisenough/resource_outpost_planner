@@ -66,7 +66,7 @@ local render_id=0
 rendering={draw_sprite=function(v)
 	drawn[#drawn+1]=v;render_id=render_id+1
 	local object={valid=true,id=render_id,definition=v,sprite=v.sprite,target=v.target,color=v.tint,
-		x_scale=v.x_scale,y_scale=v.y_scale,orientation=v.orientation or 0}
+		x_scale=v.x_scale,y_scale=v.y_scale,orientation=v.orientation or 0,render_layer=v.render_layer}
 	object.destroy=function() object.valid=false end
 	return object
 end,
@@ -249,4 +249,27 @@ local mixed_again,mixed_retained=reloaded.render(draft,{})
 assert(mixed_again[1]~=mixed[1] and mixed_again[1].definition.left_top[1]==-4,"missing tile lost its fallback rectangle")
 assert(mixed_again[2]==mixed[2] and mixed_retained[mixed[2].id] and not mixed_retained[mixed[1].id],"fallback rectangle shifted the sprite reuse sequence")
 cases=cases+6
+prototypes.entity.rail={type="straight-rail"}
+local rail_layers={"rail-stone-path-lower","rail-stone-path","rail-tie","rail-screw","rail-metal"}
+for _,direction in ipairs{"north","east","south","west"} do
+	for _,layer in ipairs(rail_layers) do sprites["mpp-preview-rail-"..direction.."-"..layer.."-1"]={} end
+end
+draft.specs={{name="entity-ghost",inner_name="rail",position={0,0},direction=E},
+	{name="entity-ghost",inner_name="rail",position={2,0},direction=E}}
+local rails=reloaded.render(draft,{})
+assert(#rails==10,"rail preview omitted ties, fasteners or metals")
+for i,layer in ipairs(rail_layers) do
+	assert(rails[i].render_layer==layer and rails[i+5].render_layer==layer,"adjacent rail components share the cursor layer")
+	assert(rails[i].sprite=="mpp-preview-rail-east-"..layer.."-1","horizontal rail uses wrong artwork")
+end
+draft.specs[1].direction=N;draft.specs[2].direction=N;draft.specs[2].position={0,2}
+local rotated=reloaded.render(draft,{})
+for i,layer in ipairs(rail_layers) do
+	assert(rotated[i]==rails[i] and rotated[i].sprite=="mpp-preview-rail-north-"..layer.."-1","rotation lost rail layer reuse")
+	assert(rotated[i].render_layer==layer,"rotated rail lost native layer")
+end
+draft.specs={{name="entity-ghost",inner_name="miner",position={.5,.5},direction=N}}
+local ordinary=reloaded.render(draft,{})
+assert(ordinary[1]==rotated[1] and ordinary[1].render_layer=="cursor","reused rail handle left ordinary artwork on the ground layer")
+cases=cases+17
 print("Preview renderer OK: "..cases.." artwork, topology, reuse, invalidation and isolation cases")

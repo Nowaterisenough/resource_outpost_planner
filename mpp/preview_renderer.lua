@@ -4,6 +4,7 @@ local renderer = {}
 local N,E,S,W,ROTATION = defines.direction.north,defines.direction.east,defines.direction.south,defines.direction.west,16
 local names={[N]="north",[E]="east",[S]="south",[W]="west"}
 local directions={N,E,S,W}
+local rail_layers={"rail-stone-path-lower","rail-stone-path","rail-tie","rail-screw","rail-metal"}
 local pipe_shapes={[0]="single",[1]="ending_up",[2]="ending_right",[4]="ending_down",[8]="ending_left",
 	[5]="straight_vertical",[10]="straight_horizontal",[3]="corner_up_right",[9]="corner_up_left",
 	[6]="corner_down_right",[12]="corner_down_left",[7]="t_right",[11]="t_up",[13]="t_left",[14]="t_down",[15]="cross"}
@@ -73,28 +74,34 @@ local function artwork(spec,tile,variant)
 	local sy=spec.mirror and not horizontal and -1 or 1
 	if spec.mirror and valid_sprite(base.."-flipped-1") then base=base.."-flipped";sx,sy=1,1 end
 	if not valid_sprite(base.."-1") then base=prefix..(names[direction] or "north") end
-	local function append(prefix,x_scale,y_scale,orientation)
+	local function append(prefix,x_scale,y_scale,orientation,render_layer)
 		local index=1
 		while valid_sprite(prefix..index) do
-			result[#result+1]={sprite=prefix..index,sx=x_scale,sy=y_scale,orientation=orientation or 0}
+			result[#result+1]={sprite=prefix..index,sx=x_scale,sy=y_scale,orientation=orientation or 0,render_layer=render_layer or "cursor"}
 			index=index+1
 		end
 	end
-	if valid_sprite(base.."-1") then append(base.."-",sx,sy)
-	elseif tile then result.rectangle=true
-	else
-		local box=obstacles.entity_box(spec.inner_name,{x=0,y=0},spec.direction)
-		local sprite="entity/"..spec.inner_name
-		if valid_sprite(sprite) then
-			result[1]={sprite=sprite,sx=sx*(box.right_bottom.x-box.left_top.x)/2,
-				sy=sy*(box.right_bottom.y-box.left_top.y)/2,orientation=0}
+	if not tile and entity_shape(spec.inner_name).type=="straight-rail" then
+		-- Native rail layers keep neighboring beds below every tie and metal segment.
+		for _,layer in ipairs(rail_layers) do append(prefix..(names[direction] or "north").."-"..layer.."-",sx,sy,0,layer) end
+	end
+	if #result==0 then
+		if valid_sprite(base.."-1") then append(base.."-",sx,sy)
+		elseif tile then result.rectangle=true
+		else
+			local box=obstacles.entity_box(spec.inner_name,{x=0,y=0},spec.direction)
+			local sprite="entity/"..spec.inner_name
+			if valid_sprite(sprite) then
+				result[1]={sprite=sprite,sx=sx*(box.right_bottom.x-box.left_top.x)/2,
+					sy=sy*(box.right_bottom.y-box.left_top.y)/2,orientation=0,render_layer="cursor"}
+			end
 		end
 	end
 	if not tile and entity_shape(spec.inner_name).type=="inserter" then
 		append("mpp-preview-"..spec.inner_name.."-hand-",1,1,direction/16)
 	end
 	for _,style in ipairs(result) do
-		style.key=style.sprite..":"..style.sx..":"..style.sy..":"..style.orientation
+		style.key=style.sprite..":"..style.sx..":"..style.sy..":"..style.orientation..":"..style.render_layer
 	end
 	options[k]=result
 	return result
@@ -216,7 +223,7 @@ function renderer.render(draft,choices)
 		local stored=styles[style.key]
 		if not stored then
 			-- Keep stored table sharing independent of local prototype caches after a join/load.
-			stored=previous_styles[style.key] or {sprite=style.sprite,sx=style.sx,sy=style.sy,orientation=style.orientation}
+			stored=previous_styles[style.key] or {sprite=style.sprite,sx=style.sx,sy=style.sy,orientation=style.orientation,render_layer=style.render_layer}
 			styles[style.key]=stored
 		end
 		style=stored
@@ -232,6 +239,7 @@ function renderer.render(draft,choices)
 				if old.sx~=style.sx then object.x_scale=style.sx end
 				if old.sy~=style.sy then object.y_scale=style.sy end
 				if old.orientation~=style.orientation then object.orientation=style.orientation end
+				if (old.render_layer or "cursor")~=style.render_layer then object.render_layer=style.render_layer end
 			end
 			if entry[4]~=x or entry[5]~=y then object.target=pos end
 			if entry[6]~=color then object.color=tint end
@@ -241,7 +249,7 @@ function renderer.render(draft,choices)
 			-- Reuse the ordered prefix only, so replacing an invalid handle preserves layer order.
 			reusable=nil
 			local object=rendering.draw_sprite{surface=draft.surface,players={player},sprite=style.sprite,target=pos,
-				x_scale=style.sx,y_scale=style.sy,tint=tint,orientation=style.orientation,render_layer="cursor",light_mode="glow"}
+				x_scale=style.sx,y_scale=style.sy,tint=tint,orientation=style.orientation,render_layer=style.render_layer,light_mode="glow"}
 			entry={object,object.id,style,x,y,color}
 		end
 		entries[#entries+1]=entry
