@@ -243,7 +243,12 @@ function preview.complete(state)
 	end
 	draft.ready=not draft.error
 	if state._apply_after_preview then
-		if draft.ready then commit(data)
+		if draft.ready then
+			if commit(data) then
+				-- Keep the current overlay until the queued build finishes or reports a failure.
+				preview.update_gui(data)
+				return
+			end
 		else draft.applying=false end
 	end
 	render(data,draft)

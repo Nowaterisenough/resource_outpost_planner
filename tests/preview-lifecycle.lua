@@ -63,7 +63,22 @@ local function fixture()
 	return draft,overlays,prior
 end
 
-local draft,overlays
+local draft,overlays,prior=fixture()
+assert(preview.apply(data) and draft.applying,"Apply did not start validation")
+assert(calls.recheck==1 and calls.commit==0 and #storage.tasks==1,"Apply bypassed its safety check")
+local validation=storage.tasks[1]
+assert(validation.preview_only and validation._apply_after_preview)
+preview.complete(validation)
+assert(calls.validation==1 and calls.commit==1 and #storage.tasks==2,"validated plan was not queued for construction")
+local build=storage.tasks[2]
+assert(build._from_preview and build._undo_state==prior,"build handoff lost Undo state")
+assert(draft.applying and not data.gui.preview_apply.enabled,"Apply became available during construction")
+assert(calls.render==0 and calls.statistics==0 and calls.cursor==0,"successful Apply redrew its temporary preview")
+assert(draft.renderings==overlays and overlays[1].valid and overlays[2].valid,"existing preview disappeared before construction")
+table.remove(storage.tasks,1)
+preview.applied(build)
+assert(not data.preview and calls.destroyed==2,"completed construction left stale preview objects")
+
 draft,overlays=fixture()
 preview.complete(state{entities=draft.resources,preview_only=true,preview_revision=1})
 assert(calls.render==1 and calls.statistics==1 and calls.cursor==1,"ordinary preview refresh was skipped")
@@ -76,4 +91,23 @@ assert(draft.renderings[1]==overlays[1] and #draft.renderings==2)
 preview.cancel(data)
 assert(calls.destroyed==3 and not overlays[1].valid and not data.preview,"Cancel leaked a reused sprite")
 
-print("Preview lifecycle OK: ordinary refresh, retained sprites and cancellation")
+draft,overlays=fixture()
+assert(preview.apply(data))
+validation=storage.tasks[1];validation.preview_error={"mpp.output_balance_blocked"}
+preview.complete(validation)
+assert(not draft.applying and not draft.ready and not data.gui.preview_apply.enabled,"failed validation can still Apply")
+assert(calls.commit==0 and calls.render==1 and calls.rendered_error==validation.preview_error,"failed validation lost its diagnostic preview")
+assert(not overlays[1].valid and #storage.tasks==1,"failed validation queued construction or kept stale overlays")
+
+draft=fixture()
+assert(preview.apply(data))
+build_error={"mpp.msg_miner_err_0"}
+preview.complete(storage.tasks[1])
+assert(calls.commit==1 and #storage.tasks==0,"failed build preparation left a task queued")
+assert(not draft.applying and not draft.ready and calls.render>0,"build preparation failure was hidden by the fast path")
+assert(calls.rendered_error==build_error and not data.gui.preview_apply.enabled)
+
+draft,overlays=fixture()
+preview.complete(state{entities=draft.resources,preview_only=true,preview_revision=0})
+assert(calls.render==0 and calls.validation==0 and calls.commit==0 and overlays[1].valid,"stale result changed the active preview")
+print("Preview lifecycle OK: validation, successful build handoff, overlay cleanup, both failure paths and stale results")
