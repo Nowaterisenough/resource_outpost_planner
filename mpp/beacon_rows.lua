@@ -86,6 +86,103 @@ function rows.reserve(state)
 	end
 end
 
+function rows.prune_poles(state)
+	local poles = state.builder_power_poles
+	if #poles==0 then return end
+	local radius,reach = state.pole.supply_area_distance or state.pole.radius,state.pole.wire
+	local size = max(1,reach)
+	local nodes,buckets,counts = {},{},{}
+	local function bucket(x,y) return x..","..y end
+	for i,spec in ipairs(poles) do
+		local p = rows.position(state,spec)
+		local node = {position=p,neighbors={},consumers={},active=true}
+		nodes[i] = node
+		local x,y = floor(p.x/size),floor(p.y/size)
+		for bx=x-1,x+1 do for by=y-1,y+1 do
+			for _,j in ipairs(buckets[bucket(bx,by)] or {}) do
+				local q = nodes[j].position
+				if (p.x-q.x)^2+(p.y-q.y)^2<=reach^2 then
+					node.neighbors[#node.neighbors+1]=j
+					nodes[j].neighbors[#nodes[j].neighbors+1]=i
+				end
+			end
+		end end
+		local k = bucket(x,y)
+		buckets[k]=buckets[k] or {};buckets[k][#buckets[k]+1]=i
+	end
+	for _,list in ipairs{state.builder_miners or {},state.builder_beacons or {}} do
+		for _,spec in ipairs(list) do
+			if prototypes.entity[spec.name].electric_energy_source_prototype then
+				local _,box = rows.position(state,spec)
+				local c = #counts+1;counts[c]=0
+				for x=floor((box.left_top.x-radius)/size),floor((box.right_bottom.x+radius)/size) do
+					for y=floor((box.left_top.y-radius)/size),floor((box.right_bottom.y+radius)/size) do
+						for _,i in ipairs(buckets[bucket(x,y)] or {}) do
+							local p = nodes[i].position
+							if p.x+radius>box.left_top.x and p.x-radius<box.right_bottom.x
+								and p.y+radius>box.left_top.y and p.y-radius<box.right_bottom.y then
+								nodes[i].consumers[#nodes[i].consumers+1]=c;counts[c]=counts[c]+1
+							end
+						end
+					end
+				end
+			end
+		end
+	end
+	-- Delete sparse outer poles first, retaining every consumer and every necessary wire bridge.
+	local order = {};for i=1,#nodes do order[i]=i end
+	table.sort(order,function(a,b)
+		local na,nb=nodes[a],nodes[b]
+		if #na.consumers~=#nb.consumers then return #na.consumers<#nb.consumers end
+		if #na.neighbors~=#nb.neighbors then return #na.neighbors<#nb.neighbors end
+		return a<b
+	end)
+	local budget = max(65536,#nodes*64)
+	local function removable(i)
+		local node=nodes[i]
+		for _,c in ipairs(node.consumers) do if counts[c]<=1 then return false end end
+		local wanted,remaining,first={},0
+		for _,j in ipairs(node.neighbors) do if nodes[j].active then
+			wanted[j]=true;remaining=remaining+1;first=first or j
+		end end
+		if remaining<=1 then return true end
+		local queue,seen,head={first},{[first]=true,[i]=true},1
+		wanted[first]=nil;remaining=remaining-1
+		while head<=#queue do
+			if budget<=0 then return false end
+			budget=budget-1
+			local current=nodes[queue[head]];head=head+1
+			for _,j in ipairs(current.neighbors) do
+				if nodes[j].active and not seen[j] then
+					seen[j]=true;queue[#queue+1]=j
+					if wanted[j] then
+						wanted[j]=nil;remaining=remaining-1
+						if remaining==0 then return true end
+					end
+				end
+			end
+		end
+		return false
+	end
+	local changed=true
+	while changed do
+		changed=false
+		for _,i in ipairs(order) do
+			local node=nodes[i]
+			if node.active and removable(i) then
+				node.active=false;changed=true
+				for _,c in ipairs(node.consumers) do counts[c]=counts[c]-1 end
+			end
+		end
+	end
+	local kept={}
+	for i,spec in ipairs(poles) do
+		if nodes[i].active then kept[#kept+1]=spec
+		else state.grid:build_thing_simple(spec.grid_x,spec.grid_y,nil) end
+	end
+	state.builder_power_poles=kept
+end
+
 function rows.finish(state)
 	local proto = prototypes.entity[state.beacon_choice]
 	local distance = proto.get_supply_area_distance(state.beacon_quality_choice or "normal")

@@ -118,19 +118,11 @@ function layout:prepare_pole_layout(state)
 		return tile and not tile.built_thing and not outputs[x..","..y]
 	end
 	local function place(x,y,light)
-		local spec = {name=state.pole_choice,quality=state.pole_quality_choice,thing="pole",grid_x=x,grid_y=y}
+		local spec = {name=state.pole_choice,quality=state.pole_quality_choice,thing="pole",grid_x=x,grid_y=y,no_light=not light}
 		local _,box = rows.position(state,spec)
 		if free(x,y) and (not selected or not obstacles.blocked_box(selected,box)) then
 			state.builder_power_poles[#state.builder_power_poles+1] = spec
 			G:build_thing_simple(x,y,"pole")
-			if light and state.lamp_choice and free(x-1,y) then
-				local lamp = {name="small-lamp",thing="lamp",grid_x=x-1,grid_y=y}
-				local _,lb = rows.position(state,lamp)
-				if not selected or not obstacles.blocked_box(selected,lb) then
-					state.builder_lamps[#state.builder_lamps+1] = lamp
-					G:build_thing_simple(x-1,y,"lamp")
-				end
-			end
 		end
 	end
 	for i=0,state.miner_lane_count do
@@ -159,6 +151,18 @@ function layout:prepare_pole_layout(state)
 					for _,belt in ipairs(state.belts) do if belt.y==y then output=true;break end end
 					if not output and free(px,y) then place(px,y,false);break end
 				end
+			end
+		end
+	end
+	rows.prune_poles(state)
+	for _,pole in ipairs(state.builder_power_poles) do
+		local x,y=pole.grid_x-1,pole.grid_y
+		if not pole.no_light and state.lamp_choice and free(x,y) then
+			local lamp={name="small-lamp",thing="lamp",grid_x=x,grid_y=y}
+			local _,box=rows.position(state,lamp)
+			if not selected or not obstacles.blocked_box(selected,box) then
+				state.builder_lamps[#state.builder_lamps+1]=lamp
+				G:build_thing_simple(x,y,"lamp")
 			end
 		end
 	end
