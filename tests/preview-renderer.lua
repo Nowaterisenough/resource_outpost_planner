@@ -62,10 +62,18 @@ assert(renderer.variant(spec,{}, {})=="east-output","underground output lost")
 cases=cases+3
 
 local drawn={}
-rendering={draw_sprite=function(v) drawn[#drawn+1]=v; return {valid=true} end,
+local render_id=0
+rendering={draw_sprite=function(v)
+	drawn[#drawn+1]=v;render_id=render_id+1
+	local object={valid=true,id=render_id,definition=v,sprite=v.sprite,target=v.target,color=v.tint,
+		x_scale=v.x_scale,y_scale=v.y_scale,orientation=v.orientation or 0}
+	object.destroy=function() object.valid=false end
+	return object
+end,
 	draw_rectangle=function() error("native artwork still has an occupancy rectangle") end}
-helpers={is_valid_sprite_path=function(name) return sprites[name]~=nil end}
-game={get_player=function() return {force={}} end}
+local sprite_checks=0
+helpers={is_valid_sprite_path=function(name) sprite_checks=sprite_checks+1;return sprites[name]~=nil end}
+game={get_player=function(index) return {index=index,force={}} end}
 local surface={find_entities_filtered=function() return {} end,can_place_entity=function(v) return v.position.x~=4.5 end}
 local draft={surface=surface,player_index=1,specs={
 	{name="entity-ghost",inner_name="miner",position={0.5,0.5},direction=N},
@@ -79,17 +87,166 @@ assert(drawn[2].tint==prototypes.utility_constants.building_not_buildable_tint a
 assert(drawn[3].target[1]==0.5 and drawn[3].target[2]==0.5,"tile texture is off-center")
 assert(drawn[1].render_layer=="cursor" and drawn[1].light_mode=="glow","preview differs from blueprint visibility")
 cases=cases+4
+local first_checks=sprite_checks
+drawn={}
+surface.can_place_entity=function() return true end
+local updated,retained=renderer.render(draft,{})
+assert(sprite_checks==first_checks,"unchanged sprite paths were queried again, including missing variants")
+assert(#drawn==0 and updated[2].y_scale==-1,"cached sprite lost mirrored artwork")
+assert(updated[2].color==prototypes.utility_constants.building_buildable_tint,"sprite cache hid a live placement change")
+assert(updated[1]==objects[1] and updated[3]==objects[3] and updated[2]==objects[2],"sprite handles were rebuilt")
+assert(retained[objects[1].id] and retained[objects[3].id] and retained[objects[2].id],"retained object ownership is wrong")
+cases=cases+3
 
 draft.specs={{name="entity-ghost",inner_name="miner",position={0.5,0.5},direction=N,preview_blocked=true}}
 drawn={}
-renderer.render(draft,{})
-assert(drawn[1].tint==prototypes.utility_constants.building_not_buildable_tint,"unconnected but physically placeable belt stays green")
+local failed=renderer.render(draft,{})
+assert(failed[1].color==prototypes.utility_constants.building_not_buildable_tint,"unconnected but physically placeable belt stays green")
 local obstacles=package.loaded["mpp.obstacles"]
 obstacles.collect=function(_,_,_,choices) assert(choices.avoid_cliffs_choice);return {} end
 obstacles.blocked_box=function() return true end
 draft.specs[1].preview_blocked=nil
 drawn={}
-renderer.render(draft,{avoid_cliffs_choice=true,deconstruction_choice=true})
-assert(drawn[1].tint==prototypes.utility_constants.building_not_buildable_tint,"forced placement overrides a selected obstacle in the preview")
+local selected=renderer.render(draft,{avoid_cliffs_choice=true,deconstruction_choice=true})
+assert(selected[1]==failed[1] and #drawn==0,"unchanged blocked sprite was rebuilt")
+assert(selected[1].color==prototypes.utility_constants.building_not_buildable_tint,"forced placement overrides a selected obstacle in the preview")
 cases=cases+2
-print("Preview renderer OK: "..cases.." artwork, topology and blueprint rendering cases")
+selected[1].destroy()
+local restored=renderer.render(draft,{avoid_cliffs_choice=true})
+assert(restored[1].valid and restored[1]~=selected[1],"externally destroyed sprite was reused")
+draft.player_index=2
+local other_player=renderer.render(draft,{})
+assert(other_player[1]~=restored[1] and other_player[1].definition.players[1].index==2,"sprite leaked between players")
+draft.surface={find_entities_filtered=function() return {} end,can_place_entity=function() return true end}
+local other_surface=renderer.render(draft,{})
+assert(other_surface[1]~=other_player[1] and other_surface[1].definition.surface==draft.surface,"sprite remained on the old surface")
+
+draft.specs={{name="entity-ghost",inner_name="belt",position={.5,.5},direction=N}}
+local straight=renderer.render(draft,{})
+draft.specs[2]={name="entity-ghost",inner_name="belt",position={-.5,.5},direction=E}
+local curved=renderer.render(draft,{})
+assert(curved[1]==straight[1] and curved[1].sprite=="mpp-preview-belt-west_to_north-1","neighbor changes left stale belt artwork")
+
+draft.specs={draft.specs[1],draft.specs[1]}
+local duplicates=renderer.render(draft,{})
+local next_duplicates=renderer.render(draft,{})
+assert(duplicates[1]~=duplicates[2] and next_duplicates[1]~=next_duplicates[2],"identical overlapping layers share one object")
+draft.specs[3]=draft.specs[1]
+local ordered=renderer.render(draft,{})
+ordered[2].destroy()
+local repaired,repair_retained=renderer.render(draft,{})
+assert(repaired[1]==ordered[1] and repaired[2]~=ordered[2] and repaired[3]~=ordered[3],"invalid handle did not rebuild the remaining draw order")
+assert(repaired[1].id<repaired[2].id and repaired[2].id<repaired[3].id and not repair_retained[ordered[3].id])
+
+prototypes.entity.arm={type="inserter"}
+for _,name in ipairs{"mpp-preview-arm-north-1","mpp-preview-arm-east-1","mpp-preview-arm-hand-1"} do sprites[name]={} end
+draft.specs={{name="entity-ghost",inner_name="arm",position={.5,.5},direction=N}}
+local north_arm=renderer.render(draft,{})
+draft.specs[1].direction=E
+local east_arm=renderer.render(draft,{})
+assert(#east_arm==2 and east_arm[2]==north_arm[2] and east_arm[2].orientation==.25,"rotated inserter reused a stale hand")
+local other_draft={surface=draft.surface,player_index=draft.player_index,specs=draft.specs}
+renderer.render(other_draft,{})
+local style_before=draft.sprite_renderings.entries[1][3]
+assert(style_before~=other_draft.sprite_renderings.entries[1][3],"separate drafts share local cache tables through storage")
+package.loaded["mpp.preview_renderer"]=nil
+local reloaded=require("mpp.preview_renderer")
+local after_load,load_retained=reloaded.render(draft,{})
+assert(after_load[1]==east_arm[1] and load_retained[east_arm[1].id],"script reload lost persisted sprite ownership")
+assert(draft.sprite_renderings.entries[1][3]==style_before,"script reload changed persisted style table sharing")
+reloaded.render(other_draft,{})
+assert(other_draft.sprite_renderings.entries[1][3]~=style_before,"reloaded drafts started sharing local cache tables")
+cases=cases+14
+
+local prototype_reads=0
+local boxes={{pipe_connections={
+	{connection_type="normal",direction=N,positions={{1,-2},{2,1},{-1,2},{-2,-1}}},
+	{connection_type="normal",direction=E,positions={{2,-1},{1,2},{-2,1},{-1,-2}}},
+	{connection_type="underground",direction=N,positions={{0,-2},{2,0},{0,2},{-2,0}}},
+	{connection_type="normal",direction=N,positions={}},
+}}}
+prototypes.entity.machine=setmetatable({type="assembling-machine"},{__index=function(_,name)
+	if name=="fluidbox_prototypes" then prototype_reads=prototype_reads+1;return boxes end
+end})
+local connections={
+	{dir=N,offset={1,-3},shape="ending_down"},
+	{dir=N,mirror=true,offset={-1,-3},shape="ending_down"},
+	{dir=E,offset={3,1},shape="ending_left"},
+	{dir=E,mirror=true,offset={3,-1},shape="ending_left"},
+	{dir=S,offset={-1,3},shape="ending_up"},
+	{dir=S,mirror=true,offset={1,3},shape="ending_up"},
+	{dir=W,offset={-3,-1},shape="ending_right"},
+	{dir=W,mirror=true,offset={-3,1},shape="ending_right"},
+	{dir=N,offset={3,-1},shape="ending_left"},
+	{dir=N,mirror=true,offset={-3,-1},shape="ending_right"},
+	{dir=E,offset={1,3},shape="ending_up"},
+	{dir=E,mirror=true,offset={1,-3},shape="ending_down"},
+	{dir=S,offset={-3,1},shape="ending_right"},
+	{dir=S,mirror=true,offset={3,1},shape="ending_left"},
+	{dir=W,offset={-1,-3},shape="ending_down"},
+	{dir=W,mirror=true,offset={-1,3},shape="ending_up"},
+}
+for _,name in ipairs{"single","ending_up","ending_down","ending_left","ending_right"} do
+	sprites["mpp-preview-pipe-"..name.."-1"]={}
+end
+local live_entities={}
+draft.surface.find_entities_filtered=function() return live_entities end
+for _,connection in ipairs(connections) do
+	for _,source in ipairs{"spec","entity","ghost"} do
+		local x,y=10+connection.offset[1],20+connection.offset[2]
+		local pipe={name="entity-ghost",inner_name="pipe",position={x,y}}
+		local machine={name="entity-ghost",inner_name="machine",position={10,20},direction=connection.dir,mirror=connection.mirror}
+		draft.specs={pipe};live_entities={}
+		if source=="spec" then draft.specs[2]=machine
+		else live_entities[1]={valid=true,name="machine",type=source=="ghost" and "entity-ghost" or "assembling-machine",
+			ghost_name="machine",ghost_type="assembling-machine",position={10,20},direction=connection.dir,mirroring=connection.mirror} end
+		local connected=reloaded.render(draft,{})
+		assert(connected[1].sprite=="mpp-preview-pipe-"..connection.shape.."-1","cached fluid port lost direction/mirror for "..source)
+		draft.specs={pipe};live_entities={}
+		local disconnected=reloaded.render(draft,{})
+		assert(disconnected[1].sprite=="mpp-preview-pipe-single-1","cached prototype kept a removed world connection")
+		cases=cases+1
+	end
+end
+assert(prototype_reads==1,"fluidbox prototypes are still read per entity or direction")
+draft.specs={{name="entity-ghost",inner_name="pipe",position={10,17}},
+	{name="entity-ghost",inner_name="machine",position={10,20},direction=N}}
+assert(reloaded.render(draft,{})[1].sprite=="mpp-preview-pipe-single-1","underground connection became a surface port")
+cases=cases+2
+
+prototypes.entity.fallback={type="electric-pole"}
+sprites["entity/fallback"]={}
+local original_box=obstacles.entity_box
+obstacles.entity_box=function(name,pos,dir)
+	if name~="fallback" then return original_box(name,pos,dir) end
+	local x,y=pos.x or pos[1],pos.y or pos[2]
+	return {left_top={x=x-1,y=y-2},right_bottom={x=x+1,y=y+2}}
+end
+draft.specs={{name="entity-ghost",inner_name="fallback",position={12,15},direction=E,mirror=true}}
+local fallback=reloaded.render(draft,{})
+assert(fallback[1].sprite=="entity/fallback" and fallback[1].x_scale==1 and fallback[1].y_scale==-2,"cached fallback lost collision-box scale or mirror")
+draft.specs[1].position={-7,-9}
+local moved_fallback=reloaded.render(draft,{})
+assert(moved_fallback[1]==fallback[1] and moved_fallback[1].target[1]==-7 and moved_fallback[1].y_scale==-2,"cached fallback retained the old position")
+
+prototypes.entity.flipped={type="assembling-machine"}
+sprites["mpp-preview-flipped-north-1"]={}
+sprites["mpp-preview-flipped-north-flipped-1"]={}
+draft.specs={{name="entity-ghost",inner_name="flipped",position={.5,.5},mirror=true}}
+local flipped=reloaded.render(draft,{})
+assert(flipped[1].sprite=="mpp-preview-flipped-north-flipped-1" and flipped[1].x_scale==1,"native flipped artwork was mirrored twice")
+draft.specs[1].mirror=false
+assert(reloaded.render(draft,{})[1].sprite=="mpp-preview-flipped-north-1","cached artwork retained the mirrored variant")
+
+rendering.draw_rectangle=function(v)
+	render_id=render_id+1
+	return {valid=true,id=render_id,definition=v}
+end
+draft.specs={{name="tile-ghost",inner_name="missing-tile",position={-4,-6}},
+	{name="entity-ghost",inner_name="miner",position={.5,.5}}}
+local mixed=reloaded.render(draft,{})
+local mixed_again,mixed_retained=reloaded.render(draft,{})
+assert(mixed_again[1]~=mixed[1] and mixed_again[1].definition.left_top[1]==-4,"missing tile lost its fallback rectangle")
+assert(mixed_again[2]==mixed[2] and mixed_retained[mixed[2].id] and not mixed_retained[mixed[1].id],"fallback rectangle shifted the sprite reuse sequence")
+cases=cases+6
+print("Preview renderer OK: "..cases.." artwork, topology, reuse, invalidation and isolation cases")

@@ -8,8 +8,10 @@ local output_preview = require("mpp.output_preview")
 local preview = {}
 local render
 
-local function destroy(objects)
-	for _, object in pairs(objects or {}) do if object.valid then object.destroy() end end
+local function destroy(objects,retained)
+	for _, object in pairs(objects or {}) do
+		if object.valid and not (retained and retained[object.id]) then object.destroy() end
+	end
 end
 
 function preview.dispose_task(state)
@@ -193,8 +195,8 @@ function preview.tick()
 end
 
 render = function(data,draft)
-	local objects=preview_renderer.render(draft,data.choices)
-	destroy(draft.renderings)
+	local objects,retained=preview_renderer.render(draft,data.choices)
+	destroy(draft.renderings,retained)
 	draft.renderings=objects
 end
 
