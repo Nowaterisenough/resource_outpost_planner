@@ -47,7 +47,9 @@ for heads=1,8 do for wagons=1,16 do for _,side in ipairs{"single","double"} do
 		end
 	end
 	local sides=side=="single" and 1 or 2
-	assert(counts.locomotive==heads and counts["cargo-wagon"]==wagons)
+	assert(not counts.locomotive and not counts["cargo-wagon"],"station creates rolling-stock ghosts")
+	assert(layout.locomotives==heads and layout.wagons==wagons,"station lost the requested train dimensions")
+	assert(counts["straight-rail"]==math.ceil((7*(heads+wagons)+2)/2)+3,"rail length no longer fits the chosen train")
 	assert(layout.outputs==wagons*sides and counts["steel-chest"]==wagons*sides*6)
 	assert(counts["bulk-inserter"]==wagons*sides*12 and #layout.loading_inputs==wagons*sides)
 	for _,piece in ipairs(layout.specs) do

@@ -36,7 +36,7 @@ function station.geometry(inputs,choices,belt_name)
 	local reference,err=balancer.geometry(inputs,outputs,belt_name,"matrix")
 	if not reference then return nil,err end
 	local inserter=prototypes.entity["bulk-inserter"] and "bulk-inserter" or "fast-inserter"
-	for _,name in ipairs{"straight-rail","train-stop","locomotive","cargo-wagon","steel-chest","medium-electric-pole",inserter} do
+	for _,name in ipairs{"straight-rail","train-stop","steel-chest","medium-electric-pole",inserter} do
 		if not prototypes.entity[name] then return nil,{"mpp.output_station_equipment",name} end
 	end
 	local specs,keepout={},{}
@@ -114,9 +114,6 @@ function station.geometry(inputs,choices,belt_name)
 	if prototypes.entity["rail-signal"] and prototypes.entity["rail-chain-signal"] then
 		add("rail-signal",left+2.5,-1.5,E,{station_control=true,station_signal=true})
 		add("rail-chain-signal",right-2.5,-1.5,E,{station_control=true,station_signal=true})
-	end
-	for i=1,heads+wagons do
-		add(i<=heads and "locomotive" or "cargo-wagon",3+7*(i-1),0,W,{station_stock=true})
 	end
 	for _,side in ipairs(double and {-1,1} or {-1}) do
 		-- Vanilla inserters pick up to the north and drop to the south at direction zero.
