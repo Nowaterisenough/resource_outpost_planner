@@ -283,9 +283,10 @@ end
 
 -- Track arrival direction and penalize turns so equal-length routes use long straight runs.
 local function path(start, finish, finish_direction, allowed, bounds, penalty, budget)
-	local heap, best = {}, {}
+	local heap, best, allowed_cells = {}, {}, {}
+	local penalties=penalty and {}
 	local turn_cost = 8
-	local sequence = 0
+	local sequence,heap_size = 0,0
 	local stride=math.ceil(bounds.x2-bounds.x1)+3
 	local function node_key(x,y,direction)
 		return ((y-bounds.y1)*stride+x-bounds.x1)*4+direction/4
@@ -293,83 +294,126 @@ local function path(start, finish, finish_direction, allowed, bounds, penalty, b
 	local function estimate(x,y,direction)
 		local dx,dy=finish.x-x,finish.y-y
 		local distance=abs(dx)+abs(dy)
-		if distance==0 then return 0 end
+		if distance==0 then return 0,0 end
 		local horizontal=dx>0 and EAST or WEST
 		local vertical=dy>0 and SOUTH or NORTH
 		local turns
 		if dx==0 then turns=direction==vertical and 0 or 1
 		elseif dy==0 then turns=direction==horizontal and 0 or 1
 		else turns=(direction==horizontal or direction==vertical) and 1 or 2 end
-		return distance+turns*turn_cost
+		return distance+turns*turn_cost,distance
 	end
+	-- Compact search records: score, turns, distance, sequence, x, y, direction, cost, previous, key.
 	local function before(a,b)
-		if a.score~=b.score then return a.score<b.score end
-		if a.turns~=b.turns then return a.turns<b.turns end
-		if a.distance~=b.distance then return a.distance<b.distance end
-		return a.sequence<b.sequence
+		local left,right=a[1],b[1]
+		if left~=right then return left<right end
+		left,right=a[2],b[2]
+		if left~=right then return left<right end
+		left,right=a[3],b[3]
+		if left~=right then return left<right end
+		return a[4]<b[4]
 	end
 	local function push(node)
 		sequence=sequence+1
-		node.sequence=sequence
-		local i = #heap+1
-		while i>1 and before(node,heap[floor(i/2)]) do
-			heap[i]=heap[floor(i/2)]; i=floor(i/2)
+		node[4]=sequence
+		heap_size=heap_size+1
+		local i = heap_size
+		while i>1 do
+			local parent=floor(i/2)
+			if not before(node,heap[parent]) then break end
+			heap[i]=heap[parent];i=parent
 		end
 		heap[i]=node
 	end
 	local function pop()
-		local node, tail = heap[1], table.remove(heap)
-		if #heap>0 then
+		local node, tail = heap[1],heap[heap_size]
+		heap[heap_size]=nil
+		heap_size=heap_size-1
+		if heap_size>0 then
 			local i=1
-			while i*2<=#heap do
+			-- The tail usually belongs near a leaf; descend first, then sift it back up.
+			while i*2<=heap_size do
 				local child=i*2
-				if child<#heap and before(heap[child+1],heap[child]) then child=child+1 end
-				if not before(heap[child],tail) then break end
+				if child<heap_size and before(heap[child+1],heap[child]) then child=child+1 end
 				heap[i]=heap[child]; i=child
+			end
+			while i>1 do
+				local parent=floor(i/2)
+				if not before(tail,heap[parent]) then break end
+				heap[i]=heap[parent];i=parent
 			end
 			heap[i]=tail
 		end
 		return node
 	end
-	start.direction=WEST
-	if start.x==finish.x and start.y==finish.y and start.direction==(finish_direction+SOUTH)%ROTATION then return end
-	start.turns=0
-	start.distance=abs(start.x-finish.x)+abs(start.y-finish.y)
-	start.cost=start.distance==0 and start.direction~=finish_direction and turn_cost or 0
-	start.score=start.cost+estimate(start.x,start.y,start.direction)
-	start.key=node_key(start.x,start.y,start.direction)
-	best[start.key]=start.cost
-	push(start)
+	if start.x==finish.x and start.y==finish.y and WEST==(finish_direction+SOUTH)%ROTATION then return end
+	local distance=abs(start.x-finish.x)+abs(start.y-finish.y)
+	if budget and budget.remaining<=0 then return end
+	if distance>0 then
+		-- A sealed destination cannot be reached, regardless of turns or congestion costs.
+		local entry=false
+		for _,dir in ipairs(search_directions) do
+			if dir~=(finish_direction+SOUTH)%ROTATION then
+				local delta=util.direction_coord[dir]
+				local x,y=finish.x-delta.x,finish.y-delta.y
+				if x==start.x and y==start.y then entry=true;break end
+				if x>=bounds.x1 and x<=bounds.x2 and y>=bounds.y1 and y<=bounds.y2 then
+					local cell=node_key(x,y,dir)-dir/4
+					local passable=not not allowed(x,y)
+					allowed_cells[cell]=passable
+					if passable then entry=true;break end
+				end
+			end
+		end
+		if not entry then return end
+	end
+	local cost=distance==0 and WEST~=finish_direction and turn_cost or 0
+	local k=node_key(start.x,start.y,WEST)
+	best[k]=cost
+	push{cost+estimate(start.x,start.y,WEST),0,distance,0,start.x,start.y,WEST,cost,nil,k}
 	local visits=0
-	while #heap>0 and visits<131072 and (not budget or budget.remaining>0) do
+	while heap_size>0 and visits<131072 and (not budget or budget.remaining>0) do
 		local node=pop()
-		if node.cost==best[node.key] then
+		local nx,ny,arrival,previous_cost=node[5],node[6],node[7],node[8]
+		if previous_cost==best[node[10]] then
 			visits=visits+1
 			if budget then budget.remaining=budget.remaining-1 end
-			if node.x==finish.x and node.y==finish.y then
+			if nx==finish.x and ny==finish.y then
 				local result={}
-				while node do result[#result+1]=node; node=node.previous end
+				while node do result[#result+1]={x=node[5],y=node[6]}; node=node[9] end
 				local ordered={}
 				for i=#result,1,-1 do ordered[#ordered+1]=result[i] end
 				return ordered
 			end
-			for _, dir in ipairs(search_directions) do
-				if dir==(node.direction+SOUTH)%ROTATION then goto continue end
+			for direction_index=1,4 do
+				local dir=search_directions[direction_index]
+				if dir==(arrival+SOUTH)%ROTATION then goto continue end
 				local delta=util.direction_coord[dir]
-				local x,y=node.x+delta.x,node.y+delta.y
+				local x,y=nx+delta.x,ny+delta.y
 				if x==finish.x and y==finish.y and dir==(finish_direction+SOUTH)%ROTATION then goto continue end
+				if x<bounds.x1 or x>bounds.x2 or y<bounds.y1 or y>bounds.y2 then goto continue end
 				local k=node_key(x,y,dir)
-				local turns=node.turns+(dir~=node.direction and 1 or 0)
-				local cost=node.cost+1+(dir~=node.direction and turn_cost or 0)+(penalty and penalty(x,y) or 0)
+				local cell=k-dir/4
+				local extra=0
+				if penalties then
+					extra=penalties[cell]
+					if extra==nil then extra=penalty(x,y);penalties[cell]=extra end
+				end
+				local turning=dir~=arrival
+				local turns=node[2]+(turning and 1 or 0)
+				local cost=previous_cost+1+(turning and turn_cost or 0)+extra
 				if x==finish.x and y==finish.y and dir~=finish_direction then
 					cost=cost+turn_cost
 					turns=turns+1
 				end
-				local distance=abs(x-finish.x)+abs(y-finish.y)
-				if x>=bounds.x1 and x<=bounds.x2 and y>=bounds.y1 and y<=bounds.y2
-					and (not best[k] or cost<best[k]) and allowed(x,y) then
+				if not best[k] or cost<best[k] then
+					-- Occupancy and congestion are fixed within a search, independent of arrival direction.
+					local passable=allowed_cells[cell]
+					if passable==nil then passable=allowed(x,y);allowed_cells[cell]=passable end
+					if not passable then goto continue end
+					local remaining,distance=estimate(x,y,dir)
 					best[k]=cost
-					push{x=x,y=y,key=k,direction=dir,turns=turns,cost=cost,score=cost+estimate(x,y,dir),distance=distance,previous=node}
+					push{cost+remaining,turns,distance,0,x,y,dir,cost,node,k}
 				end
 				::continue::
 			end
@@ -402,8 +446,21 @@ local function straight_segments(points, allowed)
 	return route
 end
 
-local function route_bundle(state, reverse, negotiate)
+local function route_bundle(state, reverse, negotiate, context)
 	local spec, dir = state.belt_specification, state.belt_direction
+	context=context or {}
+	local key=context.key
+	if not key then
+		local cell_rows,cell_count={},0
+		key=function(x,y)
+			local row=cell_rows[y]
+			if not row then row={};cell_rows[y]=row end
+			local id=row[x]
+			if not id then cell_count=cell_count+1;id=cell_count;row[x]=id end
+			return id
+		end
+		context.key=key
+	end
 	local occupied, reserved, sources, outputs, result = {}, {}, {}, {}, {}
 	local x1,y1,x2,y2 = state.belt_x,state.belt_y,state.belt_x,state.belt_y
 	local exit_x,exit_y=state.belt_x,state.belt_y
@@ -427,14 +484,22 @@ local function route_bundle(state, reverse, negotiate)
 			end
 		end
 	end
-	for _, entity in ipairs(state.planned or {}) do
-		if prototypes.entity[entity.name] then
-			local pos=world(state,entity.grid_x,entity.grid_y)
-			occupy(obstacles.entity_box(entity.name,pos,util.bp_direction[state.direction_choice][entity.direction or NORTH]))
+	if context.occupied_count then
+		for k=1,context.occupied_count do occupied[k]=true end
+		x1,y1,x2,y2=context.bounds[1],context.bounds[2],context.bounds[3],context.bounds[4]
+	else
+		for _, entity in ipairs(state.planned or {}) do
+			if prototypes.entity[entity.name] then
+				local pos=world(state,entity.grid_x,entity.grid_y)
+				occupy(obstacles.entity_box(entity.name,pos,util.bp_direction[state.direction_choice][entity.direction or NORTH]))
+			end
 		end
-	end
-	for _, ghost in pairs(state._collected_ghosts or {}) do
-		if ghost.valid and ghost.type=="entity-ghost" then occupy(ghost.bounding_box) end
+		for _, ghost in pairs(state._collected_ghosts or {}) do
+			if ghost.valid and ghost.type=="entity-ghost" then occupy(ghost.bounding_box) end
+		end
+		-- Geometry gets the first contiguous cell IDs, before reservations or routes allocate more.
+		context.occupied_count=#occupied
+		context.bounds={x1,y1,x2,y2}
 	end
 	for i, belt in ipairs(spec) do
 		local start={x=belt.x_start-1, y=belt.y}
@@ -479,9 +544,9 @@ local function route_bundle(state, reverse, negotiate)
 	local corner1,corner2=world(state,bounds.x1,bounds.y1),world(state,bounds.x2,bounds.y2)
 	state._belt_search_area={{min(corner1.x,corner2.x)-1,min(corner1.y,corner2.y)-1},
 		{max(corner1.x,corner2.x)+1,max(corner1.y,corner2.y)+1}}
-	local safe_cache={}
-	local function safe(x,y)
-		local k=key(x,y)
+	local safe_cache,grid_clear=context.safe or {},context.grid_clear or {}
+	context.safe,context.grid_clear=safe_cache,grid_clear
+	local function safe(x,y,k)
 		if safe_cache[k]==nil then
 			safe_cache[k]=obstacles.can_place(state,state.belt_choice,world(state,x,y),NORTH)
 		end
@@ -508,9 +573,17 @@ local function route_bundle(state, reverse, negotiate)
 			local function allowed(x,y)
 				local k=key(x,y)
 				local own_start=x==start.x and y==start.y
-				local tile=state.grid and state.grid:get_tile(x,y)
-				return (not reserved[k] or reserved[k]==i) and ((own_start and not routing) or not occupied[k])
-					and (own_start or not tile or not tile.built_thing) and safe(x,y)
+				if (reserved[k] and reserved[k]~=i) or (not (own_start and not routing) and occupied[k]) then return false end
+				if not own_start then
+					local clear=grid_clear[k]
+					if clear==nil then
+						local tile=state.grid and state.grid:get_tile(x,y)
+						clear=not tile or not tile.built_thing
+						grid_clear[k]=clear
+					end
+					if not clear then return false end
+				end
+				return safe(x,y,k)
 			end
 			if not allowed(start.x,start.y) or not allowed(finish.x,finish.y)
 				or (not negotiate and (not allowed(start.x-1,start.y) or not allowed(approach.x,approach.y))) then
@@ -613,15 +686,17 @@ local function route_bundle(state, reverse, negotiate)
 end
 
 local function plan_routes(state)
-	local ok, result, diagnostic = route_bundle(state, false)
+	-- Share only immutable cells within this synchronous call; lane reservations remain local to each attempt.
+	local context={}
+	local ok, result, diagnostic = route_bundle(state, false, nil, context)
 	if ok then return ok, result end
 	-- A greedy lane can close a corridor needed by the next lane; try the opposite order before failing.
 	if state.belt_specification.count>1 and diagnostic.reason~="overlap" then
-		local reversed, routes, other = route_bundle(state, true)
+		local reversed, routes, other = route_bundle(state, true, nil, context)
 		if reversed then return true, routes end
 		if #other.routes>#diagnostic.routes then diagnostic=other end
 	end
-	local rerouted, routes = route_bundle(state, false, true)
+	local rerouted, routes = route_bundle(state, false, true, context)
 	if rerouted then return true, routes end
 	if not state.preview_only then return false, result end
 	local spec, dir = state.belt_specification, state.belt_direction

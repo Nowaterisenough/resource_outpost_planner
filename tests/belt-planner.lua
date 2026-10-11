@@ -537,7 +537,43 @@ do
 	spec.surface.find_tiles_filtered=function(filter) scanned[#scanned+1]=filter.area;return {water} end
 	local state=assert(planner.create_state(spec,destination,{avoid_water_choice=true}))
 	assert(not planner.plan(state),"expanded search ignores a selected water obstacle")
-	assert(#scanned==2 and scanned[2][1][1]<scanned[1][1][1],"expanded search reuses the smaller obstacle index")
+	assert(#scanned==1,"a known blocked destination triggers redundant obstacle scans")
+	cases=cases+1
+end
+
+do
+	local spec=fixture("west",1)
+	local water={}
+	for _,y in ipairs{-31,31} do
+		local p=target(spec,0,y,W).position
+		water[#water+1]={name="water",position={x=math.floor(p.x),y=math.floor(p.y)},
+			prototype={collision_mask={layers={water_tile=true}},default_cover_tile={name="landfill"}}}
+	end
+	local scanned={}
+	spec.surface.find_tiles_filtered=function(filter)
+		local area=filter.area;scanned[#scanned+1]=area
+		local found={}
+		for _,tile in ipairs(water) do
+			local p=tile.position
+			if p.x>=area[1][1] and p.x<area[2][1] and p.y>=area[1][2] and p.y<area[2][2] then found[#found+1]=tile end
+		end
+		return found
+	end
+	local state=assert(planner.create_state(spec,target(spec,-12,5,W),{avoid_water_choice=true}))
+	local grid_calls={}
+	state.grid={get_tile=function(_,x,y)
+		local k=x..","..y
+		assert(not grid_calls[k],"immutable grid occupancy is queried again during a retry")
+		grid_calls[k]=true
+		if x==0 and y>=-30 and y<=30 then return {built_thing="obstacle"} end
+	end}
+	local ok,route=planner.plan(state)
+	assert(ok,"expanded search cannot route around the wall and newly scanned water")
+	verify(state,route)
+	assert(#scanned==2 and scanned[2][1][1]<scanned[1][1][1],"expanded search reused the smaller obstacle index")
+	for _,piece in ipairs(route) do
+		assert(piece.grid_x~=0 or math.abs(piece.grid_y)>31,"retry cache hides an obstacle outside the initial search area")
+	end
 	cases=cases+1
 end
 
