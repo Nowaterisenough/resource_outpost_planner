@@ -446,9 +446,40 @@ local function straight_segments(points, allowed)
 	return route
 end
 
-local function route_bundle(state, reverse, negotiate, outer_corridor, backward_budget, context)
+-- Monotone moves retain minimum belt length; vertical-first search postpones outward expansion.
+local function edge_path(start, finish, allowed, key, budget)
+	if finish.x>start.x then return end
+	local step=finish.y>start.y and 1 or -1
+	local xs,ys,stages,dead={start.x},{start.y},{0},{}
+	local depth=1
+	while depth>0 do
+		local x,y=xs[depth],ys[depth]
+		if x==finish.x and y==finish.y then
+			local route={}
+			for i=1,depth do route[i]={x=xs[i],y=ys[i]} end
+			return route
+		end
+		local phase=stages[depth]
+		if phase==0 then
+			if budget.remaining<=0 then return end
+			budget.remaining=budget.remaining-1
+		end
+		stages[depth]=phase+1
+		local nx,ny=x,y
+		if phase==0 and y~=finish.y then ny=y+step
+		elseif phase==1 and x>finish.x then nx=x-1
+		elseif phase>=2 then dead[key(x,y)]=true;depth=depth-1;goto continue
+		else goto continue end
+		if not dead[key(nx,ny)] and allowed(nx,ny) then
+			depth=depth+1;xs[depth],ys[depth],stages[depth]=nx,ny,0
+		end
+		::continue::
+	end
+end
+
+local function route_bundle(state, reverse, negotiate, outer_corridor, backward_budget, context, edge_priority)
 	local spec, dir = state.belt_specification, state.belt_direction
-	local corners=negotiate or backward_budget
+	local corners=negotiate or backward_budget or edge_priority
 	context=context or {}
 	local key=context.key
 	if not key then
@@ -539,6 +570,24 @@ local function route_bundle(state, reverse, negotiate, outer_corridor, backward_
 		x1,y1=min(x1,start.x,finish.x),min(y1,start.y,finish.y)
 		x2,y2=max(x2,start.x,finish.x),max(y2,start.y,finish.y)
 	end
+	local middle_turn_ranks
+	if dir==WEST and exit_x<source_left and output_y2>=spec[1].y and output_y1<=spec[spec.count].y then
+		local ordered,south_rank=true,0
+		for i=1,spec.count do
+			if i>1 and outputs[i].y<outputs[i-1].y then ordered=false;break end
+			if outputs[i].y>sources[i].y then south_rank=south_rank+1 end
+		end
+		if ordered then
+			-- Gather above and below the outlet separately, with the nearest row on the inside.
+			middle_turn_ranks={}
+			local north_rank=0
+			for i=1,spec.count do
+				if outputs[i].y>sources[i].y then middle_turn_ranks[i]=south_rank;south_rank=south_rank-1
+				elseif outputs[i].y<sources[i].y then north_rank=north_rank+1;middle_turn_ranks[i]=north_rank
+				else middle_turn_ranks[i]=0 end
+			end
+		end
+	end
 	local padding=max(negotiate and 48 or 16,spec.count+4)
 	local bounds={x1=x1-padding,y1=y1-padding,x2=x2+padding,y2=y2+padding}
 	state._belt_search_margin=padding+max(0,-x1,-y1,x2-state.coords.tw,y2-state.coords.th)+2
@@ -561,9 +610,16 @@ local function route_bundle(state, reverse, negotiate, outer_corridor, backward_
 	if reverse then
 		for i=1,floor(spec.count/2) do order[i],order[spec.count-i+1]=order[spec.count-i+1],order[i] end
 	end
+	if edge_priority then
+		table.sort(order,function(a,b)
+			local da,db=abs(outputs[a].y-sources[a].y),abs(outputs[b].y-sources[b].y)
+			if da~=db then return da<db end
+			return a<b
+		end)
+	end
 	local completed={}
 	local lane_routes, usage, history = {}, {}, {}
-	local budget=backward_budget or negotiate and {remaining=262144} or nil
+	local budget=backward_budget or edge_priority and {remaining=65536} or negotiate and {remaining=262144} or nil
 	for pass=1,negotiate and 32 or 1 do
 		result,completed={},{}
 		for _, i in ipairs(order) do
@@ -596,8 +652,8 @@ local function route_bundle(state, reverse, negotiate, outer_corridor, backward_
 			routing=true
 			local route
 			if not corners and dir==WEST and exit_x<source_left
-				and (output_y2<spec[1].y or output_y1>spec[spec.count].y) then
-				local rank=output_y2<spec[1].y and i or spec.count-i+1
+				and (middle_turn_ranks or output_y2<spec[1].y or output_y1>spec[spec.count].y) then
+				local rank=middle_turn_ranks and middle_turn_ranks[i] or (output_y2<spec[1].y and i or spec.count-i+1)
 				local column=source_left-rank-1
 				if approach.x<=column then
 					route=straight_segments({{x=start.x-1,y=start.y},{x=column,y=start.y},
@@ -643,7 +699,10 @@ local function route_bundle(state, reverse, negotiate, outer_corridor, backward_
 				route=straight_segments({{x=start.x-1,y=start.y},{x=column,y=start.y},
 					{x=column,y=row},{x=approach.x,y=row},approach},allowed)
 			end
-			if negotiate then
+			if edge_priority then
+				-- Prefer the vertical move while it can reach the outlet; widen only at obstructions.
+				route=edge_path(start,finish,allowed,key,budget)
+			elseif negotiate then
 				for _,node in ipairs(lane_routes[i] or {}) do
 					local k=key(node.x,node.y)
 					usage[k]=usage[k]-1
@@ -705,6 +764,10 @@ end
 local function plan_routes(state)
 	-- Share only immutable cells within this synchronous call; lane reservations remain local to each attempt.
 	local context={}
+	if state.belt_direction==WEST and not state.belt_input_targets then
+		local compact, routes=route_bundle(state,false,false,false,nil,context,true)
+		if compact then return true,routes end
+	end
 	local ok, result, diagnostic = route_bundle(state, false, nil, nil, nil, context)
 	if ok then return ok, result end
 	-- A greedy lane can close a corridor needed by the next lane; try the opposite order before failing.

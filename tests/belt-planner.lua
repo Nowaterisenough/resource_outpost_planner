@@ -137,15 +137,16 @@ local function route_stats(state,specs)
 	for _,piece in ipairs(specs) do by_position[piece.grid_x..","..piece.grid_y]=piece end
 	for i,source in ipairs(state.belt_specification) do
 		local node=by_position[(source.x_start-1)..","..source.y]
-		local turns,length=0,0
+		local turns,length,first_turn=0,0
 		while node do
 			length=length+1
+			if not first_turn and node.direction~=W then first_turn={x=node.grid_x,y=node.grid_y} end
 			local delta=util.direction_coord[node.direction]
 			local next=by_position[(node.grid_x+delta.x)..","..(node.grid_y+delta.y)]
 			if next and node.direction~=next.direction then turns=turns+1 end
 			node=next
 		end
-		stats[i]={turns=turns,length=length}
+		stats[i]={turns=turns,length=length,first_turn=first_turn}
 	end
 	return stats
 end
@@ -176,8 +177,13 @@ for _,rotation in ipairs{"west","north","east","south"} do
 		local ok,route=planner.plan(state)
 		assert(ok,"tidy route failed")
 		verify(state,route)
-		for _,stat in ipairs(route_stats(state,route)) do
-			assert(stat.turns<=((dir==N or dir==S) and 1 or 2),"open route has unnecessary turns: "..rotation.."/"..dir.."/"..stat.turns)
+		for i,stat in ipairs(route_stats(state,route)) do
+			if dir==W then
+				local finish_y=state.belt_y+i-spec.count
+				assert(stat.length==spec[i].x_start-1-state.belt_x+math.abs(spec[i].y-finish_y)+1,"compact gathering lengthens an open route")
+			else
+				assert(stat.turns<=((dir==N or dir==S) and 1 or 2),"open route has unnecessary turns: "..rotation.."/"..dir.."/"..stat.turns)
+			end
 		end
 		local repeated,route_again=planner.plan(state)
 		assert(repeated and #route_again==#route,"routing is not deterministic")
@@ -196,6 +202,77 @@ for _,y in ipairs{-15,35} do
 	verify(state,route)
 	for _,stat in ipairs(route_stats(state,route)) do assert(stat.turns==2,"opposite-facing belts fail to gather in parallel corridors") end
 	cases=cases+1
+end
+
+for _,rotation in ipairs{"west","north","east","south"} do
+	for _,exit_x in ipairs{-20,-60} do
+		local spec=fixture(rotation,6)
+		for i,belt in ipairs(spec) do belt.y=5+(i-1)*10 end
+		local state=assert(planner.create_state(spec,target(spec,exit_x,25,W),{}))
+		local ok,route=planner.plan(state)
+		assert(ok,"middle outlet cannot gather lanes from both sides")
+		verify(state,route)
+		for i,stats in ipairs(route_stats(state,route)) do
+			assert(stats.first_turn.x==5,"middle outlet leaves an empty margin before turning")
+			assert(stats.length==5-exit_x+math.abs(spec[i].y-(19+i))+1,"early turns lengthen the open route")
+		end
+		state.grid={get_tile=function(_,x,y)
+			if x==5 and y==18 then return {built_thing="obstacle"} end
+		end}
+		ok,route=planner.plan(state)
+		assert(ok,"preferred early bend prevents an available detour")
+		verify(state,route)
+		for _,p in ipairs(route) do assert(not state.grid:get_tile(p.grid_x,p.grid_y),"early bend crosses an obstacle") end
+		cases=cases+2
+	end
+end
+
+for _,rotation in ipairs{"west","north","east","south"} do
+	local spec=fixture(rotation,3)
+	local starts={10,5,20}
+	for i,belt in ipairs(spec) do belt.x_start=starts[i]+1;belt.y=(i-1)*10 end
+	local state=assert(planner.create_state(spec,target(spec,-12,-8,W),{}))
+	state.grid={get_tile=function(_,x,y)
+		if (x>=11 and x<=30 and ((y>=-5 and y<=-1) or (y>=1 and y<=5)))
+			or (x>=6 and x<=30 and ((y>=6 and y<=9) or (y>=11 and y<=14)))
+			or (x>=21 and x<=35 and ((y>=15 and y<=19) or (y>=21 and y<=25))) then
+			return {built_thing="miner"}
+		end
+	end}
+	local ok,route=planner.plan(state)
+	assert(ok,"contour gathering cannot connect an uneven mining boundary")
+	verify(state,route)
+	local cells={}
+	for _,p in ipairs(route) do
+		assert(not state.grid:get_tile(p.grid_x,p.grid_y),"contour gathering enters a miner")
+		cells[p.grid_x..","..p.grid_y]=p
+	end
+	assert(cells["20,19"] and cells["5,14"] and cells["4,10"],"outside lane does not follow the mining and inner-lane boundaries")
+	for i,stats in ipairs(route_stats(state,route)) do
+		assert(stats.first_turn.x==starts[i],"contour gathering extends a tail before its first bend")
+		assert(stats.length==starts[i]+12+math.abs(spec[i].y-(-11+i))+1,"contour gathering adds belt length")
+	end
+	cases=cases+1
+end
+
+do
+	local function trim(options,pole_x,first_drop)
+		local belt={is_output=true,x_start=0,x_entry=12,x1=first_drop or 14,y=4}
+		local state={belts={belt},miner={},belt={related_underground_belt="underground-belt"},
+			belt_choice="transport-belt",direction_choice="west",belt_planner_choice=true,belt_target={direction=W},
+			grid={get_tile=function(_,x,y) if y==4 and x==pole_x then return {built_thing="pole"} end end}}
+		for k,v in pairs(options or {}) do state[k]=v end
+		common.create_belt_building_environment(state)
+		return belt.x_start
+	end
+	assert(trim()==12,"ordinary connected mining row retains its aligned empty tail")
+	assert(trim(nil,11)==10,"trimmed output collides with an inline pole or severs its underground bypass")
+	assert(trim(nil,nil,10)==10,"trimming removes the first drill's receiving belt")
+	for _,options in ipairs{{belt_merge_choice=true},{output_balance_choice=true},{output_station_choice=true},
+		{belt_target=false},{belt_target={direction=E}}} do
+		assert(trim(options)==0,"tail trimming changes an unsupported or unconnected layout")
+	end
+	cases=cases+8
 end
 
 local cliff={valid=true,type="cliff",prototype={collision_mask={layers={}}},

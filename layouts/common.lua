@@ -705,6 +705,22 @@ function common.create_belt_building_environment(state)
 	local belt_choice = state.belt_choice
 	local underground_choice = B.related_underground_belt
 	local quality_choice = state.belt_quality_choice
+	-- Unmerged ordinary outlets can start at their own drill row instead of the patch-wide alignment.
+	if state.belt_planner_choice and state.belt_target and not state.belt_merge_choice
+		and not state.output_balance_choice and not state.output_station_choice
+		and state.belt_target.direction==mpp_util.bp_direction[state.direction_choice][WEST] then
+		for _,belt in ipairs(belts) do
+			if belt.is_output and belt.x_entry and belt.x1 then
+				local start=math.floor(math.min(belt.x_entry,belt.x1))
+				while start>belt.x_start do
+					local tile,exit=G:get_tile(start,belt.y),G:get_tile(start-1,belt.y)
+					if not (tile and tile.built_thing) and not (exit and exit.built_thing) then break end
+					start=start-1
+				end
+				belt.x_start=math.max(belt.x_start,start)
+			end
+		end
+	end
 
 	-- Function verb explanation
 	-- create - add specific entity to the builder list (like LuaSurface.create_entity)
