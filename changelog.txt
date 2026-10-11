@@ -1,4 +1,15 @@
 ---------------------------------------------------------------------------------------------------
+Version: 1.9.9
+Date: 2026-10-11
+  Optimizations:
+    - Try bounded reverse searches for interchangeable loading-station inputs before expensive congestion negotiation, retaining the original search budgets and fallback.
+  Bugfixes:
+    - Render complete rail artwork with stone beds, ties, backplates and metals on their native layers, preventing adjacent rail segments from obscuring each other.
+    - Preserve rail layer selection when preview sprites are reused, and retain legacy sprite names for saved previews.
+  Changes:
+    - Stop including locomotives and cargo wagons in loading-station previews, cursor blueprints and construction ghosts.
+    - Continue using locomotive and wagon counts to determine track length and loading positions; players supply their own trains.
+---------------------------------------------------------------------------------------------------
 Version: 1.9.8
 Date: 2026-10-11
   Changes:

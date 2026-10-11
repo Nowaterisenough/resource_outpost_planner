@@ -11,7 +11,7 @@ Plan mining patches and oil outposts in one interface. Select resources, inspect
 - Plan pumpjacks, pipe networks, poles, beacons, qualities and heating on cold surfaces.
 - Place continuous beacon rows on both sides of drill columns, with independent drill and beacon modules.
 - Choose cliff avoidance or removal, and water/lava/lightning-pool avoidance or filling. Unsafe connections stay visible in red so you can adjust the plan.
-- Position belt outputs with a native blueprint cursor; rotate with **R / Shift+R**. Connections favor aligned runs and fewer bends.
+- Position belt outputs with a native blueprint cursor; rotate with **R / Shift+R**. Same-facing connections turn along the equipment boundary to keep the footprint compact.
 - Enable **Balance Outputs** when needed for railway loading. It starts disabled with **8** output belts for four cargo wagons loaded on both sides; choose 1 to 32 outputs and position the balancer with **Output**. Blocked sections turn red.
 - Generate a complete **loading station** from the Output section: choose 1 to 8 locomotives, 1 to 16 cargo wagons and one-sided or two-sided loading. Defaults to **2 locomotives, 4 wagons and both sides**; balanced output count follows the wagon configuration.
 - Include rails, a train stop, signals, buffer chests, inserters and poles in the station preview. Train counts set the layout dimensions without adding rolling-stock ghosts. **R / Shift+R** rotate and **H / V** mirror it. The belt module sits close to the wagons, with locomotives extending beyond the loading area.
@@ -58,7 +58,7 @@ Belt balancer layouts use **Raynquist's** designs from [Dogmai's balancer collec
 - 油田支持抽油机、管网、电杆、插件塔、实体品质和寒冷星球供热。
 - 在矿机两侧摆放连续整排插件塔，设备内插件和塔内插件分别配置。
 - 悬崖可选择避让或拆除，水、岩浆、雷池可选择避让或填补；无法连通的位置保留红色预览，方便调整。
-- 用原生蓝图光标放置传送带出口，按 **R / Shift+R** 旋转；连接尽量规整，减少弯折。
+- 用原生蓝图光标放置传送带出口，按 **R / Shift+R** 旋转；同向出口优先贴着设备轮廓转弯，压紧占地。
 - 接火车时可开启 **均分输出**：默认关闭，路数默认 **8**，适合 4 节货厢双面上货；可修改为 1 至 32 路，用 **输出** 放置均分器，受阻部分显示红色。
 - 在独立的输出区域启用 **生成装货站**，可设置 1 至 8 个车头、1 至 16 节货厢及单边或双边装货。默认 **2 车头、4 货厢、双边装货**，均分路数随编组自动计算。
 - 装货站预览包含铁路、车站、信号灯、缓存箱、机械臂和电杆，编组数量仅用于计算布局尺寸，不生成列车虚影；**R / Shift+R** 旋转，**H / V** 镜像。输送模块靠近货厢，允许车头伸出装货区。
