@@ -1,4 +1,20 @@
 ---------------------------------------------------------------------------------------------------
+Version: 1.9.8
+Date: 2026-10-11
+  Changes:
+    - Prefer compact same-facing belt connections that turn beside drills and follow the equipment boundary.
+    - Shorten unused tails of unmerged mining rows while preserving receiving belts and underground bypasses.
+    - Prune redundant poles in full beacon-row layouts before routing belts, retaining consumer coverage and necessary wire connections.
+    - Place lamps only beside retained poles.
+  Optimizations:
+    - Filter irrelevant entities during engine obstacle scans and reuse immutable spatial data across routing retries.
+    - Reduce search-node allocation and priority-queue overhead; reject sealed destinations before exhaustive searches.
+    - Cache preview artwork and prototype connection geometry, reuse drawing objects, and skip duplicate drawing after successful Apply validation.
+  Bugfixes:
+    - Connect inward-facing loading-station inputs using bounded outer corridors and alternative assignments for interchangeable ports.
+    - Prevent empty beacon-layout poles from forcing otherwise valid compact belt routes into distant corridors.
+    - Preserve preview layer order, ownership and cleanup across refreshes, script reloads and failed construction preparation.
+---------------------------------------------------------------------------------------------------
 Version: 1.9.7
 Date: 2026-10-10
   Bugfixes:
