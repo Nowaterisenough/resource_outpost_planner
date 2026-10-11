@@ -518,3 +518,78 @@ Reports, individual samples and runner scripts are retained in
 Use the normal benchmark arguments with `--scenario irregular --timing-only`
 to repeat the large irregular-mine measurements; omit `--timing-only` for
 layout and rendering snapshots.
+
+## 2026-10-11: prioritize bounded station ingress
+
+Baseline: published `v1.9.8`. A search-node profile of the irregular south-facing
+mirrored station finds that congestion negotiation exhausts all 262,144 nodes
+before a cyclic input assignment succeeds in 23,729 nodes. Including the two
+ordinary attempts, that request expands 288,850 nodes. The successful bounded
+assignment was already available, but ran after the more expensive fallback.
+
+After the ordinary forward/reverse attempts, interchangeable east-facing input
+ports now try the existing bounded reverse search before congestion negotiation.
+It retains the shared 65,536-node budget and at most eight cyclic offsets.
+Negotiation still runs when no bounded assignment succeeds. Fixed input mappings,
+ordinary contour routing, the search heuristic, tie ordering, budgets, and literal
+balancer blueprints are unchanged. The measured difficult request avoids the
+262,144-node unsuccessful negotiation, leaving 26,706 expanded nodes.
+
+Three timing-only runs per version and scenario were alternated, using the same
+copied input save and no concurrent benchmark jobs. These are medians of script
+work and peak script-update time, not end-to-end GUI latency. The full final
+comparison is retained in `dist/performance-round7-20261011/final/comparison.json`.
+
+| Scenario | Before total ms | After total ms | Before peak tick ms | After peak tick ms |
+| --- | ---: | ---: | ---: | ---: |
+| irregular-0 | 325.34 | 349.98 | 136.00 | 156.33 |
+| irregular-4 | 854.63 | 877.30 | 605.65 | 568.51 |
+| irregular-8 | 312.91 | 271.04 | 136.91 | 79.12 |
+| irregular-12 | 916.50 | 915.30 | 617.60 | 636.39 |
+| irregular-0-mirrored | 375.55 | 369.96 | 151.85 | 123.80 |
+| irregular-4-mirrored | 1409.10 | 1373.22 | 1126.45 | 1086.56 |
+| irregular-8-mirrored | 1560.19 | 356.66 | 1359.51 | 137.83 |
+| irregular-12-mirrored | 692.10 | 744.95 | 457.79 | 448.41 |
+| belts-near | 16.73 | 17.52 | 5.22 | 5.41 |
+| belts-moved | 16.63 | 17.29 | 5.01 | 5.36 |
+| balance-3-8 | 17.21 | 17.79 | 5.44 | 5.25 |
+| station-3-8 | 78.74 | 83.56 | 21.03 | 22.09 |
+| station-mirrored | 75.16 | 75.72 | 35.49 | 33.38 |
+| station-3-10 | 59.22 | 61.29 | 17.81 | 23.77 |
+| station-far | 92.94 | 96.17 | 35.46 | 37.12 |
+| station-over-mine | 59.68 | 61.76 | 30.86 | 27.07 |
+| belts-water-wall | 189.30 | 190.82 | 146.10 | 145.27 |
+| blocked-output | 31.86 | 31.70 | 12.97 | 12.99 |
+
+The irregular south-facing mirrored case improves from 1560.19 to 356.66 ms
+in total script work (77.1%), and from 1359.51 to 137.83 ms in peak tick time
+(89.9%). Its routing phase falls from 1357.73 to 136.15 ms (90.0%). Other cases
+do not show a uniform improvement: the branch does not affect most ordinary
+routes, and rendering/allocation timing varies between runs. The other heavy
+mirrored direction still takes about 1.09 seconds in a synchronous routing tick;
+this change does not eliminate that remaining bottleneck.
+
+A candidate also prechecked pending station inlets after each completed lane.
+Profiling showed no reduction in expanded nodes for these cases, while extracting
+its shared passability helper added overhead to ordinary searches. That candidate
+was discarded; the final runtime change only reorders the station fallback.
+
+Ten separate correctness runs cover ordinary outputs, all eight irregular station
+poses, three beacon-contour outlets, repeated movement/rotation/mirroring, and
+Apply. All 27 geometry pairs and 26 sprite-definition/order pairs match `v1.9.8`,
+including readiness, entity counts and pipeline ticks. The new `--scenario contour`
+uses the 4,508-tile irregular patch, big drills, full beacon rows and top/middle/
+bottom same-facing outlets. It preserves the footprint and pole-pruning behavior.
+All timing runs also retain the same readiness, entity counts and ticks, and all
+runs share one input-save digest and one runtime digest per version.
+
+All standalone Lua suites pass, including 274 belt-planner cases and 123 search
+cases. New checks cover endpoint-corner fallback in four rotations when no
+alternate port exists and ensure a usable bounded assignment avoids weighted
+negotiation. A native eight-pose station workflow verifies construction against
+the preview (including train orientation, quality and splitter settings), with
+zero missing/extra entities and no ghosts left after Undo.
+
+Reproduce the timing runs with the normal benchmark arguments and
+`--scenario irregular --timing-only`, using `--ref v1.9.8` for the baseline.
+Use `--scenario contour` without `--timing-only` to capture beacon-contour layouts.

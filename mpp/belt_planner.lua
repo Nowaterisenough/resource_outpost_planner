@@ -780,9 +780,8 @@ local function plan_routes(state)
 		local wrapped, routes = route_bundle(state, false, false, true, nil, context)
 		if wrapped then return true, routes end
 	end
-	local rerouted, routes = route_bundle(state, false, true, nil, nil, context)
-	if rerouted then return true, routes end
 	if state.interchangeable_belt_inputs and state.belt_direction==EAST then
+		-- Try bounded input reassignment before the larger congestion-negotiation search.
 		local targets=state.belt_input_targets
 		local alternate={}
 		for k,v in pairs(state) do alternate[k]=v end
@@ -796,6 +795,8 @@ local function plan_routes(state)
 			if budget.remaining<=0 then break end
 		end
 	end
+	local rerouted, routes = route_bundle(state, false, true, nil, nil, context)
+	if rerouted then return true, routes end
 	if not state.preview_only then return false, result end
 	local spec, dir = state.belt_specification, state.belt_direction
 	local delta=util.direction_coord[dir]

@@ -65,6 +65,11 @@ if scenario=='large' then cases={
  for _,mirror in ipairs{false,true} do for _,dir in ipairs{0,4,8,12} do
   cases[#cases+1]={name='irregular-'..dir..(mirror and '-mirrored' or ''),station=true,x=65,y=65,dir=dir,mirror=mirror}
  end end
+elseif scenario=='contour' then cases={
+ {name='contour-top',x=75.5,y=-41.5,dir=4},
+ {name='contour-middle',x=71.5,y=-16.5,dir=4},
+ {name='contour-bottom',x=75.5,y=55.5,dir=4},
+}
 elseif scenario=='apply' then cases={{name='station-apply',station=true,x=65,y=65,dir=0}} end
 local phase,index,player,data,surface,start_tick=0,0
 local total
@@ -108,10 +113,14 @@ local function initialize()
  player.teleport({-10,-10},surface);player.force.research_all_technologies()
  data=storage.players[player.index]
  local c=data.choices;c.layout_choice='simple';c.miner_choice='electric-mining-drill';c.direction_choice='north';c.belt_choice='express-transport-belt';c.pole_choice='medium-electric-pole';c.beacon_choice='none';c.module_choice='none';c.belt_merge_choice=false
+ if scenario=='contour' then
+  c.layout_choice='compact';c.miner_choice='big-mining-drill';c.direction_choice='east';c.belt_choice='turbo-transport-belt'
+  c.beacon_choice='beacon';c.beacon_module_choice='speed-module-3';c.beacon_quality_choice='normal';c.beacon_module_quality_choice='normal'
+ end
  perf_gui.show_interface(player)
  local edge=(scenario=='large' or scenario=='move') and 63 or 23
  local resources={}
- if scenario=='irregular' then
+ if scenario=='irregular' or scenario=='contour' then
   for x=-48,47 do for y=-37,38 do
    local angle=math.atan2(y/35,x/46)
    local radius=1+0.15*math.sin(angle*5)+0.09*math.cos(angle*9)

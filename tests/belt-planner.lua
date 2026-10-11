@@ -152,6 +152,29 @@ local function route_stats(state,specs)
 end
 
 local cases=0
+local function upvalue(fn,name)
+	for i=1,100 do
+		local key,value=debug.getupvalue(fn,i)
+		if key==name then return value,i end
+		if not key then break end
+	end
+	error("missing routing function: "..name)
+end
+local bundle=upvalue(upvalue(planner.plan,"plan_routes"),"route_bundle")
+
+for _,rotation in ipairs{"west","north","east","south"} do
+	local spec=fixture(rotation,1)
+	local state=assert(planner.create_state(spec,target(spec,1,3,E),{}))
+	state.interchangeable_belt_inputs=true
+	state.belt_input_targets={{x=1,y=3}}
+	state.grid={get_tile=function(_,x,y) if x==4 and y==5 then return {built_thing="obstacle"} end end}
+	local ok,route=planner.plan(state)
+	assert(ok,"endpoint-corner negotiation was lost when no alternate input exists")
+	verify(state,route)
+	for _,piece in ipairs(route) do assert(not state.grid:get_tile(piece.grid_x,piece.grid_y),"fallback crosses the blocked source exit") end
+	cases=cases+1
+end
+
 for _,rotation in ipairs{"west","north","east","south"} do
 	for _,dir in ipairs{N,E,S,W} do
 		for _,count in ipairs{1,3} do
@@ -409,8 +432,16 @@ for _,rotation in ipairs{"west","north","east","south"} do
 	end}
 	assert(not planner.plan(state),"fixed input assignments were silently changed")
 	state.interchangeable_belt_inputs=true
+	local search,search_index=upvalue(bundle,"path")
+	local weighted_searches=0
+	debug.setupvalue(bundle,search_index,function(start,finish,dir,allowed,bounds,penalty,budget)
+		if penalty then weighted_searches=weighted_searches+1 end
+		return search(start,finish,dir,allowed,bounds,penalty,budget)
+	end)
 	local ok,route=planner.plan(state)
+	debug.setupvalue(bundle,search_index,search)
 	assert(ok,"split bundle cannot reach interchangeable station inputs: "..rotation)
+	assert(weighted_searches==0,"available bounded ingress was delayed by congestion negotiation")
 	verify(state,route)
 	assert(state.belt_input_targets==targets,"routing replaced the caller's target array")
 	for i,p in ipairs(targets) do assert(p.x==63 and p.y==2-i,"routing reordered the caller's inputs") end
