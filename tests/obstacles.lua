@@ -18,6 +18,7 @@ local mod_tile=tile("mod-coverable",{object=true},{name="foundation"})
 local obstacles=require("mpp.obstacles")
 local queries={}
 local entities={}
+local ignored_entity_types={resource=true,character=true,unit=true,corpse=true,["item-entity"]=true,["tile-ghost"]=true}
 local surface={
 	find_tiles_filtered=function(query)
 		queries[#queries+1]=query
@@ -27,7 +28,15 @@ local surface={
 		for _,t in ipairs{water,lava,void,space,mod_tile} do assert(names[t.name],"hazard omitted: "..t.name) end
 		return {}
 	end,
-	find_entities_filtered=function() return entities end,
+	find_entities_filtered=function(query)
+		assert(query.type and query.invert==true,"obstacle scan materializes ignored entities")
+		local excluded={};for _,kind in ipairs(query.type) do excluded[kind]=true end
+		for kind in pairs(ignored_entity_types) do assert(excluded[kind],"ignored type reaches Lua: "..kind) end
+		for kind in pairs(excluded) do assert(ignored_entity_types[kind],"obstacle type excluded: "..kind) end
+		local result={}
+		for _,e in ipairs(entities) do if not excluded[e.type] then result[#result+1]=e end end
+		return result
+	end,
 }
 local area={{-100,-100},{100,100}}
 obstacles.collect(surface,area,nil,{terrain_mode_choice="avoid"})
@@ -71,6 +80,20 @@ index=obstacles.collect(surface,area,{[3]=true},{cliff_mode_choice="avoid",decon
 assert(#index.boxes==1 and obstacles.blocked_box(index,near),"cliff mode changed")
 index=obstacles.collect(surface,area,{[3]=true},{cliff_mode_choice="remove",deconstruction_choice=true})
 assert(#index.boxes==1 and obstacles.blocked_box(index,sliver),"retained building or owned ghost handling changed")
+entities={}
+for kind in pairs(ignored_entity_types) do
+	entities[#entities+1]=setmetatable({type=kind},{__index=function() error("ignored entity inspected in Lua: "..kind) end})
+end
+local retained_bounds={}
+for i,kind in ipairs{"entity-ghost","cliff","container","tree","simple-entity","straight-rail","cargo-wagon"} do
+	local bounds=box(i*2,.1,i*2+.9,.9)
+	local e=entity(bounds,kind,100+i)
+	if kind=="entity-ghost" then e.ghost_prototype=e.prototype end
+	entities[#entities+1]=e;retained_bounds[#retained_bounds+1]=bounds
+end
+index=obstacles.collect(surface,area,nil,{cliff_mode_choice="avoid",deconstruction_choice=true})
+assert(#index.boxes==#retained_bounds,"engine filtering dropped an actual obstacle")
+for _,bounds in ipairs(retained_bounds) do assert(obstacles.blocked_box(index,bounds),"retained obstacle lost") end
 local state={surface=surface,coords={x1=0,y1=0,x2=24,y2=24},terrain_mode_choice="avoid",
 	_belt_search_margin=400,_belt_search_area={{-16,-32},{160,96}}}
 local before=#queries
@@ -98,4 +121,4 @@ assert(shape_reads==4,"prototype shape is recomputed for every route cell")
 prototypes.entity.machine={tile_width=2,tile_height=3,collision_box=box(-.7,-1.1,.9,1.4),has_flag=function() return true end}
 local free=obstacles.entity_box("machine",{x=2.2,y=3.2},0)
 assert(math.abs(free.left_top.x-1.5)<1e-9 and math.abs(free.left_top.y-2.1)<1e-9,"off-grid geometry or prototype replacement uses stale offsets")
-print("Obstacles OK: "..cases.." collision comparisons, filtered terrain, local queries and scan bounds")
+print("Obstacles OK: "..cases.." collision comparisons, engine entity/terrain filters, local queries and scan bounds")

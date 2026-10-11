@@ -3,8 +3,7 @@ local terrain = require("mpp.terrain")
 local obstacles = {}
 local cache = setmetatable({}, {__mode="k"})
 local floor, ceil = math.floor, math.ceil
-local ignored_types = {resource=true, character=true, unit=true, corpse=true,
-	["item-entity"]=true, ["entity-ghost"]=false, ["tile-ghost"]=true}
+local ignored_types = {"resource", "character", "unit", "corpse", "item-entity", "tile-ghost"}
 local hazard_tiles
 local geometry_cache={}
 
@@ -41,9 +40,9 @@ function obstacles.collect(surface, area, ignored, choices)
 			cell(pos.x,pos.y)
 		end
 	end
-	for _, entity in pairs(surface.find_entities_filtered{area=area}) do
-		if entity.valid and not ignored_types[entity.type]
-			and not (entity.unit_number and ignored and ignored[entity.unit_number]) then
+	-- Ore patches can contain thousands of resources that never obstruct placement.
+	for _, entity in pairs(surface.find_entities_filtered{area=area,type=ignored_types,invert=true}) do
+		if entity.valid and not (entity.unit_number and ignored and ignored[entity.unit_number]) then
 			local proto = entity.type == "entity-ghost" and entity.ghost_prototype or entity.prototype
 			local layers = proto.collision_mask.layers
 			local selected = not choices or terrain.blocks_entity(entity, choices)
