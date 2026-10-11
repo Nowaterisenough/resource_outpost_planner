@@ -6,6 +6,8 @@ local perf_planner=require('mpp.belt_planner')
 local perf_renderer=require('mpp.preview_renderer')
 local perf_station=require('mpp.train_station')
 local perf_simple=require('layouts.simple')
+local scenario=output_performance_scenario or 'outputs'
+local capture_snapshots=output_performance_capture~=false
 local perf_active,perf_stats,perf_calls=false,{},{}
 local function timing(label,fn,...)
  if not perf_active then return fn(...) end
@@ -15,6 +17,11 @@ local function timing(label,fn,...)
  local stat=perf_stats[label]
  if not stat then stat={timer=helpers.create_profiler(true),count=0};perf_stats[label]=stat end
  stat.timer.add(timer);stat.count=stat.count+1
+ if label=='render' then
+  local reused=b and table_size(b) or 0
+  perf_calls.render_created=(perf_calls.render_created or 0)+#a-reused
+  perf_calls.render_reused=(perf_calls.render_reused or 0)+reused
+ end
  return a,b,c
 end
 local function wrap(module,name,label)
@@ -44,8 +51,54 @@ local cases={
  {name='belts-water-wall',x=-25,y=-25,dir=0,water=true},
  {name='blocked-output',x=-25,y=-25,dir=0,blocked=true},
 }
+if scenario=='large' then cases={
+ {name='large-belts',x=-25,y=-25,dir=0},
+ {name='large-balanced',balance=true,x=13,y=-43,dir=0},
+ {name='large-station',station=true,x=101,y=101,dir=0},
+} elseif scenario=='move' then cases={
+ {name='station-initial',station=true,x=101,y=101,dir=0},
+ {name='station-moved',station=true,x=105,y=103,dir=0},
+ {name='station-rotated',station=true,x=101,y=105,dir=4},
+ {name='station-flipped',station=true,x=103,y=101,dir=4,mirror=true},
+} elseif scenario=='irregular' then
+ cases={}
+ for _,mirror in ipairs{false,true} do for _,dir in ipairs{0,4,8,12} do
+  cases[#cases+1]={name='irregular-'..dir..(mirror and '-mirrored' or ''),station=true,x=65,y=65,dir=dir,mirror=mirror}
+ end end
+elseif scenario=='apply' then cases={{name='station-apply',station=true,x=65,y=65,dir=0}} end
 local phase,index,player,data,surface,start_tick=0,0
 local total
+local function snapshot(name,specs)
+ if not capture_snapshots then return end
+ local rows={}
+ for _,s in ipairs(specs) do
+  local p=s.position
+  rows[#rows+1]={name=s.inner_name or s.name,x=p.x or p[1],y=p.y or p[2],direction=s.direction,
+   type=s.type,filter=s.filter,input_priority=s.input_priority,output_priority=s.output_priority,blocked=s.preview_blocked}
+ end
+ helpers.write_file('output-performance/'..name..'.json',helpers.table_to_json(rows),false)
+end
+local function snapshot_sprites(name,objects)
+ if not capture_snapshots then return end
+ local rows,seen={},{}
+ for _,object in ipairs(objects) do if object.valid and object.type=='sprite' then
+  assert(not seen[object.id],'one sprite handle is used by multiple preview layers')
+  seen[object.id]=true
+  local target=object.target
+  assert(target.type=='position','unexpected entity-targeted preview sprite')
+  rows[#rows+1]={sprite=object.sprite,position=target.position,color=object.color,
+   orientation=object.orientation,x_scale=object.x_scale,y_scale=object.y_scale}
+ end end
+ for _,object in pairs(rendering.get_all_objects(script.mod_name)) do
+  if object.surface==surface and object.type=='sprite' then assert(seen[object.id],'obsolete preview sprite leaked') end
+ end
+ helpers.write_file('output-performance/'..name..'-sprites.json',helpers.table_to_json(rows),false)
+end
+local function report(name,ready,entities)
+ log({'','OUTPUT PERF ',name,' total=',total,' ticks=',game.tick-start_tick,' ready=',tostring(ready),' entities=',entities,' calls=',helpers.table_to_json(perf_calls)})
+ local keys={};for k in pairs(perf_stats) do keys[#keys+1]=k end;table.sort(keys)
+ for _,k in ipairs(keys) do local s=perf_stats[k];log({'','OUTPUT PERF DETAIL ',name,' ',k,' count=',s.count,' time=',s.timer}) end
+end
 local function initialize()
  player=game.get_player(1);perf_conf.initialize_global(player.index);player.set_controller{type=defines.controllers.god}
  surface=game.create_surface('output-performance',{width=640,height=640,autoplace_controls={}})
@@ -56,13 +109,44 @@ local function initialize()
  data=storage.players[player.index]
  local c=data.choices;c.layout_choice='simple';c.miner_choice='electric-mining-drill';c.direction_choice='north';c.belt_choice='express-transport-belt';c.pole_choice='medium-electric-pole';c.beacon_choice='none';c.module_choice='none';c.belt_merge_choice=false
  perf_gui.show_interface(player)
- local resources={};for x=0,23 do for y=0,23 do resources[#resources+1]=surface.create_entity{name='iron-ore',position={x+.5,y+.5},amount=50000} end end
+ local edge=(scenario=='large' or scenario=='move') and 63 or 23
+ local resources={}
+ if scenario=='irregular' then
+  for x=-48,47 do for y=-37,38 do
+   local angle=math.atan2(y/35,x/46)
+   local radius=1+0.15*math.sin(angle*5)+0.09*math.cos(angle*9)
+   local inside=(x/46)^2+(y/35)^2<radius*radius
+   local notch=x>14 and y>4 and y<18+7*math.sin(x/9)
+   local hole=(x+11)^2+(y+4)^2<25 or (x-4)^2+(y-19)^2<12
+   if inside and not notch and not hole then
+    resources[#resources+1]=surface.create_entity{name='iron-ore',position={x+.5,y+.5},amount=50000}
+   end
+  end end
+  assert(#resources==4508,'irregular fixture changed')
+ else
+  for x=0,edge do for y=0,edge do resources[#resources+1]=surface.create_entity{name='iron-ore',position={x+.5,y+.5},amount=50000} end end
+ end
  assert(perf_preview.select{player_index=player.index,surface=surface,entities=resources})
  phase=1
 end
 local function step()
  if phase==0 then initialize();return end
  if phase==4 then return end
+ if phase==5 then
+  if data.preview or #storage.tasks>0 then return end
+  perf_active=false
+  local actual={}
+  for _,e in pairs(surface.find_entities_filtered{type='entity-ghost'}) do
+   actual[#actual+1]={name=e.ghost_name,position=e.position,direction=e.direction,
+    type=e.ghost_type=='underground-belt' and e.belt_to_ground_type or nil,
+    filter=e.ghost_type=='splitter' and e.splitter_filter or nil,
+    input_priority=e.ghost_type=='splitter' and e.splitter_input_priority or nil,
+    output_priority=e.ghost_type=='splitter' and e.splitter_output_priority or nil}
+  end
+  snapshot('apply-final',actual)
+  report('apply-final',true,#actual)
+  log('OUTPUT PERF COMPLETE');phase=4;return
+ end
  if data.preview.refresh_at or #storage.tasks>0 then return end
  if phase==1 then
   index=index+1;if not cases[index] then log('OUTPUT PERF COMPLETE');phase=4;return end
@@ -70,6 +154,7 @@ local function step()
   choices.output_station_choice=c.station==true;choices.output_balance_choice=c.balance==true;choices.output_belt_count_choice=8;choices.output_locomotive_count_choice=2;choices.output_wagon_count_choice=c.wagons or 4;choices.output_loading_side_choice='double';choices.belt_planner_choice=true
   local tiles={};for x=-40,40 do for y=-15,-5 do tiles[#tiles+1]={name=c.water and 'water' or 'grass-1',position={x,y}} end end;surface.set_tiles(tiles);choices.terrain_mode_choice=c.water and 'avoid' or 'fill';choices.deconstruction_choice=c.blocked==true
   if c.blocked then for x=-27,-21 do for y=-28,-23 do surface.create_entity{name='steel-chest',position={x+.5,y+.5},force=player.force} end end end
+  if scenario=='move' and index>1 then phase=2;return end
   data.preview.belt_target=nil;perf_preview.request(data);phase=2;return
  end
  if phase==2 then
@@ -81,16 +166,20 @@ local function step()
  end
  if phase==3 then
   perf_active=false
-  log({'','OUTPUT PERF ',cases[index].name,' total=',total,' ticks=',game.tick-start_tick,' ready=',tostring(data.preview.ready),' entities=',data.preview.entity_count or 0,' calls=',helpers.table_to_json(perf_calls)})
-  local keys={};for k in pairs(perf_stats) do keys[#keys+1]=k end;table.sort(keys)
-  for _,k in ipairs(keys) do local s=perf_stats[k];log({'','OUTPUT PERF DETAIL ',cases[index].name,' ',k,' count=',s.count,' time=',s.timer}) end
-  phase=1
+  snapshot(cases[index].name,data.preview.specs)
+  snapshot_sprites(cases[index].name,data.preview.renderings)
+  report(cases[index].name,data.preview.ready,data.preview.entity_count or 0)
+  if scenario=='apply' then
+   perf_stats={};perf_calls={};perf_active=true;total=helpers.create_profiler(true);start_tick=game.tick
+   assert(timing('apply_click',perf_preview.apply,data),'Apply refused the measured preview')
+   phase=5
+  else phase=1 end
  end
 end
 local function performance_tick(event)
  local timer=perf_active and helpers.create_profiler()
  task_runner_handler(event)
- if timer then timer.stop();total.add(timer);log({'','OUTPUT PERF TICK ',cases[index].name,' ',timer}) end
+ if timer then timer.stop();total.add(timer);log({'','OUTPUT PERF TICK ',phase==5 and 'apply-final' or cases[index].name,' ',timer}) end
  step()
  if phase~=4 then script.on_event(defines.events.on_tick,performance_tick) end
 end

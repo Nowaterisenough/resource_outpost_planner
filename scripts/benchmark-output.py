@@ -6,6 +6,7 @@ import json
 import os
 from pathlib import Path
 import re
+import shutil
 import subprocess
 import sys
 import tarfile
@@ -21,6 +22,10 @@ def main():
     parser.add_argument("--save", type=Path, required=True, help="Existing save with player 1; read only")
     parser.add_argument("--data", type=Path, help="Factorio data directory; inferred when omitted")
     parser.add_argument("--ref", help="Git revision to compare with the working tree")
+    parser.add_argument("--scenario", choices=("outputs", "large", "move", "apply", "irregular"), default="outputs",
+                        help="Output previews, large or irregular mines, repeated station moves, or validated application")
+    parser.add_argument("--timing-only", action="store_true",
+                        help="Skip correctness snapshots and their allocations between measured requests")
     parser.add_argument("--output", type=Path, help="Parent directory for the isolated run")
     args = parser.parse_args()
     binary, saved = args.factorio.resolve(), args.save.resolve()
@@ -33,6 +38,9 @@ def main():
     if args.output:
         args.output.mkdir(parents=True, exist_ok=True)
     root = Path(tempfile.mkdtemp(prefix="output-performance-", dir=args.output)).resolve()
+    isolated_save = root / "input-save.zip"
+    shutil.copyfile(saved, isolated_save)
+    save_digest = hashlib.sha256(isolated_save.read_bytes()).hexdigest()
     source = REPO
     if args.ref:
         source = root / "source"
@@ -54,7 +62,10 @@ def main():
         bundle.extractall(mods)
     mod = mods / f"{info['name']}_{info['version']}"
     control = mod / "control.lua"
-    control.write_text(control.read_text() + "\n" + (REPO / "tests/integration/output-performance.lua").read_text())
+    harness = f'local output_performance_scenario = "{args.scenario}"\n'
+    harness += f'local output_performance_capture = {str(not args.timing_only).lower()}\n'
+    harness += (REPO / "tests/integration/output-performance.lua").read_text()
+    control.write_text(control.read_text() + "\n" + harness)
     enabled = [name for name in ("base", "elevated-rails", "quality", "recycler", "space-age")
                if (data / name / "info.json").is_file()] + [info["name"]]
     (mods / "mod-list.json").write_text(json.dumps({"mods": [{"name": n, "enabled": True} for n in enabled]}))
@@ -63,7 +74,7 @@ def main():
     log_path = root / "benchmark.log"
     with log_path.open("w") as output:
         result = subprocess.run([str(binary), "--config", str(config), "--mod-directory", str(mods),
-                                 "--benchmark", str(saved), "--benchmark-ticks", "2200", "--benchmark-runs", "1"],
+                                 "--benchmark", str(isolated_save), "--benchmark-ticks", "2200", "--benchmark-runs", "1"],
                                 stdout=output, stderr=subprocess.STDOUT, env=dict(os.environ, SteamAppId="427520"))
     log = log_path.read_text()
     cases = {}
@@ -74,7 +85,19 @@ def main():
     for name, ms, ticks, ready, entities, calls in re.findall(pattern, log):
         cases.setdefault(name, {}).update(total_ms=float(ms), ticks=int(ticks), ready=ready == "true",
                                           entities=int(entities), calls=json.loads(calls))
-    report = {"source": args.ref or "working-tree", "runtime_sha256": digest.hexdigest(), "cases": cases}
+    for name, part, count, ms in re.findall(r"OUTPUT PERF DETAIL ([\w-]+) ([\w_]+) count=(\d+) .*?([\d.]+)ms", log):
+        cases.setdefault(name, {}).setdefault("details", {})[part] = {"count": int(count), "ms": float(ms)}
+    for name, case in cases.items():
+        for suffix, field in (("", "geometry_sha256"), ("-sprites", "sprites_sha256")):
+            snapshot = root / "data/script-output/output-performance" / f"{name}{suffix}.json"
+            if snapshot.is_file():
+                rows = [json.dumps(row, sort_keys=True) for row in json.loads(snapshot.read_text())]
+                case[field] = hashlib.sha256("\n".join(sorted(rows)).encode()).hexdigest()
+                if suffix:
+                    case["sprite_order_sha256"] = hashlib.sha256("\n".join(rows).encode()).hexdigest()
+    report = {"source": args.ref or "working-tree", "scenario": args.scenario,
+              "capture_snapshots": not args.timing_only,
+              "runtime_sha256": digest.hexdigest(), "save_sha256": save_digest, "cases": cases}
     (root / "results.json").write_text(json.dumps(report, indent=2) + "\n")
     print(root)
     if result.returncode or "OUTPUT PERF COMPLETE" not in log:
