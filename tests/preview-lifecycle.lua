@@ -58,7 +58,8 @@ local function fixture()
 	local draft={player_index=1,surface=player.surface,resources={{valid=true}},revision=1,ready=true,
 		specs={},renderings=overlays,belt_target={position={x=0,y=-10},direction=0}}
 	data={preview=draft,choices={belt_planner_choice=true},last_state=prior,input_mode="output",
-		gui={preview_apply={valid=true},preview_cancel={valid=true},undo_button={valid=true}}}
+		gui={preview_apply={valid=true},preview_cancel={valid=true},undo_button={valid=true},
+			preview_status={valid=true,style={}}}}
 	storage={players={[1]=data},tasks={}}
 	return draft,overlays,prior
 end
@@ -97,6 +98,7 @@ validation=storage.tasks[1];validation.preview_error={"mpp.output_balance_blocke
 preview.complete(validation)
 assert(not draft.applying and not draft.ready and not data.gui.preview_apply.enabled,"failed validation can still Apply")
 assert(calls.commit==0 and calls.render==1 and calls.rendered_error==validation.preview_error,"failed validation lost its diagnostic preview")
+assert(data.gui.preview_status.visible and data.gui.preview_status.caption==validation.preview_error,"failure is hidden behind the Apply tooltip")
 assert(not overlays[1].valid and #storage.tasks==1,"failed validation queued construction or kept stale overlays")
 
 draft=fixture()
@@ -110,4 +112,9 @@ assert(calls.rendered_error==build_error and not data.gui.preview_apply.enabled)
 draft,overlays=fixture()
 preview.complete(state{entities=draft.resources,preview_only=true,preview_revision=0})
 assert(calls.render==0 and calls.validation==0 and calls.commit==0 and overlays[1].valid,"stale result changed the active preview")
+draft=fixture()
+preview.request(data)
+assert(data.gui.preview_status.visible and data.gui.preview_status.caption[1]=="mpp.preview_updating","output recalculation has no visible feedback")
+preview.complete(state{entities=draft.resources,preview_only=true,preview_revision=draft.revision})
+assert(not data.gui.preview_status.visible,"successful preview retained a stale error/progress label")
 print("Preview lifecycle OK: validation, successful build handoff, overlay cleanup, both failure paths and stale results")

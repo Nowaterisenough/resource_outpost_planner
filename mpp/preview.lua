@@ -35,6 +35,13 @@ function preview.update_gui(data)
 	input_mode.update_gui(data)
 	local ui,draft=data.gui,data.preview
 	if not ui.preview_apply or not ui.preview_apply.valid then return end
+	if ui.preview_status and ui.preview_status.valid then
+		local status=draft and (draft.applying and {"mpp.preview_applying"}
+			or draft.error or not draft.ready and {"mpp.preview_updating"})
+		ui.preview_status.visible=status~=nil and status~=false
+		ui.preview_status.caption=status or ""
+		ui.preview_status.style.font_color=draft and draft.error and {1,0.35,0.25} or {1,0.85,0.4}
+	end
 	ui.preview_apply.enabled=draft~=nil and draft.ready==true and not draft.applying
 	ui.preview_cancel.enabled=draft~=nil and not draft.applying
 	if ui.output_balance_toggle and ui.output_balance_toggle.valid then

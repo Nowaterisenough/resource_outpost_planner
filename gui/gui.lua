@@ -17,7 +17,7 @@ local conf = require("configuration")
 local layouts = algorithm.layouts
 
 local gui = {}
-local workflow_version = 13
+local workflow_version = 14
 
 local direction_sprites = {
 	north = "virtual-signal/up-arrow",
@@ -695,7 +695,9 @@ function gui.create_interface(player)
 	end
 
 	local footer=frame.add{type="flow",direction="vertical",style="mpp_section"}
-	player_gui.preview_status=nil
+	player_gui.preview_status=footer.add{type="label",caption="",visible=false}
+	player_gui.preview_status.style.single_line=false
+	player_gui.preview_status.style.maximal_width=440
 	local tools=footer.add{type="flow",direction="horizontal"}
 	player_gui.select_tool=tools.add{type="button",caption={"mpp.tool_select"},tooltip={"mpp.tool_select_tooltip"},tags={mpp_input_mode="select"}}
 	local actions=footer.add{type="flow",direction="horizontal"}
