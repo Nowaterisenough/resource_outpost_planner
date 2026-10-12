@@ -324,6 +324,22 @@ assert(#spec.surface.created==0,"failed route partially built")
 assert(not planner.create_state(spec,{position={x=500,y=500},direction=W},{}),"distance limit lost")
 cases=cases+2
 
+for _,rotation in ipairs{"west","north","east","south"} do
+	local large=fixture(rotation,26)
+	local c=large.coords
+	c.gx,c.gy,c.w,c.h=-250.5,-180.5,300,220
+	local vertical=rotation=="north" or rotation=="south"
+	c.tw,c.th=vertical and c.h or c.w,vertical and c.w or c.h
+	for _,p in ipairs{{x=c.gx-60,y=c.gy+100},{x=c.gx+c.w+60,y=c.gy+100},
+		{x=c.gx+150,y=c.gy-60},{x=c.gx+150,y=c.gy+c.h+60}} do
+		assert(planner.create_state(large,{position=p,direction=W},{}),"large patch rejected an outlet near its boundary")
+		cases=cases+1
+	end
+	assert(not planner.create_state(large,{position={x=c.gx-101,y=c.gy},direction=W},{}),"ordinary output lost its bounded margin")
+	assert(planner.create_state(large,{position={x=c.gx-500,y=c.gy},direction=W},{output_balance_choice=true}),"balancer margin is measured from the centre")
+	cases=cases+2
+end
+
 spec=fixture()
 state=assert(planner.create_state(spec,target(spec,-12,5,W),{}))
 state.planned={{name="electric-mining-drill",grid_x=-2,grid_y=5,direction=N},

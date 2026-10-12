@@ -248,7 +248,9 @@ end
 function belt_planner.create_state(spec, target, choices)
 	local c, pos = spec.coords, target.position
 	local range = (choices.output_balance_choice or choices.output_station_choice) and 512 or 100
-	if abs(c.gx + c.w/2 - pos.x) > range or abs(c.gy + c.h/2 - pos.y) > range then
+	-- Large patches still need room outside their boundary for a many-belt outlet.
+	if pos.x<c.gx-range or pos.x>c.gx+c.w+range
+		or pos.y<c.gy-range or pos.y>c.gy+c.h+range then
 		return nil, {"mpp.msg_belt_planner_err_too_far"}
 	end
 	local x,y = grid_position(spec,pos)
