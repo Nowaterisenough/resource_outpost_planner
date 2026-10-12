@@ -215,6 +215,24 @@ local function geometry(inputs, outputs, belt_name, preference)
 			end
 			for y1=top,target.y do belt(target.x,y1) end
 		end
+		if inputs>outputs then
+			-- Feedback into an occupied input can enclose the next input behind its return belt.
+			-- Bring external feeds ahead of those loops without changing the reference core.
+			local front=prefix_y-3-3*#feedback-2
+			for _,port in ipairs(input_ports) do
+				local row=front
+				while row<=port.y do
+					if occupied[key(port.x,row+1)] and row<port.y then
+						local exit=row+2
+						while occupied[key(port.x,exit)] do exit=exit+1 end
+						assert(exit<=port.y and exit-row<=reach,"feedback crossing exceeds underground reach")
+						tunnel(port.x,row,port.x,exit,S)
+						row=exit+1
+					else belt(port.x,row);row=row+1 end
+				end
+				port.y=front-1
+			end
+		end
 	end
 	if outputs==1 and inputs==2 then keepout[#keepout+1]={x=1,y=1} end
 	-- Reserve the reference footprint so ingress routes cannot enter an empty splitter outlet.

@@ -153,6 +153,35 @@ for n=1,8 do for m=1,8 do
 	else verify(n,m,"transport-belt") end
 end end
 for _,pair in ipairs{{1,16},{4,16},{8,16},{16,8},{16,16},{3,12},{12,6},{9,8},{8,9},{1,32},{32,8}} do verify(pair[1],pair[2]) end
+for _,pair in ipairs{{26,24},{31,23}} do
+	verify(pair[1],pair[2])
+	local layout=assert(balancer.geometry(pair[1],pair[2],"express-transport-belt"))
+	local occupied={}
+	local left,top,right,bottom=math.huge,math.huge,-math.huge,-math.huge
+	for _,piece in ipairs(layout.specs) do
+		for x=math.floor(piece.x),math.ceil(piece.x) do for y=math.floor(piece.y),math.ceil(piece.y) do
+			occupied[key(x,y)]=true
+			left,top,right,bottom=math.min(left,x),math.min(top,y),math.max(right,x),math.max(bottom,y)
+		end end
+	end
+	for _,point in ipairs(layout.keepout) do occupied[key(point.x,point.y)]=true end
+	left,top,right,bottom=left-2,top-2,right+2,bottom+2
+	local queue,seen,head={{left,top}},{[key(left,top)]=true},1
+	while queue[head] do
+		local point=queue[head];head=head+1
+		for _,step in ipairs{{-1,0},{1,0},{0,-1},{0,1}} do
+			local x,y=point[1]+step[1],point[2]+step[2]
+			local k=key(x,y)
+			if x>=left and x<=right and y>=top and y<=bottom and not occupied[k] and not seen[k] then
+				seen[k]=true;queue[#queue+1]={x,y}
+			end
+		end
+	end
+	for _,port in ipairs(layout.inputs) do
+		assert(seen[key(port.x,port.y)] and seen[key(port.x,port.y-1)],"feedback encloses an external input in "..pair[1].." -> "..pair[2])
+		cases=cases+1
+	end
+end
 for n=1,8 do for m=10,32,2 do verify(n,m,"express-transport-belt","matrix") end end
 assert(not balancer.valid_count(0) and not balancer.valid_count(33) and not balancer.valid_count(1.5))
 assert(balancer.output_count({count=5},{output_balance_choice=false})==5)
