@@ -1898,7 +1898,7 @@ script.on_event(defines.events.on_gui_elem_changed, on_gui_elem_changed)
 
 local function update_output_cursor(player,data)
 	preview.update_gui(data)
-	if data.input_mode=="output" and not data.preview then
+	if data.input_mode=="output" then
 		local spec=input_mode.output_specification(data,player)
 		if spec then belt_planner.update_blueprint(player,spec) end
 	end
