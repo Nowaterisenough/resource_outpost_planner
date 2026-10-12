@@ -13,6 +13,9 @@ Plan mining patches and oil outposts in one interface. Select resources, inspect
 - Choose cliff avoidance or removal, and water/lava/lightning-pool avoidance or filling. Unsafe connections stay visible in red so you can adjust the plan.
 - Position belt outputs with a native blueprint cursor; rotate with **R / Shift+R**. Same-facing connections turn along the equipment boundary to keep the footprint compact.
 - Enable **Balance Outputs** when needed for railway loading. It starts disabled with **8** output belts for four cargo wagons loaded on both sides; choose 1 to 32 outputs and position the balancer with **Output**. Blocked sections turn red.
+- Enable **Auto merge / split** in Output and set a load range, defaulting to **0.8–1.0**; **1.1 means 110% belt load**. Merge underloaded belts and split overloaded drill rows using actual equipment, beacon coverage, productivity and stacking.
+- Keep the configured final output count as the upper bound. When it cannot carry all production, show estimated bottleneck loss while allowing Apply. Necessary internal collection rows may remain above that count; extra splitting is limited by the budget.
+- See planning progress, failures and capacity warnings above Apply. Changing output count updates the cursor immediately, and repeated clicks at the same valid output target do not restart planning.
 - Generate a complete **loading station** from the Output section: choose 1 to 8 locomotives, 1 to 16 cargo wagons and one-sided or two-sided loading. Defaults to **2 locomotives, 4 wagons and both sides**; balanced output count follows the wagon configuration.
 - Include rails, a train stop, signals, buffer chests, inserters and poles in the station preview. Train counts set the layout dimensions without adding rolling-stock ghosts. **R / Shift+R** rotate and **H / V** mirror it. The belt module sits close to the wagons, with locomotives extending beyond the loading area.
 - Use fixed, exact-count blueprints for the 1-to-8 input/output balancer matrix, preserving lane structure, underground connections, splitter priorities and filters. Two incoming belts and eight outputs use the original 2-to-8 template.
@@ -60,6 +63,9 @@ Belt balancer layouts use **Raynquist's** designs from [Dogmai's balancer collec
 - 悬崖可选择避让或拆除，水、岩浆、雷池可选择避让或填补；无法连通的位置保留红色预览，方便调整。
 - 用原生蓝图光标放置传送带出口，按 **R / Shift+R** 旋转；同向出口优先贴着设备轮廓转弯，压紧占地。
 - 接火车时可开启 **均分输出**：默认关闭，路数默认 **8**，适合 4 节货厢双面上货；可修改为 1 至 32 路，用 **输出** 放置均分器，受阻部分显示红色。
+- 在输出区域开启 **自动并带/分带**，设置负载范围，默认 **0.8–1.0**；**1.1 表示 110% 传送带负载**。根据实际设备、插件塔覆盖、采矿产能和堆叠能力，合并低负载传送带并拆分过载矿机行。
+- 最终出口不超过设定路数；运力不足时显示预计瓶颈损失，仍可应用。矿机行数较多时保留必要内部采集带，额外分带受出口数量限制。
+- 应用按钮上方直接显示规划进度、失败原因和容量提示；修改出口路数会立即更新光标，在同一有效位置重复点击不再重启规划。
 - 在独立的输出区域启用 **生成装货站**，可设置 1 至 8 个车头、1 至 16 节货厢及单边或双边装货。默认 **2 车头、4 货厢、双边装货**，均分路数随编组自动计算。
 - 装货站预览包含铁路、车站、信号灯、缓存箱、机械臂和电杆，编组数量仅用于计算布局尺寸，不生成列车虚影；**R / Shift+R** 旋转，**H / V** 镜像。输送模块靠近货厢，允许车头伸出装货区。
 - 1 至 8 路输入、1 至 8 路输出使用固定矩阵中的同规格蓝图，保留双车道结构、地下带连接、分流器优先级和过滤设置；两条来带接八路输出时直接使用原始 2 进 8 出模板。

@@ -1,4 +1,21 @@
 ---------------------------------------------------------------------------------------------------
+Version: 1.10.0
+Date: 2026-10-12
+  Features:
+    - Combine automatic belt merging and splitting into a load range in Output, defaulting to 0.8-1.0; 1.1 means 110% belt load.
+    - Split overloaded drill rows into independent collection groups using modules, qualities, actual beacon coverage, mining productivity and belt stacking.
+    - Prioritize the configured output count over load targets. Keep the selected final output count and show estimated bottleneck loss without blocking Apply.
+  Changes:
+    - Attempt merging below the minimum average belt load; allow low-yield tail belts below the target and keep both belt sides within the maximum when no output count is fixed.
+    - Limit automatic splitting to the output budget; retain necessary compact collection rows when drill rows alone exceed it.
+    - Preserve ore coverage, receiving belts, power and fluid connections during splitting, and migrate existing merge or experimental loss settings.
+    - Show planning progress, failures and nonblocking bottleneck warnings above Apply.
+  Bugfixes:
+    - Measure output placement distance from the mining-area boundary so large patches retain their working margin.
+    - Update the held blueprint's output count immediately while a preview is recalculating.
+    - Ignore repeated clicks at an unchanged valid output target so held clicks cannot keep restarting planning.
+    - Keep external inputs accessible in reducing balancers with feedback paths, preserving the reference blueprint core.
+---------------------------------------------------------------------------------------------------
 Version: 1.9.9
 Date: 2026-10-11
   Optimizations:
