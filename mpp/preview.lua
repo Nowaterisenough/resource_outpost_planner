@@ -131,8 +131,12 @@ end
 function preview.set_belt_target(data, target)
 	local draft=data.preview
 	if not draft or draft.applying or not draft.belt_specification then return false end
+	local previous=draft.belt_target
+	if previous and previous.position.x==target.position.x and previous.position.y==target.position.y
+		and previous.direction==target.direction and (previous.mirror or false)==(target.mirror or false)
+		and not draft.error then return true end
 	draft.belt_target=target
-	preview.request(data)
+	preview.request(data,true)
 	return true
 end
 

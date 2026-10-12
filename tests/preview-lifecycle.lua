@@ -134,6 +134,14 @@ assert(draft.ready and data.gui.preview_apply.enabled and data.gui.preview_statu
 data.choices.output_belt_count_choice=24
 preview.request(data,true)
 assert(not draft.error and draft.refresh_at,"valid output count did not recover")
+local revision,deadline=draft.revision,draft.refresh_at
+for i=1,60 do
+	game.tick=100+i
+	assert(preview.set_belt_target(data,{position={x=0,y=-10},direction=0,mirror=false}))
+end
+assert(draft.revision==revision and draft.refresh_at==deadline,"held clicks keep postponing or canceling the plan")
+preview.set_belt_target(data,{position={x=1,y=-10},direction=0})
+assert(draft.revision==revision+1,"moving the output is ignored")
 data.choices.output_belt_count_choice=8
 preview.request(data)
 assert(not draft.warning and not draft.error and draft.refresh_at,"equipment changes use stale capacity estimates")

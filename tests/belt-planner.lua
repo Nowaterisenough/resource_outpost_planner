@@ -541,7 +541,7 @@ spec.player.clear_cursor()
 assert(preview.give_belt_planner(data),"cannot return to output")
 cases=cases+1
 
-assert(preview.set_belt_target(data,target(spec,-12,5,W)),"cannot set preview target")
+assert(preview.set_belt_target(data,target(spec,-13,5,W)),"cannot set preview target")
 assert(not data.preview.ready and not data.gui.preview_apply.enabled,"target change leaves stale Apply enabled")
 local revision=data.preview.revision
 preview.complete(layout_state)
