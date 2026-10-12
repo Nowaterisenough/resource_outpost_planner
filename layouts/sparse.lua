@@ -1,3 +1,4 @@
+local belt_capacity = require("mpp.belt_capacity")
 local mpp_util = require("mpp.mpp_util")
 local common   = require("layouts.common")
 local renderer = require("mpp.render_util")
@@ -359,7 +360,8 @@ end
 ---@param target BaseBeltSpecification
 ---@param direction defines.direction.north | defines.direction.south
 function layout:_apply_belt_merge_strategy(state, source, target, direction)
-	local capacity = common.get_belt_capacity_multiplier(state)
+	if not belt_capacity.merge_candidate(state,source) then return end
+	local capacity = belt_capacity.merge_limit(state)
 	local source_t1, source_t2 = source.throughput1, source.throughput2
 	local source_total = source_t1 + source_t2
 	local target_t1, target_t2 = target.merged_throughput1, target.merged_throughput2

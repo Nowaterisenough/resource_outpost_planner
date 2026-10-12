@@ -152,6 +152,14 @@ local function route_stats(state,specs)
 end
 
 local cases=0
+do
+	local spec=fixture("west",26)
+	spec.minimum_output_count=23
+	local state,err=planner.create_state(spec,target(spec,-12,5,W),{output_balance_choice=true,output_belt_count_choice=8})
+	assert(state and not err and state.output_belt_count_choice==8 and state.preview_warning[1]=="mpp.belt_capacity_outputs","fixed count should warn without rejecting direct output")
+	assert(planner.create_state(spec,target(spec,-12,5,W),{output_balance_choice=true,output_belt_count_choice=24}),"valid direct output is rejected")
+	cases=cases+2
+end
 local function upvalue(fn,name)
 	for i=1,100 do
 		local key,value=debug.getupvalue(fn,i)

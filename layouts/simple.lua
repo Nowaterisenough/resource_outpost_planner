@@ -8,6 +8,7 @@ local terrain = require("mpp.terrain")
 local obstacles = require("mpp.obstacles")
 local belt_planner = require("mpp.belt_planner")
 local beacons = require("mpp.beacons")
+local belt_capacity = require("mpp.belt_capacity")
 local coord_convert, coord_revert = mpp_util.coord_convert, mpp_util.coord_revert
 local internal_revert, internal_convert = mpp_util.internal_revert, mpp_util.internal_convert
 local miner_direction, opposite = mpp_util.miner_direction, mpp_util.opposite
@@ -1228,7 +1229,8 @@ end
 ---@param target BaseBeltSpecification
 ---@param direction defines.direction.north | defines.direction.south
 function layout:_apply_belt_merge_strategy(state, source, target, direction)
-	local capacity = common.get_belt_capacity_multiplier(state)
+	if not belt_capacity.merge_candidate(state,source) then return end
+	local capacity = belt_capacity.merge_limit(state)
 	local source_t1, source_t2 = source.throughput1, source.throughput2
 	local source_total = source_t1 + source_t2
 	local target_t1, target_t2 = target.merged_throughput1, target.merged_throughput2
@@ -1725,12 +1727,40 @@ function layout:expensive_deconstruct(state)
 	return "prepare_connections"
 end
 
+function layout:check_belt_capacity(state)
+	if belt_capacity.enabled(state) then
+		if not belt_capacity.valid_range(belt_capacity.ratios(state)) then
+			state.preview_error={"mpp.belt_load_invalid"}
+		elseif state.layout_choice~="capacity_rows" and belt_capacity.overloaded(state) and belt_capacity.can_split(state) then
+			local single_error=belt_capacity.single_error(state)
+			if single_error and not belt_capacity.output_budget(state) then state.preview_error=single_error
+			else
+				state._capacity_original_coverage=belt_capacity.coverage(state)
+				state._mining_layout_choice=state._mining_layout_choice or state.layout_choice
+				state.layout_choice="capacity_rows"
+				return "initialize_capacity_layout"
+			end
+		end
+		if not state.preview_error then state.preview_warning=belt_capacity.output_warning(state) end
+		if state.preview_error and not state.preview_only then state.player.print(state.preview_error);return false end
+	end
+end
+
 function layout:prepare_beacons(state)
-	if common.prepare_beacons(state,self) then return true end
+	if not state._capacity_checked and common.prepare_beacons(state,self) then return true end
+	local next_step=self:check_belt_capacity(state)
+	if next_step~=nil then return next_step end
 	return "deconstruct_layout"
 end
 
 function layout:prepare_connections(state)
+	if belt_capacity.enabled(state) then
+		if common.prepare_beacons(state,self) then return true end
+		local next_step=self:check_belt_capacity(state)
+		if next_step~=nil then return next_step end
+		state._capacity_checked=true
+		if state.preview_error then return "prepare_beacons" end
+	end
 	local ok, err = common.prepare_belt_connection(state)
 	if not ok then
 		state.preview_error = err
@@ -1789,7 +1819,7 @@ function layout:placement_miners(state)
 			thing="miner",
 			grid_x = miner.origin_x,
 			grid_y = miner.origin_y,
-			direction = mpp_util.clamped_rotation(defines.direction[direction], M.rotation_bump),
+			direction = mpp_util.clamped_rotation(state._capacity_rows and miner.direction or defines.direction[direction], M.rotation_bump),
 		}
 
 		if ghost and state.module_choice ~= "none" and module_inv_size > 0 then

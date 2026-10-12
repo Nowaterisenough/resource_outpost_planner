@@ -4,6 +4,7 @@ local compatibility = require("mpp.compatibility")
 local oil_config = require("oil.config")
 local common = require("layouts.common")
 local beacons = require("mpp.beacons")
+local belt_capacity = require("mpp.belt_capacity")
 
 local floor, ceil = math.floor, math.ceil
 local min, max = math.min, math.max
@@ -30,6 +31,7 @@ require_layout("sparse_logistics")
 require_layout("blueprints")
 require_layout("oil")
 layouts.beacon_rows = require("layouts.beacon_rows")
+layouts.capacity_rows = require("layouts.capacity_rows")
 
 function algorithm.get_mining_layout(player_data)
 	local choices = player_data.choices
@@ -167,10 +169,15 @@ local function create_state(event)
 
 	-- fill in player option properties
 	local player_choices = player_data.choices
+	belt_capacity.migrate_choices(player_choices)
 	for k, v in pairs(player_choices) do
 		state[k] = util.copy(v)
 	end
 	local layout = layouts[state.layout_choice]
+	if state.belt_merge_choice and layout.restrictions.belt_merging_available
+		and not belt_capacity.valid_range(belt_capacity.ratios(state)) then
+		return nil,{"mpp.belt_load_invalid"}
+	end
 	if beacons.enabled(state) then
 		state._mining_layout_choice = state.layout_choice
 		state._beacon_logistics = layout.restrictions.logistics_available

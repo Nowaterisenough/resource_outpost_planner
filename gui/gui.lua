@@ -13,11 +13,12 @@ local output_balancer = require("mpp.output_balancer")
 local belt_planner = require("mpp.belt_planner")
 local train_station = require("mpp.train_station")
 local conf = require("configuration")
+local belt_capacity = require("mpp.belt_capacity")
 
 local layouts = algorithm.layouts
 
 local gui = {}
-local workflow_version = 14
+local workflow_version = 16
 
 local direction_sprites = {
 	north = "virtual-signal/up-arrow",
@@ -674,6 +675,19 @@ function gui.create_interface(player)
 	player_gui.output_count.style.width=44
 	player_gui.output_count.style.height=28
 	player_gui.output_balance_root.add{type="label",caption={"mpp.output_balance_unit"}}
+	local capacity_root=output.add{type="flow",direction="vertical"}
+	player_gui.belt_load_root=capacity_root
+	player_gui.belt_load_toggle=capacity_root.add{type="checkbox",state=false,caption={"mpp.belt_load_label"},
+		tooltip={"mpp.belt_load_tooltip"},tags={mpp_belt_load=true}}
+	local capacity_row=capacity_root.add{type="flow",direction="horizontal"}
+	player_gui.belt_load_fields={}
+	for _,bound in ipairs{"min","max"} do
+		capacity_row.add{type="label",caption={"mpp.belt_load_"..bound}}
+		local field=capacity_row.add{type="textfield",text=bound=="min" and "0.8" or "1",numeric=true,allow_decimal=true,
+			allow_negative=false,lose_focus_on_confirm=true,tags={mpp_belt_load_bound=bound},tooltip={"mpp.belt_load_tooltip"}}
+		field.style.width=60;field.style.height=28
+		player_gui.belt_load_fields[bound]=field
+	end
 	player_gui.output_station_toggle=output.add{type="checkbox",state=false,caption={"mpp.output_station_label"},
 		tooltip={"mpp.output_station_tooltip"},tags={mpp_output_station=true}}
 	local train_row=output.add{type="flow",direction="horizontal"}
@@ -1224,16 +1238,6 @@ local function update_misc_selection(player)
 		icon=setting_toggle_icon("avoid_water", choices.terrain_mode_choice=="avoid"),
 	}
 
-	if layout.restrictions.belt_merging_available then
-		values:push{
-			value="belt_merge",
-			icon_enabled=setting_toggle_icon("belt_merge", true),
-			icon=setting_toggle_icon("belt_merge"),
-			tooltip={"mpp.choice_merge_belts"},
-		}
-	end
-
-
 	if layout.restrictions.lamp_available then
 		values:push{
 			value="lamp",
@@ -1531,6 +1535,15 @@ local function update_selections(player)
 	if choices.output_balance_choice==nil then choices.output_balance_choice=false end
 	if not output_balancer.valid_count(choices.output_belt_count_choice) then choices.output_belt_count_choice=8 end
 	player_data.gui.output_settings_root.visible=can_output
+	local can_capacity=can_output and choices.layout_choice~="blueprints"
+	player_data.gui.belt_load_root.visible=can_capacity
+	player_data.gui.belt_load_toggle.state=choices.belt_merge_choice==true
+	for _,bound in ipairs{"min","max"} do
+		local field=player_data.gui.belt_load_fields[bound]
+		field.text=tostring(choices["belt_load_"..bound.."_choice"])
+		field.enabled=can_capacity and choices.belt_merge_choice==true
+	end
+	player_data.belt_load_invalid=not belt_capacity.valid_range(belt_capacity.ratios(choices))
 	player_data.gui.output_station_toggle.state=choices.output_station_choice
 	player_data.gui.output_balance_toggle.state=choices.output_station_choice or choices.output_balance_choice
 	player_data.gui.output_count.text=tostring(choices.output_station_choice and train_station.output_count(choices) or choices.output_belt_count_choice)
@@ -1570,6 +1583,7 @@ function gui.show_interface(player)
 	local player_data = storage.players[player.index]
 	conf.migrate_statistics_choice(player_data.choices)
 	conf.migrate_terrain_choices(player_data.choices)
+	belt_capacity.migrate_choices(player_data.choices)
 	player_data.blueprint_add_mode = false
 	player_data.entity_filtering_mode = false
 	if frame and player_data.gui.workflow_version ~= workflow_version then
@@ -1641,7 +1655,7 @@ local function on_gui_click(event)
 	if evt_ele_tags.mpp_output_loading then
 		player_data.choices.output_loading_side_choice=evt_ele_tags.mpp_output_loading
 		player_data.gui.output_count.text=tostring(train_station.output_count(player_data.choices))
-		preview.request(player_data)
+		preview.request(player_data,true)
 		preview.update_gui(player_data)
 		if player_data.input_mode=="output" then input_mode.output(player_data,player) end
 		return
@@ -1907,11 +1921,18 @@ end
 script.on_event(defines.events.on_gui_checked_state_changed,function(event)
 	local data=storage.players[event.player_index]
 	if not data or (data.preview and data.preview.applying) then return end
+	if event.element.tags.mpp_belt_load then
+		data.choices.belt_merge_choice=event.element.state
+		for _,field in pairs(data.gui.belt_load_fields) do field.enabled=event.element.state end
+		preview.request(data)
+		update_output_cursor(game.get_player(event.player_index),data)
+		return
+	end
 	if event.element.tags.mpp_output_station then
 		data.choices.output_station_choice=event.element.state
 		data.gui.output_balance_toggle.state=event.element.state or data.choices.output_balance_choice
 		data.gui.output_count.text=tostring(event.element.state and train_station.output_count(data.choices) or data.choices.output_belt_count_choice)
-		preview.request(data)
+		preview.request(data,true)
 		update_output_cursor(game.get_player(event.player_index),data)
 		if data.input_mode=="output" then input_mode.output(data,game.get_player(event.player_index)) end
 		return
@@ -1921,12 +1942,24 @@ script.on_event(defines.events.on_gui_checked_state_changed,function(event)
 	data.gui.output_count.enabled=event.element.state
 	if event.element.state and data.output_count_invalid then
 		preview.invalidate(data,{"mpp.output_balance_count_error",output_balancer.max_count})
-	else preview.request(data) end
+	else preview.request(data,true) end
 	update_output_cursor(game.get_player(event.player_index),data)
 end)
 
 script.on_event(defines.events.on_gui_text_changed, function(event)
 	local data = storage.players[event.player_index]
+	if data and event.element.tags.mpp_belt_load_bound and not (data.preview and data.preview.applying) then
+		local fields=data.gui.belt_load_fields
+		local lower,upper=tonumber(fields.min.text),tonumber(fields.max.text)
+		local valid=belt_capacity.valid_range(lower,upper)
+		data.belt_load_invalid=not valid
+		if valid then data.choices.belt_load_min_choice=lower;data.choices.belt_load_max_choice=upper end
+		for _,field in pairs(fields) do
+			field.tooltip=valid and {"mpp.belt_load_tooltip"} or {"mpp.belt_load_invalid"}
+		end
+		if data.choices.belt_merge_choice then preview.request(data) end
+		return
+	end
 	if data and event.element.tags.mpp_output_train_count and not (data.preview and data.preview.applying) then
 		local field=event.element.tags.mpp_output_train_count
 		local value=tonumber(event.element.text)
@@ -1939,7 +1972,7 @@ script.on_event(defines.events.on_gui_text_changed, function(event)
 		event.element.tooltip=valid and {"mpp.output_station_tooltip"} or {"mpp.output_station_count_error",8,16}
 		if data.choices.output_station_choice then
 			data.gui.output_count.text=tostring(train_station.output_count(data.choices))
-			preview.request(data)
+			preview.request(data,true)
 			update_output_cursor(game.get_player(event.player_index),data)
 			if not data.output_station_count_invalid and data.input_mode=="output" then input_mode.output(data,game.get_player(event.player_index)) end
 		end
@@ -1951,7 +1984,7 @@ script.on_event(defines.events.on_gui_text_changed, function(event)
 			data.output_count_invalid=false
 			data.choices.output_belt_count_choice=count
 			event.element.tooltip={"mpp.output_balance_tooltip"}
-			preview.request(data)
+			preview.request(data,true)
 			update_output_cursor(game.get_player(event.player_index),data)
 		else
 			data.output_count_invalid=true

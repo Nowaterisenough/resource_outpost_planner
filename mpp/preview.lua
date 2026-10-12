@@ -37,13 +37,18 @@ function preview.update_gui(data)
 	if not ui.preview_apply or not ui.preview_apply.valid then return end
 	if ui.preview_status and ui.preview_status.valid then
 		local status=draft and (draft.applying and {"mpp.preview_applying"}
-			or draft.error or not draft.ready and {"mpp.preview_updating"})
+			or draft.error or not draft.ready and {"mpp.preview_updating"} or draft.warning)
 		ui.preview_status.visible=status~=nil and status~=false
 		ui.preview_status.caption=status or ""
 		ui.preview_status.style.font_color=draft and draft.error and {1,0.35,0.25} or {1,0.85,0.4}
 	end
 	ui.preview_apply.enabled=draft~=nil and draft.ready==true and not draft.applying
 	ui.preview_cancel.enabled=draft~=nil and not draft.applying
+	if ui.belt_load_toggle and ui.belt_load_toggle.valid then
+		local enabled=not (draft and (draft.applying or draft.output_only))
+		ui.belt_load_toggle.enabled=enabled
+		for _,field in pairs(ui.belt_load_fields) do field.enabled=enabled and data.choices.belt_merge_choice==true end
+	end
 	if ui.output_balance_toggle and ui.output_balance_toggle.valid then
 		local enabled=not (draft and draft.applying)
 		local train=data.choices.output_station_choice==true
@@ -90,9 +95,12 @@ function preview.invalidate(data,err)
 	preview.update_gui(data)
 end
 
-function preview.request(data)
+function preview.request(data,output_change)
 	local draft=data.preview
 	if not draft or draft.applying then return end
+	if data.choices.belt_merge_choice and data.belt_load_invalid then
+		preview.invalidate(data,{"mpp.belt_load_invalid"});return
+	end
 	if data.choices.output_station_choice and data.output_station_count_invalid then
 		preview.invalidate(data,{"mpp.output_station_count_error",8,16});return
 	end
@@ -107,6 +115,7 @@ function preview.request(data)
 	draft.revision=draft.revision+1
 	draft.ready=false
 	draft.error=nil
+	draft.warning=nil
 	draft.refresh_at=game.tick+8
 	preview.update_gui(data)
 	script.on_event(defines.events.on_tick,task_runner_handler)
@@ -229,6 +238,7 @@ function preview.complete(state)
 	local draft=data and data.preview
 	if not draft or draft.revision~=state.preview_revision or (draft.applying and not state._apply_after_preview) then return end
 	draft.error=state.preview_error
+	draft.warning=state.preview_warning
 	local captured, diagnostic_error=pcall(diagnostics.capture,state)
 	if not captured then
 		log("Preview diagnostics failed: "..tostring(diagnostic_error))

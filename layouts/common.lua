@@ -3,6 +3,7 @@ local render_util = require("mpp.render_util")
 local belt_planner = require("mpp.belt_planner")
 local beacons = require("mpp.beacons")
 local train_station = require("mpp.train_station")
+local belt_load = require("mpp.belt_load")
 
 local common = {}
 
@@ -706,7 +707,7 @@ function common.create_belt_building_environment(state)
 	local underground_choice = B.related_underground_belt
 	local quality_choice = state.belt_quality_choice
 	-- Unmerged ordinary outlets can start at their own drill row instead of the patch-wide alignment.
-	if state.belt_planner_choice and state.belt_target and not state.belt_merge_choice
+	if not state._capacity_rows and state.belt_planner_choice and state.belt_target and not state.belt_merge_choice
 		and not state.output_balance_choice and not state.output_station_choice
 		and state.belt_target.direction==mpp_util.bp_direction[state.direction_choice][WEST] then
 		for _,belt in ipairs(belts) do
@@ -1194,6 +1195,13 @@ function common.create_belt_planner_specification(state)
 	local belts = state.belts
 	
 	if belts == nil or #belts == 0 then return end
+	local required
+	if state.belt_merge_choice and state.miner and state.belt then
+		local lower,upper=belt_load.ratios(state)
+		if belt_load.valid_range(lower,upper) then
+			required=belt_load.required_outputs(belts,common.get_belt_capacity_multiplier(state)*upper)
+		end
+	end
 	
 	---@type BeltPlannerSpecification
 	local belt_planner_spec = {
@@ -1203,6 +1211,8 @@ function common.create_belt_planner_specification(state)
 		direction_choice = state.direction_choice,
 		belt_choice = state.belt_choice,
 		belt_quality_choice = state.belt_quality_choice,
+		minimum_output_count = required,
+		lane_capacity = required and common.get_belt_capacity_multiplier(state) or nil,
 		output_count = state.output_station_choice and train_station.output_count(state)
 			or state.output_balance_choice and state.output_belt_count_choice or nil,
 		station_choices = state.output_station_choice and train_station.choices(state) or nil,

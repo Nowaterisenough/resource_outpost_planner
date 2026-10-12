@@ -57,6 +57,7 @@ end
 function layout:prepare_miner_layout(state)
 	local next_step = simple.prepare_miner_layout(self,state)
 	rows.reserve(state)
+	if state.belt_merge_choice then rows.finish(state) end
 	return next_step
 end
 

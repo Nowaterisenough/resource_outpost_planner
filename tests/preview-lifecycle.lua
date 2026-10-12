@@ -24,7 +24,12 @@ package.loaded["mpp.preview_diagnostics"]={
 	capture=function() calls.validation=calls.validation+1 end,
 	resource_issues=function(_,err) return {{position={x=0,y=0},reason=err}} end,
 }
-package.loaded["mpp.input_mode"]={update_gui=function() end,idle=function(d) d.input_mode=nil end}
+package.loaded["mpp.input_mode"]={update_gui=function() end,idle=function(d) d.input_mode=nil end,
+	output_specification=function(d)
+		local spec=d.preview.belt_specification
+		if spec then spec.output_count=d.choices.output_balance_choice and d.choices.output_belt_count_choice end
+		return spec
+	end}
 package.loaded["mpp.output_preview"]={}
 defines={events={on_tick=1}}
 script={on_event=function() end}
@@ -117,4 +122,19 @@ preview.request(data)
 assert(data.gui.preview_status.visible and data.gui.preview_status.caption[1]=="mpp.preview_updating","output recalculation has no visible feedback")
 preview.complete(state{entities=draft.resources,preview_only=true,preview_revision=draft.revision})
 assert(not data.gui.preview_status.visible,"successful preview retained a stale error/progress label")
+draft=fixture()
+draft.belt_specification={count=26,minimum_output_count=23}
+data.choices.output_balance_choice=true;data.choices.output_belt_count_choice=8
+preview.request(data,true)
+assert(not draft.error and draft.refresh_at and data.gui.preview_status.visible,"fixed output count blocks layout replanning")
+local capped=state{entities=draft.resources,preview_revision=draft.revision}
+capped.preview_warning={"mpp.belt_capacity_outputs",8,"63.6"}
+preview.complete(capped)
+assert(draft.ready and data.gui.preview_apply.enabled and data.gui.preview_status.caption==capped.preview_warning,"bottleneck warning blocks Apply or is hidden")
+data.choices.output_belt_count_choice=24
+preview.request(data,true)
+assert(not draft.error and draft.refresh_at,"valid output count did not recover")
+data.choices.output_belt_count_choice=8
+preview.request(data)
+assert(not draft.warning and not draft.error and draft.refresh_at,"equipment changes use stale capacity estimates")
 print("Preview lifecycle OK: validation, successful build handoff, overlay cleanup, both failure paths and stale results")

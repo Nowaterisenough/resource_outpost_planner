@@ -3,6 +3,7 @@ local current_version = require("mpp.version")
 local conf = {}
 local preview = require("mpp.preview")
 local terrain = require("mpp.terrain")
+local belt_load = require("mpp.belt_load")
 
 ---@alias FilteredEntityStatus
 ---| "auto_hidden" marked hidden automaticall
@@ -78,6 +79,8 @@ local terrain = require("mpp.terrain")
 ---@field output_wagon_count_choice number
 ---@field output_loading_side_choice "single"|"double"
 ---@field belt_merge_choice boolean
+---@field belt_load_min_choice number
+---@field belt_load_max_choice number
 
 ---@class PlayerGui
 ---@field section table<MppSettingSections, LuaGuiElement>
@@ -168,6 +171,8 @@ conf.default_config = {
 		output_wagon_count_choice = 4,
 		output_loading_side_choice = "double",
 		belt_merge_choice = false,
+		belt_load_min_choice = 0.8,
+		belt_load_max_choice = 1,
 		balancer_choice = false,
 
 		-- non layout/convienence/advanced settings
@@ -290,6 +295,7 @@ function conf.update_player_data(player_index)
 	local old_choices = old_config.choices or {}
 	conf.migrate_statistics_choice(old_choices)
 	conf.migrate_terrain_choices(old_choices)
+	belt_load.migrate_choices(old_choices)
 	for key, new_choice in pairs(new_config.choices) do
 		new_config.choices[key] = pass_same_type(old_choices[key], new_choice)
 	end
@@ -302,9 +308,11 @@ function conf.update_player_quality_data(player_index)
 	local player_data = storage.players[player_index]
 	conf.migrate_statistics_choice(player_data.choices)
 	conf.migrate_terrain_choices(player_data.choices)
+	belt_load.migrate_choices(player_data.choices)
 	if player_data.last_state then
 		conf.migrate_statistics_choice(player_data.last_state)
 		conf.migrate_terrain_choices(player_data.last_state)
+		belt_load.migrate_choices(player_data.last_state)
 	end
 	local filtered_entities = player_data.filtered_entities
 	for _, quality_name in pairs(conf.get_locked_qualities(game.get_player(player_index) --[[@as LuaPlayer]])) do

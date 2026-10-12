@@ -2,6 +2,7 @@ local current_version = require("mpp.version")
 local conf = require("configuration")
 local enums = require("mpp.enums")
 local preview = require("mpp.preview")
+local belt_load = require("mpp.belt_load")
 
 -- resetting a GUI manually from console
 -- /c __resource-outpost-planner__ game.player.gui.screen.mpp_settings_frame.destroy()
@@ -86,6 +87,7 @@ script.on_configuration_changed(function(config_changed_data)
 	for _, state in pairs(storage.tasks or {}) do
 		conf.migrate_statistics_choice(state)
 		conf.migrate_terrain_choices(state)
+		belt_load.migrate_choices(state)
 	end
 
 	if config_changed_data.mod_changes["resource-outpost-planner"] and version < current_version then

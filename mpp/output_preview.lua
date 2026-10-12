@@ -1,6 +1,7 @@
 local planner = require("mpp.belt_planner")
 local builder = require("mpp.builder")
 local common = require("layouts.common")
+local capacity = require("mpp.belt_capacity")
 local output = {}
 
 function output.begin(data,player)
@@ -23,6 +24,7 @@ local function prepare(data,preview_only)
 	choices._deconstruction_orders=source._deconstruction_orders
 	local state,err=planner.create_state(draft.source_spec,draft.belt_target,choices)
 	if not state then return nil,err end
+	state.preview_warning=capacity.output_warning(source,data.choices)
 	state.output_only=true
 	state.preview_only=preview_only
 	state._preview_specs={}
@@ -33,9 +35,10 @@ end
 
 function output.refresh(data)
 	local draft=data.preview
-	if not draft.belt_target then draft.ready=false;draft.error=nil;draft.specs={};draft.issues={};return false end
+	if not draft.belt_target then draft.ready=false;draft.error=nil;draft.warning=nil;draft.specs={};draft.issues={};return false end
 	local state,err,diagnostic=prepare(data,true)
 	draft.error=err
+	draft.warning=state and state.preview_warning
 	draft.issues=diagnostic and diagnostic.issues or {{position=draft.belt_target.position,reason=err}}
 	draft.specs={}
 	if state and diagnostic then

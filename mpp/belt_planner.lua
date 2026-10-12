@@ -6,6 +6,7 @@ local floor, min, max, abs = math.floor, math.min, math.max, math.abs
 local terrain = require("mpp.terrain")
 local output_balancer = require("mpp.output_balancer")
 local train_station = require("mpp.train_station")
+local belt_load = require("mpp.belt_load")
 local belt_planner = {}
 local blueprint_name = "mpp-blueprint-belt-planner"
 local station_cursor_version = 4
@@ -246,6 +247,9 @@ end
 
 ---@return BeltinatorState?, LocalisedString?
 function belt_planner.create_state(spec, target, choices)
+	local outputs=choices.output_station_choice and train_station.output_count(choices)
+		or choices.output_balance_choice and output_balancer.output_count(spec,choices)
+	local loss=spec.lane_capacity and belt_load.loss_percent(spec,spec.lane_capacity,outputs)
 	local c, pos = spec.coords, target.position
 	local range = (choices.output_balance_choice or choices.output_station_choice) and 512 or 100
 	-- Large patches still need room outside their boundary for a many-belt outlet.
@@ -257,6 +261,7 @@ function belt_planner.create_state(spec, target, choices)
 	local direction = util.clamped_rotation(-defines.direction[spec.direction_choice]-EAST, target.direction)
 	return {
 		type="belt_planner", player=spec.player, surface=spec.surface, coords=c,
+		preview_warning=belt_load.output_warning(spec.minimum_output_count,outputs,loss),
 		direction_choice=spec.direction_choice, belt_specification=spec,
 		belt_x=floor(x+0.5), belt_y=floor(y+0.5), belt_direction=direction,
 		belt_choice=spec.belt_choice, belt_quality_choice=spec.belt_quality_choice,
