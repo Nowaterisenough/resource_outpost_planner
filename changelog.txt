@@ -1,4 +1,15 @@
 ---------------------------------------------------------------------------------------------------
+Version: 1.10.1
+Date: 2026-10-13
+  Optimizations:
+    - Reuse unchanged mining geometry when moving or rotating outputs, recalculating only the output connections instead of repeating ore convolution and drill-layout selection.
+    - Use compact resource snapshots and read each native resource position once during cache validation; skip output-cache setup for layouts without belt outputs.
+    - Index preview connectivity by numeric coordinates and share immutable connection shapes, reducing temporary tables and coordinate strings.
+    - Reuse each entity's collision bounds and normalized position within a render while retaining live placement checks and blocked diagnostics.
+  Changes:
+    - Replan fully when settings, output count, resources, research, force, surface effects or nearby obstacles change; retain full planning for mining landfill and unsupported cache layouts.
+    - Preserve cache validity across save/load, discard incompatible development caches safely, and keep complete Apply validation and Undo behavior.
+---------------------------------------------------------------------------------------------------
 Version: 1.10.0
 Date: 2026-10-12
   Features:

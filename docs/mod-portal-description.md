@@ -20,7 +20,8 @@ Plan mining patches and oil outposts in one interface. Select resources, inspect
 - Include rails, a train stop, signals, buffer chests, inserters and poles in the station preview. Train counts set the layout dimensions without adding rolling-stock ghosts. **R / Shift+R** rotate and **H / V** mirror it. The belt module sits close to the wagons, with locomotives extending beyond the loading area.
 - Use fixed, exact-count blueprints for the 1-to-8 input/output balancer matrix, preserving lane structure, underground connections, splitter priorities and filters. Two incoming belts and eight outputs use the original 2-to-8 template.
 - Red and blue belts support all 64 matrix combinations; yellow supports 60. Yellow 5-to-8, 6-to-5, 7-to-5 and 8-to-7 require a higher belt tier. Larger stations retain their extended output layouts.
-- Faster routing and obstacle queries reduce pauses when positioning outputs, including distant stations.
+- Moving or rotating outputs reuses unchanged mining geometry and rebuilds only their connections. Changes to equipment, resources, research or nearby obstacles trigger full planning; Apply still revalidates the layout.
+- Preview rendering reuses connection shapes, collision bounds and positions to reduce temporary allocations and pauses.
 - Select equipment qualities with compact icons below each picker. **Statistics** combines placement reports and belt load overlays.
 - Apply the plan to place construction ghosts, or cancel the current preview. Reselecting resources clears the planner's latest unfinished plan and old overlays, retaining completed buildings and other plans.
 
@@ -70,7 +71,8 @@ Belt balancer layouts use **Raynquist's** designs from [Dogmai's balancer collec
 - 装货站预览包含铁路、车站、信号灯、缓存箱、机械臂和电杆，编组数量仅用于计算布局尺寸，不生成列车虚影；**R / Shift+R** 旋转，**H / V** 镜像。输送模块靠近货厢，允许车头伸出装货区。
 - 1 至 8 路输入、1 至 8 路输出使用固定矩阵中的同规格蓝图，保留双车道结构、地下带连接、分流器优先级和过滤设置；两条来带接八路输出时直接使用原始 2 进 8 出模板。
 - 红带、蓝带支持全部 64 种矩阵组合，黄带支持 60 种；黄带的 5 进 8 出、6 进 5 出、7 进 5 出、8 进 7 出需要升级传送带。较大装货站继续使用扩展输出布局。
-- 优化寻路和障碍查询，减少放置输出及远处车站时的卡顿。
+- 移动或旋转出口时复用未变化的矿区布局，只重算出口连接；设备、资源、研究或附近障碍改变时完整重算，应用前仍重新校验。
+- 预览绘制复用连接形状、碰撞边界和位置对象，减少临时内存分配与停顿。
 - 品质使用设备下方的小图标选择；**统计** 合并放置报告和传送带负载显示。
 - 点击应用后才生成建设蓝图；重新选区会清掉本规划器上次未施工的规划和旧叠层，保留已建成设备和其他规划。
 
