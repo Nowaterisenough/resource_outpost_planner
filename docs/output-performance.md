@@ -659,3 +659,59 @@ python3 scripts/test-preview-output-cache.py --factorio /path/to/factorio \
 The persistence test copies each input save into a separate directory and starts
 only private localhost test servers on allocated ports. Reports and paired
 measurements are in `dist/performance-output-cache-20261013/`.
+
+## 2026-10-13: reduce allocation during repeated previews
+
+This round starts from the unpublished output-cache optimization above, not
+from released `v1.10.0`. Its runtime is archived in
+`dist/performance-preview-round2-20261013/baseline-package/`; `baseline.json`
+records the original package and runtime-file digests.
+
+- Store the ore snapshot in parallel arrays instead of allocating a record for
+  each resource. Read each native ore position once per validation. Compare
+  current options directly against the saved options instead of copying them
+  again. Older cache records safely trigger a full replan.
+- Skip output-cache setup for layouts without belt outputs, including logistics
+  beacon rows.
+- Index preview connectivity by numeric rows and columns. Share immutable
+  direction/type records within the ephemeral topology, retaining live world
+  connections and avoiding per-neighbor coordinate-string construction.
+- Calculate each displayed entity collision box once per render and reuse it
+  for the obstacle check. Reuse normalized positions for native placement probes
+  and sprite targets. Known blocked diagnostics retain their red tint without
+  redundant native placement probes. Live checks remain enabled for other entities.
+
+The new `load-repeat` scenario performs 24 successive output placements on the
+same 4,508-tile mine, with every sixth placement rotated. Three timing-only runs
+per version alternate order, share one save digest, and run without concurrent
+benchmark jobs. The following values compare this round with the preceding
+cache implementation. Cumulative values and peaks are medians across the three
+runs; per-move values are medians across all 72 measured requests per version.
+
+| Measurement | Previous cache | This round | Reduction |
+| --- | ---: | ---: | ---: |
+| Total script work, 24 moves | 2222.78 ms | 1885.46 ms | 15.2% |
+| Rendering work, 24 moves | 1021.17 ms | 660.50 ms | 35.3% |
+| Largest script-update pause per run | 149.46 ms | 116.87 ms | 21.8% |
+| Typical output request | 84.43 ms | 65.32 ms | 22.6% |
+| Typical render | 33.38 ms | 25.27 ms | 24.3% |
+
+The scheduling delay remains 9 game ticks. These measurements describe script
+CPU work, not wall-clock click latency. Some individual moves are slower, and
+allocation/collection and synchronous routing still cause occasional pauses
+around 0.1 seconds. The aggregate improvement holds across the three runs.
+
+All standalone tests pass, including 122 renderer checks and 60 output-cache
+checks. Native comparisons cover 41 previews: ordinary and blocked outputs,
+station movement/rotation/mirroring, compact beacon contours, and all 24 repeated
+load-controlled placements. Geometry, sprite definitions, draw order, readiness
+and entity counts match the previous cache implementation. The separate native
+save/reload test also passes invalidation, forced-full-plan parity, Apply and Undo.
+
+To compare an unpublished baseline, first keep its installable archive and pass
+`--package /path/to/baseline.zip` to `scripts/benchmark-output.py`. Use
+`--scenario load-repeat --timing-only` for repeated-placement timing; omit
+`--timing-only` to record geometry and sprite-order snapshots. `--package` and
+`--ref` are mutually exclusive. Detailed samples are retained under
+`dist/performance-preview-round2-20261013/repeat-timing/`, with native comparisons
+in `correctness/` and persistence results in `native/`.

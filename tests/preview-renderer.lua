@@ -227,7 +227,9 @@ local fallback=reloaded.render(draft,{})
 assert(fallback[1].sprite=="entity/fallback" and fallback[1].x_scale==1 and fallback[1].y_scale==-2,"cached fallback lost collision-box scale or mirror")
 draft.specs[1].position={-7,-9}
 local moved_fallback=reloaded.render(draft,{})
-assert(moved_fallback[1]==fallback[1] and moved_fallback[1].target[1]==-7 and moved_fallback[1].y_scale==-2,"cached fallback retained the old position")
+local moved_target=moved_fallback[1].target
+assert(moved_fallback[1]==fallback[1] and (moved_target.x or moved_target[1])==-7
+	and (moved_target.y or moved_target[2])==-9 and moved_fallback[1].y_scale==-2,"cached fallback retained the old position")
 
 prototypes.entity.flipped={type="assembling-machine"}
 sprites["mpp-preview-flipped-north-1"]={}
@@ -272,4 +274,35 @@ draft.specs={{name="entity-ghost",inner_name="miner",position={.5,.5},direction=
 local ordinary=reloaded.render(draft,{})
 assert(ordinary[1]==rotated[1] and ordinary[1].render_layer=="cursor","reused rail handle left ordinary artwork on the ground layer")
 cases=cases+17
+-- Coordinate grids preserve fractional/negative positions and live neighbors.
+for _,origin in ipairs{{-1024.25,.125},{1000000.5,-999999.5}} do
+	local x,y=origin[1],origin[2]
+	draft.specs={{name="entity-ghost",inner_name="belt",position={x=x,y=y},direction=N},
+		{name="entity-ghost",inner_name="belt",position={x=x-1,y=y},direction=E}}
+	local connected=reloaded.render(draft,{})
+	assert(connected[1].sprite=="mpp-preview-belt-west_to_north-1","numeric topology loses a fractional neighbor")
+	draft.specs[2].position.x=x-2
+	local removed=reloaded.render(draft,{})
+	assert(removed[1].sprite=="mpp-preview-belt-starting_north-1","shared topology shape retains a removed neighbor")
+	cases=cases+2
+end
+local box_queries,placement_queries,placeable=0,0,true
+local saved_box=obstacles.entity_box
+obstacles.entity_box=function(...)
+	box_queries=box_queries+1;return saved_box(...)
+end
+obstacles.blocked_box=function() return false end
+draft.surface.can_place_entity=function() placement_queries=placement_queries+1;return placeable end
+draft.specs={{name="entity-ghost",inner_name="miner",position={x=.5,y=.5},direction=N}}
+local clear=reloaded.render(draft,{avoid_cliffs_choice=true})
+assert(box_queries==1 and placement_queries==1,"one entity recomputes its collision bounds")
+box_queries,placement_queries,placeable=0,0,false
+local newly_blocked=reloaded.render(draft,{avoid_cliffs_choice=true})
+assert(box_queries==1 and placement_queries==1 and newly_blocked[1]==clear[1]
+	and newly_blocked[1].color==prototypes.utility_constants.building_not_buildable_tint,"geometry reuse caches live placement answers")
+draft.specs[1].preview_blocked=true;placement_queries=0;placeable=true
+local diagnostic=reloaded.render(draft,{avoid_cliffs_choice=true})
+assert(placement_queries==0 and diagnostic[1].color==prototypes.utility_constants.building_not_buildable_tint,
+	"known blocked diagnostics needlessly probe placement or become green")
+cases=cases+3
 print("Preview renderer OK: "..cases.." artwork, topology, reuse, invalidation and isolation cases")

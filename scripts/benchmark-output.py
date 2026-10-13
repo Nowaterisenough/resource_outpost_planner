@@ -21,8 +21,10 @@ def main():
     parser.add_argument("--factorio", type=Path, required=True)
     parser.add_argument("--save", type=Path, required=True, help="Existing save with player 1; read only")
     parser.add_argument("--data", type=Path, help="Factorio data directory; inferred when omitted")
-    parser.add_argument("--ref", help="Git revision to compare with the working tree")
-    parser.add_argument("--scenario", choices=("outputs", "large", "move", "apply", "irregular", "contour", "load"), default="outputs",
+    baseline = parser.add_mutually_exclusive_group()
+    baseline.add_argument("--ref", help="Git revision to compare with the working tree")
+    baseline.add_argument("--package", type=Path, help="Previously packaged runtime to compare with the working tree")
+    parser.add_argument("--scenario", choices=("outputs", "large", "move", "apply", "irregular", "contour", "load", "load-repeat"), default="outputs",
                         help="Output previews, large/irregular mines, beacon contours, station moves, or application")
     parser.add_argument("--timing-only", action="store_true",
                         help="Skip correctness snapshots and their allocations between measured requests")
@@ -52,12 +54,24 @@ def main():
     info = json.loads((source / "info.json").read_text())
     package_dir, mods = root / "package", root / "mods"
     mods.mkdir()
-    subprocess.run([sys.executable, str(source / "scripts/package-mod.py"), "--output", str(package_dir)],
-                   check=True, stdout=subprocess.DEVNULL)
-    archive = next(package_dir.glob("*.zip"))
+    if args.package:
+        archive = args.package.resolve()
+    else:
+        subprocess.run([sys.executable, str(source / "scripts/package-mod.py"), "--output", str(package_dir)],
+                       check=True, stdout=subprocess.DEVNULL)
+        archive = next(package_dir.glob("*.zip"))
     digest = hashlib.sha256()
     with zipfile.ZipFile(archive) as bundle:
+        info_files = [name for name in bundle.namelist() if len(Path(name).parts) == 2 and name.endswith("/info.json")]
+        if len(info_files) != 1:
+            parser.error("The runtime archive must contain one top-level mod folder")
+        info = json.loads(bundle.read(info_files[0]))
+        prefix = f"{info['name']}_{info['version']}/"
+        if info_files[0] != prefix + "info.json":
+            parser.error("Runtime folder does not match its mod name and version")
         for name in sorted(bundle.namelist()):
+            if not name.startswith(prefix) or Path(name).is_absolute() or ".." in Path(name).parts:
+                parser.error("Unsafe runtime archive path")
             digest.update(name.encode()); digest.update(bundle.read(name))
         bundle.extractall(mods)
     mod = mods / f"{info['name']}_{info['version']}"
@@ -95,7 +109,7 @@ def main():
                 case[field] = hashlib.sha256("\n".join(sorted(rows)).encode()).hexdigest()
                 if suffix:
                     case["sprite_order_sha256"] = hashlib.sha256("\n".join(rows).encode()).hexdigest()
-    report = {"source": args.ref or "working-tree", "scenario": args.scenario,
+    report = {"source": args.ref or (str(args.package) if args.package else "working-tree"), "scenario": args.scenario,
               "capture_snapshots": not args.timing_only,
               "runtime_sha256": digest.hexdigest(), "save_sha256": save_digest, "cases": cases}
     (root / "results.json").write_text(json.dumps(report, indent=2) + "\n")

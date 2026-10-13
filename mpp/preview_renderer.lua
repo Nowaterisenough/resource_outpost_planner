@@ -13,6 +13,31 @@ local function position(pos) return pos.x or pos[1],pos.y or pos[2] end
 local sprite_paths={}
 local artworks={entity={},tile={}}
 local entity_shapes={}
+local topology_shapes={}
+
+local function grid_at(grid,x,y)
+	local row=grid[y]
+	return row and row[x]
+end
+
+local function flat_at(grid,x,y) return grid[key(x,y)] end
+
+local function grid_set(grid,x,y,value)
+	local row=grid[y]
+	if not row then row={};grid[y]=row end
+	row[x]=value
+end
+
+local function topology_shape(kind,direction,endpoint)
+	local by_type=topology_shapes[kind]
+	if not by_type then by_type={};topology_shapes[kind]=by_type end
+	local by_direction=by_type[direction]
+	if not by_direction then by_direction={};by_type[direction]=by_direction end
+	local k=endpoint or false
+	local shape=by_direction[k]
+	if not shape then shape={type=kind,direction=direction,kind=endpoint};by_direction[k]=shape end
+	return shape
+end
 
 local function entity_shape(name)
 	local shape=entity_shapes[name]
@@ -114,11 +139,13 @@ local function topology(draft)
 		if not shape then return end
 		local x,y=position(pos)
 		direction=direction or N
-		nodes[key(x,y)]={type=shape.type,direction=direction,kind=kind}
+		-- Topology is ephemeral: share immutable connection shapes without storing
+		-- those local tables in the persistent sprite records.
+		grid_set(nodes,x,y,topology_shape(shape.type,direction,kind))
 		if shape.type=="splitter" then
 			local delta=util.direction_coord[direction]
 			for _,sign in ipairs{-1,1} do
-				nodes[key(x+delta.y*sign/2,y-delta.x*sign/2)]={type="transport-belt",direction=direction}
+				grid_set(nodes,x+delta.y*sign/2,y-delta.x*sign/2,topology_shape("transport-belt",direction))
 			end
 		end
 		for _,port in ipairs(shape.ports[direction] or {}) do
@@ -127,9 +154,9 @@ local function topology(draft)
 				if direction==N or direction==S then px=-px; facing=(-facing)%ROTATION
 				else py=-py; facing=(S-facing)%ROTATION end
 			end
-			local k=key(x+px,y+py)
-			ports[k]=ports[k] or {}
-			ports[k][facing]=true
+			local connections=grid_at(ports,x+px,y+py)
+			if not connections then connections={};grid_set(ports,x+px,y+py,connections) end
+			connections[facing]=true
 		end
 	end
 	local x1,y1,x2,y2=math.huge,math.huge,-math.huge,-math.huge
@@ -154,7 +181,8 @@ local function topology(draft)
 	return nodes,ports
 end
 
-function renderer.variant(spec,nodes,ports)
+function renderer.variant(spec,nodes,ports,lookup)
+	lookup=lookup or flat_at
 	local shape=entity_shape(spec.inner_name)
 	local direction=spec.direction or N
 	local name=names[direction] or "north"
@@ -164,14 +192,14 @@ function renderer.variant(spec,nodes,ports)
 		local count,incoming=0,nil
 		for _,dir in ipairs(directions) do
 			local delta=util.direction_coord[dir]
-			local other=nodes[key(x-delta.x,y-delta.y)]
+			local other=lookup(nodes,x-delta.x,y-delta.y)
 			if other and (other.type=="transport-belt" or other.type=="underground-belt" and other.kind=="output")
 				and other.direction==dir and dir~=(direction+S)%ROTATION then count=count+1;incoming=dir end
 		end
 		-- Atlas curve names describe the entry side, opposite to the incoming belt's movement.
 		if count==1 and incoming~=direction then return names[(incoming+S)%ROTATION].."_to_"..name end
 		local delta=util.direction_coord[direction]
-		local front=nodes[key(x+delta.x,y+delta.y)]
+		local front=lookup(nodes,x+delta.x,y+delta.y)
 		if count==0 then return "starting_"..name end
 		if not front or (front.type~="transport-belt" and front.type~="underground-belt") then return "ending_"..name end
 		return name
@@ -180,10 +208,13 @@ function renderer.variant(spec,nodes,ports)
 		local mask=0
 		for index,dir in ipairs(directions) do
 			local delta=util.direction_coord[dir]
-			local k=key(x+delta.x,y+delta.y)
-			local other=nodes[k]
+			local nx,ny=x+delta.x,y+delta.y
+			local other=lookup(nodes,nx,ny)
 			local connected=other and other.type==shape.type
-			if shape.type=="pipe" then connected=ports[k] and ports[k][(dir+S)%ROTATION] or connected end
+			if shape.type=="pipe" then
+				local facing=lookup(ports,nx,ny)
+				connected=facing and facing[(dir+S)%ROTATION] or connected
+			end
 			if connected then mask=mask+2^(index-1) end
 		end
 		return pipe_shapes[mask]
@@ -206,13 +237,16 @@ function renderer.render(draft,choices)
 	local allowed=constants.building_buildable_tint or {0.4,1,0.4,1}
 	local blocked=constants.building_not_buildable_tint or {1,0.4,0.4,1}
 	local allowed_key,blocked_key=color_key(allowed),color_key(blocked)
-	local selected_obstacles
+	local selected_obstacles,boxes
 	if obstacles.active(choices) then
+		boxes={}
 		local x1,y1,x2,y2=math.huge,math.huge,-math.huge,-math.huge
-		for _,spec in ipairs(draft.specs) do
+		for i,spec in ipairs(draft.specs) do
 			if spec.name=="entity-ghost" then
 				local x,y=position(spec.position)
-				local box=obstacles.entity_box(spec.inner_name,{x=x,y=y},spec.direction)
+				local pos=spec.position.x and spec.position or {x=x,y=y}
+				local box=obstacles.entity_box(spec.inner_name,pos,spec.direction)
+				boxes[i]=box
 				x1,y1=math.min(x1,box.left_top.x),math.min(y1,box.left_top.y)
 				x2,y2=math.max(x2,box.right_bottom.x),math.max(y2,box.right_bottom.y)
 			end
@@ -255,18 +289,19 @@ function renderer.render(draft,choices)
 		entries[#entries+1]=entry
 		objects[#objects+1]=entry[1]
 	end
-	for _,spec in ipairs(draft.specs) do
+	for i,spec in ipairs(draft.specs) do
 		local x,y=position(spec.position)
+		local pos=spec.position.x and spec.position or {x=x,y=y}
 		local tile=spec.name=="tile-ghost"
-		local variant=tile and "north" or renderer.variant(spec,nodes,ports)
+		local variant=tile and "north" or renderer.variant(spec,nodes,ports,grid_at)
 		local layers=artwork(spec,tile,variant)
 		local tint=spec.preview_blocked and blocked or allowed
-		if not tile and not spec.preview_existing and (selected_obstacles and obstacles.blocked_box(selected_obstacles,
-			obstacles.entity_box(spec.inner_name,{x=x,y=y},spec.direction))
+		if not tile and not spec.preview_blocked and not spec.preview_existing
+			and (selected_obstacles and obstacles.blocked_box(selected_obstacles,boxes[i])
 			or draft.surface.can_place_entity and not draft.surface.can_place_entity{
-			name=spec.inner_name,position={x=x,y=y},direction=spec.direction,force=player.force,
+			name=spec.inner_name,position=pos,direction=spec.direction,force=player.force,
 			build_check_type=defines.build_check_type.blueprint_ghost,forced=choices.deconstruction_choice==true}) then tint=blocked end
-		local target=tile and {x+0.5,y+0.5} or {x,y}
+		local target=tile and {x+0.5,y+0.5} or pos
 		if layers.rectangle then
 			objects[#objects+1]=rendering.draw_rectangle{surface=draft.surface,players={player},
 				left_top={x,y},right_bottom={x+1,y+1},filled=true,draw_on_ground=true,color={0.2,0.5,0.2,0.5}}
