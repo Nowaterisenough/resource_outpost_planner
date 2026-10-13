@@ -4,6 +4,7 @@ local common = require("layouts.common")
 local diagnostics = require("mpp.preview_diagnostics")
 local input_mode = require("mpp.input_mode")
 local output_preview = require("mpp.output_preview")
+local output_cache = require("mpp.preview_output_cache")
 
 local preview = {}
 local render
@@ -98,6 +99,8 @@ end
 function preview.request(data,output_change)
 	local draft=data.preview
 	if not draft or draft.applying then return end
+	if not output_change then draft.output_basis=nil end
+	draft.output_change=output_change==true
 	if data.choices.belt_merge_choice and data.belt_load_invalid then
 		preview.invalidate(data,{"mpp.belt_load_invalid"});return
 	end
@@ -188,6 +191,12 @@ function preview.tick()
 					if spec then belt_planner.update_blueprint(game.get_player(draft.player_index),spec) end
 				end
 			else
+				local reused=draft.output_change and output_cache.resume(data)
+				if reused then
+					storage.tasks[#storage.tasks+1]=reused
+					goto next_player
+				end
+				draft.output_basis=nil
 				local resources={}
 				for _,entity in pairs(draft.resources) do if entity.valid then resources[#resources+1]=entity end end
 				draft.resources=resources
@@ -211,6 +220,7 @@ function preview.tick()
 				end
 			end
 		end
+		::next_player::
 	end
 end
 
@@ -249,6 +259,7 @@ function preview.complete(state)
 		state._preview_issues=diagnostics.resource_issues(state.resources,state.preview_error)
 	end
 	draft.belt_specification=common.create_belt_planner_specification(state)
+	output_cache.complete(state,draft)
 	draft.specs=state._preview_specs or {}
 	draft.issues=state._preview_issues or {}
 	draft.resource_count=#state.resources

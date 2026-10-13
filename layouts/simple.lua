@@ -9,6 +9,7 @@ local obstacles = require("mpp.obstacles")
 local belt_planner = require("mpp.belt_planner")
 local beacons = require("mpp.beacons")
 local belt_capacity = require("mpp.belt_capacity")
+local output_cache = require("mpp.preview_output_cache")
 local coord_convert, coord_revert = mpp_util.coord_convert, mpp_util.coord_revert
 local internal_revert, internal_convert = mpp_util.internal_revert, mpp_util.internal_convert
 local miner_direction, opposite = mpp_util.miner_direction, mpp_util.opposite
@@ -146,6 +147,7 @@ end
 ---@param self SimpleLayout
 ---@param state SimpleState
 function layout:initialize_grid(state)
+	if self.restrictions.belt_planner_available then output_cache.begin(state) end
 	local miner = state.miner
 	local c = state.coords
 
@@ -1761,12 +1763,17 @@ function layout:prepare_connections(state)
 		state._capacity_checked=true
 		if state.preview_error then return "prepare_beacons" end
 	end
+	output_cache.capture(state)
 	local ok, err = common.prepare_belt_connection(state)
 	if not ok then
 		state.preview_error = err
 		if not state.preview_only then state.player.print(err);return false end
 	end
 	return "prepare_beacons"
+end
+
+function layout:refresh_output(state)
+	return output_cache.refresh(state)
 end
 
 function layout:deconstruct_layout(state)
@@ -1872,9 +1879,11 @@ function layout:placement_belts(state)
 end
 
 function layout:placement_belt_connections(state)
+	local first=state.preview_only and #state._preview_specs+1
 	local create_entity = builder.create_entity_builder(state,{do_deconstruction=true,diagnostic=state.preview_only})
 	for _, belt in ipairs(state.builder_belt_connections or {}) do create_entity(belt) end
 	belt_planner.place_landfill(state,state.builder_belt_connections)
+	if first then state._output_preview_range={first,#state._preview_specs} end
 	return state.builder_all and "placement_landfill" or "placement_poles"
 end
 

@@ -593,3 +593,69 @@ zero missing/extra entities and no ghosts left after Undo.
 Reproduce the timing runs with the normal benchmark arguments and
 `--scenario irregular --timing-only`, using `--ref v1.9.8` for the baseline.
 Use `--scenario contour` without `--timing-only` to capture beacon-contour layouts.
+
+## 2026-10-13: reuse mining geometry when moving outputs
+
+Baseline: published `v1.10.0`. The new `load` scenario uses the same 4,508-tile
+irregular mine, legendary big drills, beacon rows, production modules, a load
+range of 0.8–1.1 and eight balanced outputs. Profiling now covers every mining
+layout, including internal capacity rows. Each output click previously repeated
+three grid builds, 41 layout-attempt callbacks and 30 convolution callbacks.
+These unchanged mining steps accounted for most of the 137-tick wait.
+
+Output-only requests now retain the mining entities, collection ports and a
+sparse routing occupancy map. They check the mining inputs and world state,
+then recompute the output route and render on successive ticks. Cached data is
+plain persistent data, so it survives save/load and multiplayer joins. It never
+stores the transient routing-grid function or a completed output route.
+
+The cache is discarded for mining settings or output-count changes, resource
+removal/movement/amount changes, mining productivity, belt-stack research, surface
+effects, force changes, nearby entities or hazard tiles. Changing the ordinary
+output direction also checks whether it changes trimmed collection-belt tails.
+Blueprint layouts, non-row beacon planning and full layouts containing landfill
+retain the full planning path. Output obstacles and landfill are checked afresh
+on every route; Apply still performs its existing complete validation.
+
+The table contains medians of three native timing-only runs per version. The
+baseline samples came from the alternating before/after series; the final
+conservative landfill guard was then measured in three separate runs. All runs
+used the same save digest with no concurrent benchmark jobs. Total and peak
+measure script CPU work; game ticks measure scheduling, not observed wall-clock
+latency. At 60 UPS, 137 ticks span 2.28 seconds and 9 ticks span 0.15 seconds,
+before accounting for slow frames.
+
+| Output action | Before total ms | After total ms | Before peak tick ms | After peak tick ms | Ticks before → after |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| load-initial | 460.58 | 56.60 | 135.24 | 33.89 | 137 → 9 |
+| load-moved | 407.71 | 164.59 | 46.99 | 102.68 | 137 → 9 |
+| load-rotated | 498.36 | 142.96 | 85.53 | 109.06 | 137 → 9 |
+| load-moved-again | 371.45 | 59.19 | 41.76 | 35.62 | 137 → 9 |
+
+Total script work falls by 59.6–87.7%, and the pipeline uses 93.4% fewer ticks.
+The change does not uniformly improve the longest frame: the measured second
+move and rotation still reach about 103–109 ms. Rendering, allocation and routing
+remain synchronous within their respective steps.
+
+Correctness comparisons cover 21 output states: the four new load cases, ten
+ordinary/balanced/station/blocked cases, four station movements and three compact
+beacon-contour outputs. Entity geometry, sprite definitions/order, readiness and
+entity counts match the baseline. The existing 28 native capacity cases pass.
+A separate two-process localhost test saves and reloads a real cached preview,
+checks five mining-input invalidations against forced full replans, and verifies
+preview/Apply parity plus complete Undo. Standalone tests cover cache ownership,
+failure diagnostics, depleted/moved resources, research, terrain and tail trimming.
+
+Reproduce the timing and snapshot checks using `scripts/benchmark-output.py`
+with `--scenario load`, `--ref v1.10.0` for the baseline, and optionally
+`--timing-only`. The native persistence test is:
+
+```sh
+python3 scripts/test-preview-output-cache.py --factorio /path/to/factorio \
+  --data /path/to/factorio/data --save /path/to/fixture.zip \
+  --output dist/output-cache-checks
+```
+
+The persistence test copies each input save into a separate directory and starts
+only private localhost test servers on allocated ports. Reports and paired
+measurements are in `dist/performance-output-cache-20261013/`.

@@ -31,6 +31,7 @@ package.loaded["mpp.input_mode"]={update_gui=function() end,idle=function(d) d.i
 		return spec
 	end}
 package.loaded["mpp.output_preview"]={}
+package.loaded["mpp.preview_output_cache"]={complete=function() end,resume=function() return nil end}
 defines={events={on_tick=1}}
 script={on_event=function() end}
 task_runner_handler=function() end
@@ -145,4 +146,9 @@ assert(draft.revision==revision+1,"moving the output is ignored")
 data.choices.output_belt_count_choice=8
 preview.request(data)
 assert(not draft.warning and not draft.error and draft.refresh_at,"equipment changes use stale capacity estimates")
+draft=fixture();draft.output_basis={cached=true}
+preview.request(data,true)
+assert(draft.output_basis and draft.output_change,"output request discarded reusable mining basis")
+preview.request(data)
+assert(not draft.output_basis and not draft.output_change,"equipment request kept an obsolete mining basis")
 print("Preview lifecycle OK: validation, successful build handoff, overlay cleanup, both failure paths and stale results")

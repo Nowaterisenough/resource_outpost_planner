@@ -22,7 +22,7 @@ def main():
     parser.add_argument("--save", type=Path, required=True, help="Existing save with player 1; read only")
     parser.add_argument("--data", type=Path, help="Factorio data directory; inferred when omitted")
     parser.add_argument("--ref", help="Git revision to compare with the working tree")
-    parser.add_argument("--scenario", choices=("outputs", "large", "move", "apply", "irregular", "contour"), default="outputs",
+    parser.add_argument("--scenario", choices=("outputs", "large", "move", "apply", "irregular", "contour", "load"), default="outputs",
                         help="Output previews, large/irregular mines, beacon contours, station moves, or application")
     parser.add_argument("--timing-only", action="store_true",
                         help="Skip correctness snapshots and their allocations between measured requests")

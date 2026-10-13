@@ -33,8 +33,12 @@ wrap(perf_renderer,'render','render')
 wrap(perf_station,'geometry','station_geometry')
 wrap(perf_planner,'update_blueprint','cursor')
 wrap(perf_preview,'complete','complete')
-local old_tick=perf_simple.tick
-perf_simple.tick=function(self,state) return timing('mining_'..tostring(state._callback),old_tick,self,state) end
+local profiled={}
+for _,layout in pairs(algorithm.layouts) do if not profiled[layout] then
+ local old_tick=layout.tick
+ layout.tick=function(self,state) return timing('mining_'..tostring(state._callback),old_tick,self,state) end
+ profiled[layout]=true
+end end
 for _,name in ipairs{'can_place','blocked_box','shared_entity'} do
  local fn=perf_obstacles[name]
  perf_obstacles[name]=function(...) if perf_active then perf_calls[name]=(perf_calls[name] or 0)+1 end;return fn(...) end
@@ -69,6 +73,12 @@ elseif scenario=='contour' then cases={
  {name='contour-top',x=75.5,y=-41.5,dir=4},
  {name='contour-middle',x=71.5,y=-16.5,dir=4},
  {name='contour-bottom',x=75.5,y=55.5,dir=4},
+}
+elseif scenario=='load' then cases={
+ {name='load-initial',balance=true,x=-130.5,y=-16.5,dir=12},
+ {name='load-moved',balance=true,x=-136.5,y=-12.5,dir=12},
+ {name='load-rotated',balance=true,x=-138.5,y=-10.5,dir=0},
+ {name='load-moved-again',balance=true,x=-134.5,y=-14.5,dir=12},
 }
 elseif scenario=='apply' then cases={{name='station-apply',station=true,x=65,y=65,dir=0}} end
 local phase,index,player,data,surface,start_tick=0,0
@@ -117,10 +127,18 @@ local function initialize()
   c.layout_choice='compact';c.miner_choice='big-mining-drill';c.direction_choice='east';c.belt_choice='turbo-transport-belt'
   c.beacon_choice='beacon';c.beacon_module_choice='speed-module-3';c.beacon_quality_choice='normal';c.beacon_module_quality_choice='normal'
  end
+ if scenario=='load' then
+  c.layout_choice='compact';c.miner_choice='big-mining-drill';c.miner_quality_choice='legendary';c.direction_choice='west'
+  c.belt_choice='turbo-transport-belt';c.pole_quality_choice='legendary';c.module_choice='productivity-module-3'
+  c.beacon_choice='beacon';c.beacon_module_choice='speed-module-3';c.beacon_quality_choice='normal';c.beacon_module_quality_choice='normal'
+  c.belt_merge_choice=true;c.belt_load_min_choice=0.8;c.belt_load_max_choice=1.1
+  c.output_balance_choice=true;c.output_belt_count_choice=8
+  player.force.mining_drill_productivity_bonus=4;player.force.belt_stack_size_bonus=3
+ end
  perf_gui.show_interface(player)
  local edge=(scenario=='large' or scenario=='move') and 63 or 23
  local resources={}
- if scenario=='irregular' or scenario=='contour' then
+ if scenario=='irregular' or scenario=='contour' or scenario=='load' then
   for x=-48,47 do for y=-37,38 do
    local angle=math.atan2(y/35,x/46)
    local radius=1+0.15*math.sin(angle*5)+0.09*math.cos(angle*9)
@@ -163,7 +181,7 @@ local function step()
   choices.output_station_choice=c.station==true;choices.output_balance_choice=c.balance==true;choices.output_belt_count_choice=8;choices.output_locomotive_count_choice=2;choices.output_wagon_count_choice=c.wagons or 4;choices.output_loading_side_choice='double';choices.belt_planner_choice=true
   local tiles={};for x=-40,40 do for y=-15,-5 do tiles[#tiles+1]={name=c.water and 'water' or 'grass-1',position={x,y}} end end;surface.set_tiles(tiles);choices.terrain_mode_choice=c.water and 'avoid' or 'fill';choices.deconstruction_choice=c.blocked==true
   if c.blocked then for x=-27,-21 do for y=-28,-23 do surface.create_entity{name='steel-chest',position={x+.5,y+.5},force=player.force} end end end
-  if scenario=='move' and index>1 then phase=2;return end
+  if (scenario=='move' or scenario=='load') and index>1 then phase=2;return end
   data.preview.belt_target=nil;perf_preview.request(data);phase=2;return
  end
  if phase==2 then
