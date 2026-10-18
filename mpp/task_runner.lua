@@ -11,7 +11,9 @@ function task_runner.mining_patch_task(state)
 	---@type TickResult
 	local tick_result
 
-	if state.preview_only then
+	if state._forced_applied then
+		tick_result=false
+	elseif state.preview_only then
 		local success
 		success,tick_result=pcall(layout.tick,layout,state)
 		if not success then

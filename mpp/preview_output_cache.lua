@@ -77,7 +77,7 @@ local function trimmed(state,target,choices)
 end
 
 function cache.begin(state)
-	if not state.preview_only or state._apply_after_preview or state._preview_environment
+	if not state.preview_only or state._apply_after_preview or state._force_build_mode or state._preview_environment
 		or state._beacon_logistics or state.layout_choice=="blueprints" or state.layout_choice=="oil" then return end
 	local data=storage.players[state.player.index]
 	if not data or not data.preview then return end

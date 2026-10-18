@@ -153,6 +153,7 @@ local function create_state(event)
 	state._deconstruction_orders = {}
 	state.preview_only = event.preview_only == true
 	state.preview_revision = event.preview_revision
+	state._force_build_mode = event.force_build_mode
 	state.belt_target = event.belt_target and util.copy(event.belt_target)
 	state._preview_specs = state.preview_only and {} or nil
 	state._render_objects = List()

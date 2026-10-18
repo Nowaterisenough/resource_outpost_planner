@@ -18,7 +18,7 @@ local belt_capacity = require("mpp.belt_capacity")
 local layouts = algorithm.layouts
 
 local gui = {}
-local workflow_version = 16
+local workflow_version = 17
 
 local direction_sprites = {
 	north = "virtual-signal/up-arrow",
@@ -716,10 +716,11 @@ function gui.create_interface(player)
 	player_gui.select_tool=tools.add{type="button",caption={"mpp.tool_select"},tooltip={"mpp.tool_select_tooltip"},tags={mpp_input_mode="select"}}
 	local actions=footer.add{type="flow",direction="horizontal"}
 	player_gui.preview_apply=actions.add{type="button",style="green_button",caption={"mpp.preview_apply"},enabled=false,tags={mpp_preview_apply=true}}
+	player_gui.preview_force=actions.add{type="button",caption={"mpp.preview_force"},tooltip={"mpp.preview_force_tooltip"},enabled=false,tags={mpp_preview_force=true}}
 	player_gui.preview_cancel=actions.add{type="button",style="button",caption={"mpp.preview_cancel"},enabled=false,tags={mpp_preview_cancel=true}}
 	player_gui.undo_button=actions.add{type="button",caption={"controls.undo"},tooltip=mpp_util.wrap_tooltip{"controls.undo"},
 		enabled=helper_undo_available(player_data),tags={mpp_undo=true}}
-	for _, button in ipairs{player_gui.select_tool, player_gui.output_tool, player_gui.preview_apply, player_gui.preview_cancel, player_gui.undo_button} do
+	for _, button in ipairs{player_gui.select_tool, player_gui.output_tool, player_gui.preview_apply, player_gui.preview_force, player_gui.preview_cancel, player_gui.undo_button} do
 		button.style.width = 108
 		button.style.height = 28
 	end
@@ -1650,7 +1651,11 @@ local function on_gui_click(event)
 		else input_mode.output(player_data, player) end
 		return
 	end
-	if evt_ele_tags.mpp_preview_apply then preview.apply(player_data); return end
+	if evt_ele_tags.mpp_preview_apply or evt_ele_tags.mpp_preview_force then
+		local mode=(event.shift or evt_ele_tags.mpp_preview_force) and
+			(event.control and defines.build_mode.superforced or defines.build_mode.forced) or nil
+		preview.apply(player_data,mode); return
+	end
 	if evt_ele_tags.mpp_preview_cancel then preview.cancel(player_data); return end
 	if evt_ele_tags.mpp_output_loading then
 		player_data.choices.output_loading_side_choice=evt_ele_tags.mpp_output_loading

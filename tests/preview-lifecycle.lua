@@ -7,6 +7,7 @@ local function object()
 	result.destroy=function() assert(result.valid);result.valid=false;calls.destroyed=calls.destroyed+1 end
 	return result
 end
+package.loaded["mpp.forced_build"]={apply=function(_,mode) calls.forced=mode;return true end}
 package.loaded["mpp.preview_renderer"]={render=function(draft)
 	calls.render=calls.render+1;calls.rendered_error=draft.error
 	if reuse then
@@ -32,13 +33,14 @@ package.loaded["mpp.input_mode"]={update_gui=function() end,idle=function(d) d.i
 	end}
 package.loaded["mpp.output_preview"]={}
 package.loaded["mpp.preview_output_cache"]={complete=function() end,resume=function() return nil end}
-defines={events={on_tick=1}}
+defines={events={on_tick=1},build_mode={forced=1,superforced=2}}
 script={on_event=function() end}
 task_runner_handler=function() end
 List=function() return {} end
 game={tick=100,get_player=function() return player end}
 local function state(event)
 	return {player=player,surface=player.surface,resources=event.entities,preview_only=event.preview_only,
+		_force_build_mode=event.force_build_mode,
 		preview_revision=event.preview_revision,_preview_specs={{name="entity-ghost",position={x=0,y=0}}},
 		belts={},belt={},_collected_ghosts={}}
 end
@@ -65,6 +67,7 @@ local function fixture()
 		specs={},renderings=overlays,belt_target={position={x=0,y=-10},direction=0}}
 	data={preview=draft,choices={belt_planner_choice=true},last_state=prior,input_mode="output",
 		gui={preview_apply={valid=true},preview_cancel={valid=true},undo_button={valid=true},
+			preview_force={valid=true},
 			preview_status={valid=true,style={}}}}
 	storage={players={[1]=data},tasks={}}
 	return draft,overlays,prior
@@ -152,3 +155,37 @@ assert(draft.output_basis and draft.output_change,"output request discarded reus
 preview.request(data)
 assert(not draft.output_basis and not draft.output_change,"equipment request kept an obsolete mining basis")
 print("Preview lifecycle OK: validation, successful build handoff, overlay cleanup, both failure paths and stale results")
+
+draft=fixture();draft.ready=false;draft.error={"mpp.output_balance_blocked"}
+draft.specs={{name="entity-ghost",position={x=0,y=0},preview_blocked=true}}
+preview.update_gui(data)
+assert(data.gui.preview_force.enabled and not data.gui.preview_apply.enabled,"blocked plan has no force action")
+assert(not preview.apply(data),"ordinary Apply bypasses blocked plan")
+assert(preview.apply(data,defines.build_mode.superforced),"forced Apply cannot replan an obstructed output")
+validation=storage.tasks[1]
+assert(validation.preview_only and validation._force_build_mode==defines.build_mode.superforced)
+preview.complete(validation)
+assert(calls.forced==defines.build_mode.superforced and storage.tasks[2]._forced_applied,"native build mode lost")
+assert(calls.commit==0,"forced plan fell back to ordinary ghost placement")
+
+draft=fixture();assert(preview.apply(data,defines.build_mode.forced))
+validation=storage.tasks[1];validation.preview_error={"mpp.msg_obstacle_route_failed"}
+preview.complete(validation)
+assert(not calls.forced and storage.tasks[2]._force_build_mode,"changed obstacles did not trigger a coherent fallback")
+validation=storage.tasks[2];validation.preview_error={"mpp.msg_obstacle_route_failed"}
+preview.complete(validation)
+assert(not calls.forced and not draft.ready and not draft.applying,"invalid diagnostic guides reached native building")
+draft=fixture();preview.request(data)
+assert(not data.gui.preview_force.enabled and not preview.apply(data,defines.build_mode.forced),"force builds an unfinished preview")
+
+draft=fixture();assert(preview.apply(data,defines.build_mode.forced))
+validation=storage.tasks[1]
+assert(not validation._force_build_mode,"force discards a valid displayed route")
+preview.complete(validation)
+assert(calls.forced==defines.build_mode.forced and storage.tasks[2]._forced_applied)
+
+draft=fixture();assert(preview.apply(data,defines.build_mode.forced))
+validation=storage.tasks[1];validation._preview_specs={};validation.preview_error={"mpp.preview_failed"}
+preview.complete(validation)
+assert(not draft.applying and not data.gui.preview_apply.enabled and data.gui.preview_status.caption==draft.error,
+	"empty failed preflight leaves UI stuck applying")

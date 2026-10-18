@@ -158,6 +158,9 @@ function obstacles.shared_entity(state,name,position,direction,quality)
 end
 
 function obstacles.can_place(state, name, position, direction)
+	-- Only an explicitly forced output replan may ignore external obstructions.
+	-- The router still checks planned entities and lane connectivity itself.
+	if state._force_build_mode and state._belt_routing then return true end
 	if not obstacles.active(state) then return true end
 	if obstacles.shared_entity(state,name,position,direction,state.belt_quality_choice) then return true end
 	return not obstacles.blocked_box(obstacles.get(state), obstacles.entity_box(name,position,direction))

@@ -5,6 +5,7 @@ local diagnostics = require("mpp.preview_diagnostics")
 local input_mode = require("mpp.input_mode")
 local output_preview = require("mpp.output_preview")
 local output_cache = require("mpp.preview_output_cache")
+local forced_build = require("mpp.forced_build")
 
 local preview = {}
 local render
@@ -44,6 +45,10 @@ function preview.update_gui(data)
 		ui.preview_status.style.font_color=draft and draft.error and {1,0.35,0.25} or {1,0.85,0.4}
 	end
 	ui.preview_apply.enabled=draft~=nil and draft.ready==true and not draft.applying
+	if ui.preview_force and ui.preview_force.valid then
+		ui.preview_force.enabled=draft~=nil and not draft.applying and not draft.refresh_at
+			and (draft.ready or draft.error~=nil) and #(draft.specs or {})>0
+	end
 	ui.preview_cancel.enabled=draft~=nil and not draft.applying
 	if ui.belt_load_toggle and ui.belt_load_toggle.valid then
 		local enabled=not (draft and (draft.applying or draft.output_only))
@@ -67,7 +72,7 @@ function preview.update_gui(data)
 	end
 	ui.undo_button.enabled=draft~=nil or (data.last_state and #data.last_state._collected_ghosts>0) or false
 	ui.preview_apply.tooltip=draft and draft.error
-		and {"",draft.error,"\n",{"mpp.preview_diagnostics_hint"}} or nil
+		and {"",draft.error,"\n",{"mpp.preview_diagnostics_hint"}} or {"mpp.preview_apply_tooltip"}
 end
 
 function preview.cancel(data,force,keep_selection)
@@ -275,7 +280,30 @@ function preview.complete(state)
 	end
 	draft.ready=not draft.error
 	if state._apply_after_preview then
+		if draft.error and state._native_build_mode and not state._force_build_mode then
+			-- Preserve the displayed safe route whenever it still validates. Only a
+			-- blocked output needs a second, coherent plan that ignores world obstacles.
+			draft.applying=false
+			if preview.apply(data,state._native_build_mode) then return end
+		end
 		if draft.ready then
+			if state._native_build_mode then
+				local previous=data.last_state
+				for _,field in ipairs{"_collected_ghosts","_deconstruction_orders"} do
+					state[field]={}
+					for _,value in pairs(previous and previous[field] or {}) do state[field][#state[field]+1]=value end
+				end
+				local ok,result=pcall(forced_build.apply,state,state._native_build_mode)
+				if ok and result then
+					state.preview_only=false;state._forced_applied=true;state._from_preview=true
+					storage.tasks[#storage.tasks+1]=state
+					return
+				end
+				if not ok then log("Forced blueprint build failed: "..tostring(result)) end
+				draft.applying=false;draft.error={"mpp.preview_force_empty"};draft.ready=false
+				for _,object in pairs(state._render_objects or {}) do draft.renderings[#draft.renderings+1]=object end
+				preview.update_gui(data);return
+			end
 			if commit(data) then
 				-- Keep the current overlay until the queued build finishes or reports a failure.
 				preview.update_gui(data)
@@ -296,13 +324,15 @@ function preview.complete(state)
 	end
 end
 
-function preview.apply(data)
+function preview.apply(data,mode)
 	local draft=data.preview
-	if not draft or not draft.ready or draft.applying or draft.refresh_at then return false end
+	if mode~=nil and mode~=defines.build_mode.forced and mode~=defines.build_mode.superforced then return false end
+	if not draft or draft.applying or draft.refresh_at then return false end
+	if not draft.ready and not (mode and draft.error and #(draft.specs or {})>0) then return false end
 	local player=game.get_player(draft.player_index)
 	if not player or player.surface~=draft.surface then return false end
 	if draft.output_only then
-		if output_preview.apply(data) then input_mode.idle(data,player);preview.cancel(data);return true end
+		if output_preview.apply(data,mode) then input_mode.idle(data,player);preview.cancel(data);return true end
 		render(data,draft);preview.update_gui(data);return false
 	end
 	input_mode.idle(data, player)
@@ -312,9 +342,11 @@ function preview.apply(data)
 	-- Recheck the entire route before any construction or deconstruction begins.
 	local state,err=algorithm.on_player_selected_area{player_index=draft.player_index,entities=resources,surface=draft.surface,
 		preview_only=true,preview_revision=draft.revision,
+		force_build_mode=draft.error and mode or nil,
 		belt_target=data.choices.belt_planner_choice and draft.belt_target or nil}
 	if not state then preview.invalidate(data,err); return false end
 	state._apply_after_preview=true
+	state._native_build_mode=mode
 	draft.applying=true
 	storage.tasks[#storage.tasks+1]=state
 	preview.update_gui(data)

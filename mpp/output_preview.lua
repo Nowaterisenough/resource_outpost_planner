@@ -2,6 +2,7 @@ local planner = require("mpp.belt_planner")
 local builder = require("mpp.builder")
 local common = require("layouts.common")
 local capacity = require("mpp.belt_capacity")
+local forced_build = require("mpp.forced_build")
 local output = {}
 
 function output.begin(data,player)
@@ -14,11 +15,12 @@ function output.begin(data,player)
 	return true
 end
 
-local function prepare(data,preview_only)
+local function prepare(data,preview_only,mode)
 	local draft,source=data.preview,data.last_state
 	if not draft.belt_target then return nil,{"mpp.preview_empty"} end
 	local choices={}
 	for k,v in pairs(data.choices) do choices[k]=v end
+	choices._force_build_mode=mode
 	choices._previous_state=source
 	choices._collected_ghosts=source._collected_ghosts or {}
 	choices._deconstruction_orders=source._deconstruction_orders
@@ -55,14 +57,22 @@ function output.refresh(data)
 	return draft.ready
 end
 
-function output.apply(data)
-	if not output.refresh(data) then return false end
-	local state,err,diagnostic=prepare(data,false)
-	if err or not state then return false end
+function output.apply(data,mode)
+	if not mode and not output.refresh(data) then return false end
+	local fallback=data.preview.error and mode or nil
+	local state,err,diagnostic=prepare(data,mode~=nil,fallback)
+	if err and mode and not fallback then state,err,diagnostic=prepare(data,true,mode) end
+	if err or not state then data.preview.error=err;data.preview.ready=false;return false end
 	local create=builder.create_entity_builder(state,{do_deconstruction=true})
 	for _,spec in ipairs(diagnostic.routes) do create(spec) end
 	planner.place_landfill(state,diagnostic.routes)
+	if mode and not forced_build.apply(state,mode) then
+		data.preview.error={"mpp.preview_force_empty"};data.preview.ready=false;return false
+	end
 	local source=data.last_state
+	for _,object in pairs(state._render_objects or {}) do
+		source._render_objects=source._render_objects or {};source._render_objects[#source._render_objects+1]=object
+	end
 	source._collected_ghosts=state._collected_ghosts
 	source._deconstruction_orders=state._deconstruction_orders
 	source.balanced_output_count=state.balanced_output_count
