@@ -5,7 +5,9 @@ local belt=image("belt.png",128,128); belt.frame_count=16; belt.direction_count=
 local input=image("underground.png",192,192); input.y=192
 data={raw={
 	["transport-belt"]={belt={belt_animation_set={animation_set=belt}}},
-	["underground-belt"]={underground={structure={direction_in={sheet=input},direction_out={sheet=image("underground.png",192,192)}}}},
+	["underground-belt"]={underground={belt_animation_set={animation_set=belt},structure={
+		back_patch={sheet=image("back.png",192,192)},front_patch={sheet=image("front.png",192,192)},
+		direction_in={sheet=input},direction_out={sheet=image("underground.png",192,192)}}}},
 	["electric-pole"]={pole={pictures={layers={image("pole.png",84,252)}}}},
 	["mining-drill"]={miner={graphics_set={animation={north=image("miner-N.png",190,198),east=image("miner-E.png",198,190)}}}},
 	pipe={pipe={pictures={straight_vertical_single=image("pipe-single.png",160,160),corner_up_right=image("pipe-corner.png",128,128)}}},
@@ -16,8 +18,15 @@ data.raw["electric-pole"].pole.pictures.layers[1].direction_count=4
 require("prototypes.preview")
 assert(sprites["mpp-preview-belt-east_to_north-1"].y==4*128,"curve uses straight belt frame")
 assert(sprites["mpp-preview-belt-starting_north-1"].y==16*128,"belt entrance uses wrong frame")
-assert(sprites["mpp-preview-underground-east-input-1"].x==192 and sprites["mpp-preview-underground-east-input-1"].y==192,"underground entrance ignores direction")
-assert(sprites["mpp-preview-underground-west-output-1"].x==576 and sprites["mpp-preview-underground-west-output-1"].y==0,"underground exit uses entrance artwork")
+for i,dir in ipairs{"north","east","south","west"} do
+	for _,kind in ipairs{"input","output"} do
+		local prefix="mpp-preview-underground-"..dir.."-"..kind.."-"
+		local facing=(i-1+(kind=="output" and 2 or 0))%4
+		for _,layer in ipairs{1,3,4} do assert(sprites[prefix..layer].x==facing*192,"tunnel structure or patch faces backwards") end
+		assert(sprites[prefix..3].y==(kind=="input" and 192 or 0),"wrong entrance/exit texture")
+		assert(sprites[prefix..2].y==sprites["mpp-preview-belt-"..dir.."-1"].y,"tunnel correction reversed belt flow artwork")
+	end
+end
 assert(sprites["mpp-preview-pole-east-1"].x==84 and sprites["mpp-preview-pole-east-1"].shift[2]==-0.5,"rotated sprite loses native offset")
 assert(sprites["mpp-preview-miner-east-1"].filename=="miner-E.png","miner direction artwork changed")
 assert(sprites["mpp-preview-pipe-corner_up_right-1"] and sprites["mpp-preview-heat-single-1"],"connected pipes fall back to icons")

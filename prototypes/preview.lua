@@ -136,11 +136,14 @@ for _,entity_type in ipairs(types) do
 					for _,kind in ipairs{"input","output"} do
 						local layers={}
 						local structure=proto.structure or {}
-						collect(structure.back_patch,layers,direction_index-1)
+						-- Structure sheets face into the tunnel. The output faces
+						-- opposite the belt's transport direction, as in the engine.
+						local facing=(direction_index-1+(kind=="output" and 2 or 0))%4
+						collect(structure.back_patch,layers,facing)
 						local belt=proto.belt_animation_set or {}
 						collect(belt.animation_set,layers,0,(belt[direction.."_index"] or belt_indexes[direction])-1)
-						collect(structure[kind=="input" and "direction_in" or "direction_out"],layers,direction_index-1)
-						collect(structure.front_patch,layers,direction_index-1)
+						collect(structure[kind=="input" and "direction_in" or "direction_out"],layers,facing)
+						collect(structure.front_patch,layers,facing)
 						register(name,direction.."-"..kind,layers)
 					end
 				else
