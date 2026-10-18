@@ -80,7 +80,7 @@ for _,miner in ipairs(state.best_attempt.miners) do
 	check(left and right,"pipe channels stay between each drill and its two beacon rows")
 end
 
--- A selected obstacle keeps its slot in the row as a red diagnostic instead of scattering a replacement.
+-- Obstructed optional towers are adapted or omitted, never fatal to the mine.
 state=fixture("west",5,13)
 state.avoid_cliffs_choice=true
 local original_get=obstacles.get
@@ -92,12 +92,33 @@ obstacles.blocked_box=function(_,box)
 		and blocked_position.y>box.left_top.y and blocked_position.y<box.right_bottom.y
 end
 rows.reserve(state)
-check(state.preview_error and state.preview_error[1]=="mpp.beacon_row_blocked","blocked row is actionable")
-check(state.builder_beacons[2].preview_blocked,"blocked tower is retained for red blueprint artwork")
-check(#state.builder_beacons==32,"blocked slot does not change full-row geometry")
+check(not state.preview_error,"optional blocked beacon must not reject the mine")
+for _,spec in ipairs(state.builder_beacons) do
+ local _,box=rows.position(state,spec)
+ check(not obstacles.blocked_box({},box) and not spec.preview_blocked,"retained towers are all buildable")
+end
 rows.finish(state)
-check(state.beacon_summary[1]==31,"blocked towers do not count toward actual effects")
-check(state._preview_issues and #state._preview_issues==1,"diagnostic identifies the obstructed footprint")
+check(state.beacon_summary[1]==#state.builder_beacons,"only actual retained towers contribute effects")
+check(state.beacon_summary[2]==#state.best_attempt.miners,"shoreline pruning retains useful coverage")
+-- Blocking a tile on the edge of the first slot can be repaired by shifting the strip.
+state=fixture("west",5,13)
+state.avoid_cliffs_choice=true
+local initial=rows.specifications(state,state.best_attempt)
+local _,first_box=rows.position(state,initial[1])
+obstacles.blocked_box=function(_,box)
+ return box.left_top.x<first_box.left_top.x+.2 and box.right_bottom.x>first_box.left_top.x
+  and box.left_top.y<first_box.left_top.y+.2 and box.right_bottom.y>first_box.left_top.y
+end
+rows.reserve(state)
+local shifted=false
+for _,spec in ipairs(state.builder_beacons) do
+ if spec.row_x==initial[1].row_x and (spec.row_y-state.best_attempt.sy)%3~=0 then shifted=true end
+end
+check(shifted,"blocked strip should try a better vertical phase")
+-- No feasible tower is still a usable mining layout with truthful zero effects.
+obstacles.blocked_box=function() return true end
+rows.reserve(state);rows.finish(state)
+check(#state.builder_beacons==0 and not state.preview_error and state.beacon_summary[1]==0,"all optional towers can be omitted")
 obstacles.get=original_get;obstacles.blocked_box=original_blocked
 
 local baseline=rows.specifications(state,state.best_attempt)
@@ -107,4 +128,13 @@ for _,density in ipairs{0,1,2,4} do
 	check(#other==#baseline,"legacy density settings migrate to complete rows")
 	for i,spec in ipairs(other) do check(spec.row_x==baseline[i].row_x and spec.row_y==baseline[i].row_y,"legacy density cannot punch holes in a row") end
 end
+
+-- Disconnected lobes must not be bridged with idle towers; quality changes reach.
+state=fixture("west",5,13)
+state.best_attempt.miners={{x=1,y=1,origin_x=3,origin_y=3},{x=1,y=40,origin_x=3,origin_y=42}}
+local normal=rows.specifications(state,state.best_attempt)
+for _,spec in ipairs(normal) do check(spec.row_y<9 or spec.row_y>32,"empty middle of sparse strip has no tower") end
+state.beacon_quality_choice="legendary"
+prototypes.entity.beacon.get_supply_area_distance=function(q) return q=="legendary" and 12 or 3 end
+check(#rows.specifications(state,state.best_attempt)>#normal,"useful towers respect quality supply radius")
 print("Beacon rows: "..cases.." assertions passed")

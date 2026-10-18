@@ -88,6 +88,7 @@ for _,change in ipairs{
 	function(d) d.choices.output_station_choice=true end,
 	function(d) d.choices.belt_load_max_choice=1.2 end,
 	function(d) d.choices.module_choice="speed-module" end,
+	function(d) d.preview.output_basis.geometry_revision=nil end,
 	function(d,s) s.surface.valid=false end,
 	function(d,s) d.preview.surface={} end,
 	function() tiles={{name="water",position={x=4,y=4}}} end,

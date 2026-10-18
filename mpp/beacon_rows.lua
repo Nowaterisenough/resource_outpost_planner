@@ -16,9 +16,24 @@ local function overlap(a,b)
 		and a.left_top.y<b.right_bottom.y and b.left_top.y<a.right_bottom.y
 end
 
-function rows.specifications(state, attempt)
+function rows.specifications(state, attempt, selected)
 	local proto = prototypes.entity[state.beacon_choice]
 	local w,h,gap = proto.tile_width,proto.tile_height,state.beacon_pipe_gap
+	local distance = proto.get_supply_area_distance(state.beacon_quality_choice or "normal")
+	-- Index actual drills: sparse rows need no empty towers, and alternate phases
+	-- only examine nearby consumers even on a large ore patch.
+	local buckets,boxes = {},{}
+	local cell_size = max(w,h,state.miner.size)+2*distance
+	for i,miner in ipairs(attempt.miners) do
+		local _,box=rows.position(state,{name=state.miner_choice,grid_x=miner.origin_x,grid_y=miner.origin_y})
+		boxes[i]=box
+		for x=floor(box.left_top.x/cell_size),floor(box.right_bottom.x/cell_size) do
+			for y=floor(box.left_top.y/cell_size),floor(box.right_bottom.y/cell_size) do
+				local key=x..","..y
+				buckets[key]=buckets[key] or {};buckets[key][#buckets[key]+1]=i
+			end
+		end
+	end
 	local strips = {}
 	for _,miner in ipairs(attempt.miners) do
 		for _,x in ipairs{miner.x-w-gap,miner.x+state.miner.size+gap} do
@@ -34,32 +49,53 @@ function rows.specifications(state, attempt)
 	for _,strip in ipairs(ordered) do
 		local y1 = attempt.sy+floor((strip.y1-attempt.sy)/h)*h
 		local y2 = attempt.sy+ceil((strip.y2-attempt.sy)/h)*h
-		for y=y1,y2-1,h do
-			specs[#specs+1] = {name=state.beacon_choice,quality=state.beacon_quality_choice,thing="beacon",
-				grid_x=strip.x+(w-1)/2,grid_y=y+(h-1)/2,extent_w=w/2,extent_h=h/2,
-				row_x=strip.x,row_y=y}
+		local function phase(offset)
+			local candidates,covered,effects,blocked = {},{},0,false
+			for y=y1+offset,y2-1+offset,h do
+				local spec={name=state.beacon_choice,quality=state.beacon_quality_choice,thing="beacon",
+					grid_x=strip.x+(w-1)/2,grid_y=y+(h-1)/2,extent_w=w/2,extent_h=h/2,row_x=strip.x,row_y=y}
+				local _,box=rows.position(state,spec)
+				local area={left_top={x=box.left_top.x-distance,y=box.left_top.y-distance},
+					right_bottom={x=box.right_bottom.x+distance,y=box.right_bottom.y+distance}}
+				local affected,collision={},false
+				for x=floor(area.left_top.x/cell_size),floor(area.right_bottom.x/cell_size) do
+					for by=floor(area.left_top.y/cell_size),floor(area.right_bottom.y/cell_size) do
+						for _,i in ipairs(buckets[x..","..by] or {}) do
+							if overlap(area,boxes[i]) then affected[i]=true end
+							if overlap(box,boxes[i]) then collision=true end
+						end
+					end
+				end
+				if next(affected) and not collision then
+					if selected and obstacles.blocked_box(selected,box) then blocked=true
+					else
+						candidates[#candidates+1]=spec
+						for i in pairs(affected) do covered[i]=true;effects=effects+1 end
+					end
+				end
+			end
+			local count=0;for _ in pairs(covered) do count=count+1 end
+			return candidates,count,effects,blocked
 		end
+		local best,coverage,effects,blocked=phase(0)
+		if blocked then
+			for shift=1,h-1 do for _,offset in ipairs{-shift,shift} do
+				local candidate,c,e=phase(offset)
+				if c>coverage or c==coverage and e>effects then best,coverage,effects=candidate,c,e end
+			end end
+		end
+		for _,spec in ipairs(best) do specs[#specs+1]=spec end
 	end
 	return specs
 end
 
 function rows.reserve(state)
-	state.builder_beacons = rows.specifications(state,state.best_attempt)
 	local selected
 	if obstacles.active(state) then
 		selected = obstacles.get(setmetatable({_belt_routing=true},{__index=state}))
 	end
+	state.builder_beacons = rows.specifications(state,state.best_attempt,selected)
 	for _,spec in ipairs(state.builder_beacons) do
-		if selected then
-			local p,box = rows.position(state,spec)
-			if obstacles.blocked_box(selected,box) then
-				spec.preview_blocked = true
-				state.preview_error = {"mpp.beacon_row_blocked"}
-				state._preview_issues = state._preview_issues or {}
-				state._preview_issues[#state._preview_issues+1] = {position=p,left_top=box.left_top,
-					right_bottom=box.right_bottom,reason=state.preview_error}
-			end
-		end
 		for y=spec.row_y,spec.row_y+prototypes.entity[state.beacon_choice].tile_height-1 do
 			for x=spec.row_x,spec.row_x+prototypes.entity[state.beacon_choice].tile_width-1 do
 				state.grid:build_thing_simple(x,y,"beacon")

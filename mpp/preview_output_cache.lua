@@ -4,6 +4,7 @@ local planner = require("mpp.belt_planner")
 local builder = require("mpp.builder")
 local common = require("layouts.common")
 local cache = {}
+local geometry_revision = 2 -- Adaptive beacon rows replace the old unconditional full strips.
 
 local ignored_types={"resource","character","unit","corpse","item-entity","tile-ghost"}
 local hazard_names
@@ -109,7 +110,7 @@ function cache.capture(state)
 			planned[#planned+1]={name=spec.name,grid_x=spec.grid_x,grid_y=spec.grid_y,direction=spec.direction}
 		end
 	end
-	state._output_basis={occupied=occupied,planned=planned,trimmed=trimmed(state,state.belt_target,state),
+	state._output_basis={geometry_revision=geometry_revision,occupied=occupied,planned=planned,trimmed=trimmed(state,state.belt_target,state),
 		environment=state._preview_environment,_capacity_rows=state._capacity_rows}
 end
 
@@ -144,7 +145,7 @@ end
 function cache.resume(data)
 	local draft=data.preview
 	local basis=draft.output_basis
-	if not basis or not draft.belt_target then return end
+	if not basis or basis.geometry_revision~=geometry_revision or not draft.belt_target then return end
 	local env,source=basis.environment,basis.state
 	if not source.surface.valid or source.surface~=draft.surface or not source.player.valid
 		or not same_options(env.choices,data.choices)
