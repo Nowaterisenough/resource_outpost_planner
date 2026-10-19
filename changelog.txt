@@ -1,4 +1,17 @@
 ---------------------------------------------------------------------------------------------------
+Version: 1.10.2
+Date: 2026-10-19
+  Features:
+    - Add Force apply with native blueprint placement rules. Shift-click Apply skips unplaceable pieces and orders natural obstacles for removal; Ctrl+Shift-click also orders conflicting buildings for removal. Ctrl-click Force apply uses the same stronger mode.
+    - Revalidate the complete plan before forced placement, retaining valid displayed routes and replanning blocked outputs without building diagnostic guide paths.
+    - Preserve entity qualities, module requests, splitter settings, station alignment and Undo ownership; mark skipped entities red for 10 seconds.
+  Bugfixes:
+    - Keep only beacon-row towers that affect actual drills, try nearby vertical offsets around obstacles, and omit optional blocked towers instead of rejecting the whole mine.
+    - Calculate beacon effects from retained towers and invalidate cached mining geometry from the old full-row implementation.
+    - Correct underground-belt output structures and patches to face out of the tunnel while preserving transport direction.
+  Changes:
+    - Refresh the settings panel on upgrade to expose forced placement controls while preserving player choices and existing construction plans.
+---------------------------------------------------------------------------------------------------
 Version: 1.10.1
 Date: 2026-10-13
   Optimizations:
