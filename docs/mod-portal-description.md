@@ -24,7 +24,7 @@ Plan mining patches and oil outposts in one interface. Select resources, inspect
 - Preview rendering reuses connection shapes, collision bounds and positions to reduce temporary allocations and pauses.
 - Select equipment qualities with compact icons below each picker. **Statistics** combines placement reports and belt load overlays.
 - Apply the plan to place construction ghosts, or cancel the current preview. Reselecting resources clears the planner's latest unfinished plan and old overlays, retaining completed buildings and other plans.
-- New pole ghosts receive copper wires and can connect to nearby existing poles within quality-dependent wire reach.
+- **Clear** controls facilities, trees and rocks together: enable it to mark obstructions for deconstruction when applying; disable it to retain and avoid all three. Cliffs and terrain follow their own settings. New pole ghosts receive copper wires and can connect to nearby existing poles within quality-dependent wire reach.
 - Use **Force apply** or **Shift-click Apply** for native forced placement. **Ctrl-click Force apply** or **Ctrl+Shift-click Apply** also marks conflicting buildings for removal. Blocked outputs are replanned coherently; skipped pieces are counted and marked red for 10 seconds. Undo includes new ghosts and deconstruction orders.
 
 ## How To Use
@@ -78,7 +78,7 @@ Belt balancer layouts use **Raynquist's** designs from [Dogmai's balancer collec
 - 品质使用设备下方的小图标选择；**统计** 合并放置报告和传送带负载显示。
 - 点击应用后才生成建设蓝图；重新选区会清掉本规划器上次未施工的规划和旧叠层，保留已建成设备和其他规划。
 
-- 电线杆虚影自动连接铜线，并按各自品质线长接入附近已有电杆。
+- **清障** 统一控制已有设施、树木和岩石：勾选后，普通应用会标记遮挡布局的三类实体拆除并放置虚影；未勾选则全部保留并避让。悬崖与水域由各自选项控制。电线杆虚影自动连接铜线，并按各自品质线长接入附近已有电杆。
 - 点击 **强制应用** 或 **Shift 点击应用** 使用原生强制放置；**Ctrl 点击强制应用** 或 **Ctrl+Shift 点击应用** 还会标记冲突建筑拆除。受阻输出会先重新规划，未放下的位置提示数量并标红 10 秒；撤销包含新增虚影及拆除命令。
 
 ## 使用方法

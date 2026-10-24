@@ -58,11 +58,14 @@ function output.refresh(data)
 	return draft.ready
 end
 
-function output.apply(data,mode)
+function output.apply(data,mode,facility_removal)
+	if mode==nil and data.choices.remove_entities_choice then
+		mode=defines.build_mode.superforced;facility_removal=true
+	end
 	if not mode and not output.refresh(data) then return false end
-	local fallback=data.preview.error and mode or nil
+	local fallback=not facility_removal and data.preview.error and mode or nil
 	local state,err,diagnostic=prepare(data,mode~=nil,fallback)
-	if err and mode and not fallback then state,err,diagnostic=prepare(data,true,mode) end
+	if err and mode and not fallback and not facility_removal then state,err,diagnostic=prepare(data,true,mode) end
 	if err or not state then data.preview.error=err;data.preview.ready=false;return false end
 	local create=builder.create_entity_builder(state,{do_deconstruction=true})
 	for _,spec in ipairs(diagnostic.routes) do create(spec) end

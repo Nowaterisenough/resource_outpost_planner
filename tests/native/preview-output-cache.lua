@@ -31,7 +31,7 @@ local function start()
  c.belt_choice="express-transport-belt";c.belt_quality_choice="normal";c.pole_choice="medium-electric-pole";c.pole_quality_choice="normal"
  c.belt_merge_choice=true;c.belt_load_min_choice=0.8;c.belt_load_max_choice=1.1
  c.belt_planner_choice=true;c.output_balance_choice=true;c.output_belt_count_choice=8;c.output_station_choice=false
- c.terrain_mode_choice="fill";c.cliff_mode_choice="remove";c.deconstruction_choice=true
+ c.terrain_mode_choice="fill";c.cliff_mode_choice="remove";c.remove_entities_choice=false
  local resources={}
  for x=0,39 do for y=0,31 do resources[#resources+1]=surface.create_entity{name="iron-ore",position={x+.5,y+.5},amount=100000} end end
  storage.preview_cache_test={phase="base",refreshes=0,surface=surface,resources=resources,changes=0}

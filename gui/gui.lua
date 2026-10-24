@@ -18,7 +18,7 @@ local belt_capacity = require("mpp.belt_capacity")
 local layouts = algorithm.layouts
 
 local gui = {}
-local workflow_version = 17
+local workflow_version = 18
 
 local direction_sprites = {
 	north = "virtual-signal/up-arrow",
@@ -1251,10 +1251,9 @@ local function update_misc_selection(player)
 
 	if layout.restrictions.deconstruction_omit_available then
 		values:push{
-			value="deconstruction",
-			tooltip={"mpp.choice_deconstruction"},
-			icon=setting_toggle_icon("deconstruction"),
-			icon_enabled=setting_toggle_icon("deconstruction", true),
+			value="remove_entities",
+			tooltip={"mpp.choice_remove_entities"},
+			icon="item/deconstruction-planner",
 		}
 	end
 
@@ -1326,7 +1325,7 @@ local function update_misc_selection(player)
 
 	local groups = {misc=List(), terrain=List(), power=List()}
 	for _, value in ipairs(values) do
-		if value.value=="cliff_mode" or value.value=="terrain_mode" or value.value=="deconstruction" or value.value=="space_landfill" then
+		if value.value=="cliff_mode" or value.value=="terrain_mode" or value.value=="remove_entities" or value.value=="space_landfill" then
 			groups.terrain:push(value)
 		elseif value.value=="lamp" then groups.power:push(value)
 		elseif choices.layout_choice~="oil" then groups.misc:push(value) end

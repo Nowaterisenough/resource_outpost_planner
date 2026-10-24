@@ -108,7 +108,7 @@ end
 ---@field cliff_mode_choice "avoid"|"remove"
 ---@field space_landfill_choice string
 ---@field start_choice boolean
----@field deconstruction_choice boolean
+---@field remove_entities_choice boolean
 ---@field pipe_choice string
 ---@field pipe_quality_choice string
 ---@field module_choice string

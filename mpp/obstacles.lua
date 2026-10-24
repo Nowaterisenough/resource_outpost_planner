@@ -14,7 +14,7 @@ obstacles.blocked_tile = terrain.blocked_tile
 function obstacles.active(state)
 	return state.cliff_mode_choice ~= nil or state.terrain_mode_choice ~= nil
 		or state.avoid_obstacles_choice or state.avoid_water_choice or state.avoid_cliffs_choice
-		or state.deconstruction_choice or state.landfill_choice
+		or state.remove_entities_choice ~= nil or state.deconstruction_choice or state.landfill_choice
 end
 
 local function overlap(a, b)

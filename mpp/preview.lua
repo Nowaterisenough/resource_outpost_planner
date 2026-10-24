@@ -280,7 +280,7 @@ function preview.complete(state)
 	end
 	draft.ready=not draft.error
 	if state._apply_after_preview then
-		if draft.error and state._native_build_mode and not state._force_build_mode then
+		if draft.error and state._native_build_mode and not state._force_build_mode and not state._facility_removal then
 			-- Preserve the displayed safe route whenever it still validates. Only a
 			-- blocked output needs a second, coherent plan that ignores world obstacles.
 			draft.applying=false
@@ -329,10 +329,12 @@ function preview.apply(data,mode)
 	if mode~=nil and mode~=defines.build_mode.forced and mode~=defines.build_mode.superforced then return false end
 	if not draft or draft.applying or draft.refresh_at then return false end
 	if not draft.ready and not (mode and draft.error and #(draft.specs or {})>0) then return false end
+	local facility_removal=mode==nil and data.choices.remove_entities_choice==true
+	if facility_removal then mode=defines.build_mode.superforced end
 	local player=game.get_player(draft.player_index)
 	if not player or player.surface~=draft.surface then return false end
 	if draft.output_only then
-		if output_preview.apply(data,mode) then input_mode.idle(data,player);preview.cancel(data);return true end
+		if output_preview.apply(data,mode,facility_removal) then input_mode.idle(data,player);preview.cancel(data);return true end
 		render(data,draft);preview.update_gui(data);return false
 	end
 	input_mode.idle(data, player)
@@ -347,6 +349,7 @@ function preview.apply(data,mode)
 	if not state then preview.invalidate(data,err); return false end
 	state._apply_after_preview=true
 	state._native_build_mode=mode
+	state._facility_removal=facility_removal
 	draft.applying=true
 	storage.tasks[#storage.tasks+1]=state
 	preview.update_gui(data)

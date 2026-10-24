@@ -146,7 +146,7 @@ function config.get(player_data)
 				shared[name.."_quality_choice"] = data.qualities[name] or shared[name.."_quality_choice"]
 			end
 			shared.terrain_mode_choice = data.add_landfill == false and "avoid" or "fill"
-			shared.deconstruction_choice = data.remove_existing ~= true
+			shared.remove_entities_choice = data.remove_existing == true
 		end
 		data.shared_choices_version = 1
 	end
@@ -157,8 +157,8 @@ function config.get(player_data)
 		data.qualities[name] = shared[name.."_quality_choice"]
 	end
 	data.add_landfill = not terrain.avoid_tiles(shared)
-	data.remove_existing = not shared.deconstruction_choice
-	data.retain_entities = shared.deconstruction_choice
+	data.remove_existing = not terrain.retain_entities(shared)
+	data.retain_entities = terrain.retain_entities(shared)
 	for _, section in ipairs(config.get_sections()) do
 		local key = section.name.."_choice"
 		local selected = data.choices[key]

@@ -134,7 +134,7 @@ local function start()
  c.beacon_choice="beacon";c.beacon_quality_choice="normal";c.beacon_module_choice="speed-module-3";c.beacon_module_quality_choice="normal"
  c.belt_choice="express-transport-belt";c.belt_quality_choice="normal";c.pole_choice="medium-electric-pole";c.pole_quality_choice="normal"
  c.belt_merge_choice=false;c.belt_planner_choice=true;c.output_balance_choice=true;c.output_belt_count_choice=4;c.output_station_choice=false
- c.terrain_mode_choice="avoid";c.cliff_mode_choice="avoid";c.deconstruction_choice=true
+ c.terrain_mode_choice="avoid";c.cliff_mode_choice="avoid";c.remove_entities_choice=false
  local lava={};local resources={}
  for x=0,39 do for y=0,39 do
   if x<8+math.floor(5*math.sin(y/5)) then lava[#lava+1]={name="lava",position={x,y}}
@@ -190,9 +190,23 @@ script.on_nth_tick(1,function()
   preview.select{player_index=1,surface=t.surface,entities=t.resources}
   t.phase="mine-ready"
  elseif t.phase=="mine-ready" then
-  assert(v.ready and preview.apply(d));t.phase="mine-applied"
+  assert(v.ready)
+  for _,spec in ipairs(v.specs) do if spec.inner_name=="big-mining-drill" then
+   if not t.natural then t.natural=t.surface.create_entity{name="tree-01",position=spec.position,force="neutral"}
+   else t.rock=t.surface.create_entity{name="big-rock",position=spec.position,force="neutral"};break end
+  end end
+  assert(t.natural and t.rock);preview.request(d,true);t.phase="mine-natural"
+ elseif t.phase=="mine-natural" then
+  assert(v.ready and not t.natural.to_be_deconstructed(p.force) and not t.rock.to_be_deconstructed(p.force),"unchecked cleanup demolished trees or rocks")
+  for _,spec in ipairs(v.specs) do if spec.name=="entity-ghost" then
+   local box=obstacle_test.entity_box(spec.inner_name,spec.position,spec.direction)
+   assert(t.surface.count_entities_filtered{area=box,name={"tree-01","big-rock"}}==0,"unchecked cleanup did not avoid natural obstacles")
+  end end
+  assert(preview.apply(d));t.phase="mine-applied"
  elseif t.phase=="mine-applied" then
   assert(not v and d.last_state)
+  assert(not t.natural.to_be_deconstructed(p.force) and not t.rock.to_be_deconstructed(p.force),"unchecked cleanup removed trees or rocks")
+  log("PLACEMENT unchecked cleanup PASS: trees and rocks retained and avoided")
   log("PLACEMENT normal mine copper network PASS: "..connected_poles(d.last_state._collected_ghosts).." poles")
   t.original_count=#d.last_state._collected_ghosts
   assert(output_test.begin(d,p))
@@ -212,7 +226,8 @@ script.on_nth_tick(1,function()
   assert(t.chest.valid and not t.chest.to_be_deconstructed(p.force),"full plan Undo left demolition")
   assert(t.surface.count_entities_filtered{type="entity-ghost"}==0,"full plan Undo left ghosts")
   assert(not t.second_chest.to_be_deconstructed(p.force),"output-only Undo left demolition")
-  t.chest.destroy();t.second_chest.destroy()
+  assert(not t.natural.to_be_deconstructed(p.force),"natural obstruction Undo left demolition")
+  t.natural.destroy();t.rock.destroy();t.chest.destroy();t.second_chest.destroy()
   d.choices.layout_choice="compact";d.choices.beacon_choice="none"
   d.choices.output_station_choice=true;d.choices.output_locomotive_count_choice=1;d.choices.output_wagon_count_choice=1
   d.choices.output_loading_side_choice="double"
@@ -241,6 +256,49 @@ script.on_nth_tick(1,function()
    assert(found,"native forced station differs from preview: "..helpers.table_to_json(s))
   end
   log("PLACEMENT station Apply modifier and rail/stop preview parity PASS")
-  t.phase="done";log("PLACEMENT COMPLETE: coherent forced output, output-only, station and Undo PASS")
+  script.get_event_handler(defines.events.on_gui_click){player_index=1,element=d.gui.undo_button,button=defines.mouse_button_type.left}
+  d.choices.output_station_choice=false;d.choices.remove_entities_choice=true
+  gui.show_interface(p)
+  assert(d.gui.selections.misc.remove_entities.style.name=="yellow_slot_button","facility button selection is inverted")
+  script.get_event_handler(defines.events.on_gui_click){player_index=1,element=d.gui.selections.misc.remove_entities,button=defines.mouse_button_type.left}
+  assert(d.choices.remove_entities_choice==false and d.gui.selections.misc.remove_entities.style.name=="slot_button")
+  script.get_event_handler(defines.events.on_gui_click){player_index=1,element=d.gui.selections.misc.remove_entities,button=defines.mouse_button_type.left}
+  assert(d.choices.remove_entities_choice==true)
+  preview.select{player_index=1,surface=t.surface,entities=t.resources};t.phase="facility-clear"
+ elseif t.phase=="facility-clear" then
+  assert(v.ready)
+  for _,spec in ipairs(v.specs) do
+   if spec.inner_name=="big-mining-drill" then
+    if not t.facility then t.facility=t.surface.create_entity{name="steel-chest",position=spec.position,force=p.force}
+    elseif not t.clear_tree then t.clear_tree=t.surface.create_entity{name="tree-01",position=spec.position,force="neutral"}
+    else t.clear_rock=t.surface.create_entity{name="big-rock",position=spec.position,force="neutral"};break end
+   end
+  end
+  assert(t.facility and t.clear_tree and t.clear_rock)
+  preview.request(d,true);t.phase="facility-preview"
+ elseif t.phase=="facility-preview" then
+  assert(v.ready,"facility-removal checkbox still blocks mine")
+  assert(not t.facility.to_be_deconstructed(p.force) and not t.clear_tree.to_be_deconstructed(p.force) and not t.clear_rock.to_be_deconstructed(p.force),"preview demolished an obstruction")
+  assert(preview.apply(d));t.phase="facility-applied"
+ elseif t.phase=="facility-applied" then
+  assert(not v and t.facility.to_be_deconstructed(p.force) and t.clear_tree.to_be_deconstructed(p.force) and t.clear_rock.to_be_deconstructed(p.force),"checked cleanup did not remove facilities, trees and rocks")
+  log("PLACEMENT checked cleanup PASS: facilities, trees and rocks marked for removal")
+  log("PLACEMENT automatic facility removal and copper network PASS: "..connected_poles(d.last_state._collected_ghosts).." poles")
+  assert(output_test.begin(d,p))
+  preview.set_belt_target(d,{position={x=120.5,y=20.5},direction=defines.direction.east})
+  t.phase="facility-output-clear"
+ elseif t.phase=="facility-output-clear" then
+  assert(v.ready)
+  t.output_facility=t.surface.create_entity{name="steel-chest",position=v.belt_target.position,force=p.force}
+  preview.request(d,true);t.phase="facility-output-blocked"
+ elseif t.phase=="facility-output-blocked" then
+  assert(v.ready and preview.apply(d),"automatic output-only facility removal failed")
+  assert(not d.preview and t.output_facility.to_be_deconstructed(p.force))
+  script.get_event_handler(defines.events.on_gui_click){player_index=1,element=d.gui.undo_button,button=defines.mouse_button_type.left}
+  assert(t.facility.valid and not t.facility.to_be_deconstructed(p.force) and not t.output_facility.to_be_deconstructed(p.force))
+  assert(t.surface.count_entities_filtered{type="entity-ghost"}==0,"automatic facility removal Undo left ghosts")
+  assert(not t.clear_tree.to_be_deconstructed(p.force) and not t.clear_rock.to_be_deconstructed(p.force),"cleanup Undo left natural demolition")
+  t.clear_tree.destroy();t.clear_rock.destroy();t.facility.destroy();t.output_facility.destroy()
+  t.phase="done";log("PLACEMENT COMPLETE: facility toggle, copper wires, coherent forced output, output-only, station and Undo PASS")
  end
 end)

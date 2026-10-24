@@ -4,7 +4,7 @@ local planner = require("mpp.belt_planner")
 local builder = require("mpp.builder")
 local common = require("layouts.common")
 local cache = {}
-local geometry_revision = 2 -- Adaptive beacon rows replace the old unconditional full strips.
+local geometry_revision = 4 -- The cleanup switch now retains trees and rocks together with facilities.
 
 local ignored_types={"resource","character","unit","corpse","item-entity","tile-ghost"}
 local hazard_names

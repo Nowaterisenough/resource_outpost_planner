@@ -15,9 +15,11 @@ local hazards = {
 for _, cliff in ipairs{"avoid", "remove"} do
 	for _, mode in ipairs{"avoid", "fill"} do
 		for _, keep in ipairs{true,false} do
-			local choices = {cliff_mode_choice=cliff,terrain_mode_choice=mode,deconstruction_choice=keep}
+			local choices = {cliff_mode_choice=cliff,terrain_mode_choice=mode,remove_entities_choice=not keep}
 			check(terrain.blocks_entity({type="cliff"}, choices) == (cliff=="avoid"), "entity retention overrides cliff mode")
 			check(terrain.blocks_entity({type="assembling-machine"}, choices) == keep, "terrain mode overrides entity retention")
+			check(terrain.blocks_entity({type="tree"}, choices)==keep, "tree retention differs from facility retention")
+			check(terrain.blocks_entity({type="simple-entity"}, choices)==keep, "rock retention differs from facility retention")
 			for _, hazard in ipairs(hazards) do
 				check(terrain.blocks_tile(hazard, choices) == (mode=="avoid"), "hazard does not follow terrain mode")
 			end
@@ -79,13 +81,20 @@ local configuration = require("configuration")
 for _, old in ipairs{
 	{avoid_cliffs_choice=true}, {avoid_water_choice=true}, {landfill_choice=true},
 	{avoid_obstacles_choice=true}, {avoid_cliffs_choice=false,avoid_water_choice=false},
+	{deconstruction_choice=true}, {deconstruction_choice=false},
 } do
-	local cliff, tiles = terrain.avoid_cliffs(old), terrain.avoid_tiles(old)
+	local cliff, tiles, keep = terrain.avoid_cliffs(old), terrain.avoid_tiles(old), terrain.retain_entities(old)
 	configuration.migrate_terrain_choices(old)
 	check((old.cliff_mode_choice=="avoid")==cliff and (old.terrain_mode_choice=="avoid")==tiles, "legacy terrain preference lost")
+	check(old.remove_entities_choice == not keep, "legacy facility setting reversed")
 	check(old.avoid_cliffs_choice==nil and old.avoid_water_choice==nil and old.landfill_choice==nil and old.avoid_obstacles_choice==nil, "redundant flags survive migration")
 end
 local current = {cliff_mode_choice="remove",terrain_mode_choice="avoid",deconstruction_choice=false}
 configuration.migrate_terrain_choices(current)
-check(current.cliff_mode_choice=="remove" and current.terrain_mode_choice=="avoid" and current.deconstruction_choice==false, "migration overwrites current modes or false retention")
+check(current.cliff_mode_choice=="remove" and current.terrain_mode_choice=="avoid" and current.remove_entities_choice==true and current.deconstruction_choice==nil, "migration overwrites current modes or false retention")
+for _,remove in ipairs{false,true} do
+	local saved={remove_entities_choice=remove,deconstruction_choice=remove}
+	configuration.migrate_terrain_choices(saved)
+	check(saved.remove_entities_choice==remove and saved.deconstruction_choice==nil, "new facility choice overwritten")
+end
 print("Terrain OK: "..cases.." independent modes, hazard covers and demolition ownership checks")

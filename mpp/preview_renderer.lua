@@ -300,7 +300,7 @@ function renderer.render(draft,choices)
 			and (selected_obstacles and obstacles.blocked_box(selected_obstacles,boxes[i])
 			or draft.surface.can_place_entity and not draft.surface.can_place_entity{
 			name=spec.inner_name,position=pos,direction=spec.direction,force=player.force,
-			build_check_type=defines.build_check_type.blueprint_ghost,forced=choices.deconstruction_choice==true}) then tint=blocked end
+			build_check_type=defines.build_check_type.blueprint_ghost,forced=true}) then tint=blocked end
 		local target=tile and {x+0.5,y+0.5} or pos
 		if layers.rectangle then
 			objects[#objects+1]=rendering.draw_rectangle{surface=draft.surface,players={player},

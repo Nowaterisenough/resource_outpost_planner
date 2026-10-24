@@ -53,7 +53,7 @@ local belt_load = require("mpp.belt_load")
 ---@field space_landfill_choice string
 ---@field coverage_choice boolean
 ---@field start_choice boolean
----@field deconstruction_choice boolean
+---@field remove_entities_choice boolean
 ---@field pipe_choice string
 ---@field pipe_quality_choice string
 ---@field module_choice string
@@ -149,7 +149,7 @@ conf.default_config = {
 		space_landfill_choice = "se-space-platform-scaffold",
 		coverage_choice = false,
 		start_choice = false,
-		deconstruction_choice = false,
+		remove_entities_choice = true,
 		pipe_choice = "pipe",
 		pipe_quality_choice = "normal",
 		module_choice = "none",
@@ -232,7 +232,10 @@ function conf.migrate_terrain_choices(choices)
 	if choices.terrain_mode_choice == nil then
 		choices.terrain_mode_choice = terrain.avoid_tiles(choices) and "avoid" or "fill"
 	end
-	if choices.avoid_obstacles_choice then choices.deconstruction_choice = true end
+	if choices.remove_entities_choice == nil then
+		choices.remove_entities_choice = not terrain.retain_entities(choices)
+	end
+	choices.deconstruction_choice = nil
 	choices.avoid_cliffs_choice = nil
 	choices.avoid_water_choice = nil
 	choices.avoid_obstacles_choice = nil

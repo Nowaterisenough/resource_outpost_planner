@@ -189,3 +189,16 @@ validation=storage.tasks[1];validation._preview_specs={};validation.preview_erro
 preview.complete(validation)
 assert(not draft.applying and not data.gui.preview_apply.enabled and data.gui.preview_status.caption==draft.error,
 	"empty failed preflight leaves UI stuck applying")
+
+-- Automatic facility removal is a native superforced build, but must never
+-- retry a failed terrain check with the manual force-routing override.
+draft=fixture();data.choices.remove_entities_choice=true
+assert(preview.apply(data));validation=storage.tasks[1]
+assert(validation._native_build_mode==defines.build_mode.superforced and validation._facility_removal)
+preview.complete(validation)
+assert(calls.forced==defines.build_mode.superforced and storage.tasks[2]._forced_applied)
+draft=fixture();data.choices.remove_entities_choice=true
+assert(preview.apply(data));validation=storage.tasks[1];validation.preview_error={"blocked-terrain"}
+preview.complete(validation)
+assert(not calls.forced and #storage.tasks==1 and not draft.applying and draft.error,
+ "automatic facility removal bypasses terrain validation")

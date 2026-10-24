@@ -45,7 +45,7 @@ local function shore_start()
  c.belt_choice="fast-transport-belt";c.belt_quality_choice="normal";c.pole_choice="medium-electric-pole";c.pole_quality_choice="normal"
  c.belt_merge_choice=true;c.belt_load_min_choice=.8;c.belt_load_max_choice=1.1
  c.belt_planner_choice=true;c.output_balance_choice=true;c.output_belt_count_choice=8;c.output_station_choice=false
- c.terrain_mode_choice="avoid";c.cliff_mode_choice="avoid";c.deconstruction_choice=true;c.statistics_choice=true
+ c.terrain_mode_choice="avoid";c.cliff_mode_choice="avoid";c.remove_entities_choice=false;c.statistics_choice=true
  c.lamp_choice=false;c.force_pipe_placement_choice=false
  storage.shoreline_scene={phase="mine",surface=s,resources=resources,report={ore_tiles=#resources}}
  gui.show_interface(p)

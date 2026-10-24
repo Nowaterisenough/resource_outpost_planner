@@ -277,6 +277,7 @@ function belt_planner.create_state(spec, target, choices)
 		space_landfill_choice=choices.space_landfill_choice,
 		avoid_obstacles_choice=choices.avoid_obstacles_choice,
 		avoid_cliffs_choice=choices.avoid_cliffs_choice, avoid_water_choice=choices.avoid_water_choice,
+		remove_entities_choice=choices.remove_entities_choice,
 		deconstruction_choice=choices.deconstruction_choice, landfill_choice=choices.landfill_choice,
 		_previous_state=choices._previous_state, _collected_ghosts=choices._collected_ghosts,
 		_deconstruction_orders=choices._deconstruction_orders,

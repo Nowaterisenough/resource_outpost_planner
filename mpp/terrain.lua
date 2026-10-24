@@ -11,6 +11,7 @@ function terrain.avoid_tiles(choices)
 end
 
 function terrain.retain_entities(choices)
+	if choices.remove_entities_choice ~= nil then return not choices.remove_entities_choice end
 	return choices.deconstruction_choice == true or choices.avoid_obstacles_choice == true
 end
 

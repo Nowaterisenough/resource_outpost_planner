@@ -53,7 +53,7 @@ function layout:initialize(state)
 		retain_entities = data.retain_entities,
 		cliff_mode_choice = state.cliff_mode_choice,
 		terrain_mode_choice = state.terrain_mode_choice,
-		deconstruction_choice = state.deconstruction_choice,
+		remove_entities_choice = state.remove_entities_choice,
 	}
 end
 
