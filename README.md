@@ -15,6 +15,7 @@ Plan mining patches and oil outposts in Factorio. Select resources, inspect a ro
 - Share poles, pipes and qualities between both planners. Two terrain controls switch cliffs between avoid/remove and water, lava and lightning pools between avoid/fill, consistently across drills, beacons, oil layouts and belt connections.
 - Both modes order equipment, transport, power/heating, beacons, layout options and terrain consistently. Oil pumpjacks and beacons also have adjacent module pickers with independent qualities and construction requests.
 - Fill uses the terrain's landfill, foundation or platform; unfillable terrain remains blocked. Keeping existing facilities is independent of cliff removal and terrain filling.
+- Applied pole ghosts receive copper connections, including links to nearby existing poles within each pole’s quality wire reach; the wires remain when ghosts are built.
 - Cancel discards only the preview; Undo removes the latest applied ghosts and cancels its newly issued demolition orders where entities still exist.
 - Selecting resources again clears the previous preview, statistics overlays and the latest unfinished construction plan made by this planner, including connected outputs and fill ghosts. Completed buildings and other construction plans remain. Shift-selection adds resources to the current preview.
 

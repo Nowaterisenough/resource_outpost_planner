@@ -1,3 +1,4 @@
+local pole_connections = require("mpp.pole_connections")
 local planner = require("mpp.belt_planner")
 local builder = require("mpp.builder")
 local common = require("layouts.common")
@@ -69,6 +70,7 @@ function output.apply(data,mode)
 	if mode and not forced_build.apply(state,mode) then
 		data.preview.error={"mpp.preview_force_empty"};data.preview.ready=false;return false
 	end
+	if not mode then pole_connections.connect(state) end
 	local source=data.last_state
 	for _,object in pairs(state._render_objects or {}) do
 		source._render_objects=source._render_objects or {};source._render_objects[#source._render_objects+1]=object

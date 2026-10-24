@@ -1,3 +1,4 @@
+local pole_connections = require("mpp.pole_connections")
 local obstacles = require("mpp.obstacles")
 local forced = {}
 
@@ -61,6 +62,8 @@ function forced.apply(state, mode)
 			state._deconstruction_orders[#state._deconstruction_orders+1]=e;changed=changed+1
 		end
 	end
+	-- Native blueprints built from specifications have no saved copper wires.
+	pole_connections.connect(state)
 	-- Mark pieces the native forced build skipped, without claiming existing ghosts.
 	local skipped=0
 	state._render_objects=state._render_objects or {}

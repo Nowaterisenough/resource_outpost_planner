@@ -56,6 +56,66 @@ local function native_modes(p,surface) local function ghost(name,x,y,extra)
  log("PLACEMENT native modes, world coordinates, qualities, modules, splitter, rails, station and Undo PASS")
 end
 
+local wire_test=require("mpp.pole_connections")
+local builder_test=require("mpp.builder")
+
+local function connected_poles(entities)
+ local wanted,first,count={},nil,0
+ for _,e in pairs(entities) do
+  if e.valid and (e.type=="electric-pole" or e.type=="entity-ghost" and e.ghost_type=="electric-pole") then
+   wanted[e.unit_number]=true;first=first or e;count=count+1
+  end
+ end
+ assert(count>1,"not enough poles to check")
+ local queue,seen={first},{[first.unit_number]=true}
+ local i=1
+ while i<=#queue do
+  local e=queue[i];i=i+1
+  local connector=e.get_wire_connector(defines.wire_connector_id.pole_copper,false)
+  assert(connector,"pole has no copper connector")
+  for _,c in pairs(connector.connections) do
+   local other=c.target.owner
+   assert(e.can_wires_reach(other),"connected poles outside their quality wire reach")
+   if not seen[other.unit_number] then seen[other.unit_number]=true;queue[#queue+1]=other end
+  end
+ end
+ for id in pairs(wanted) do assert(seen[id],"pole network disconnected; reached "..#queue.." / "..count) end
+ return count
+end
+
+local function native_poles(p,surface)
+ for _,mode in ipairs{"normal","forced"} do
+  local external=surface.create_entity{name="medium-electric-pole",position={-158.5,-140.5},force=p.force,auto_connect=false}
+  local far=surface.create_entity{name="medium-electric-pole",position={-160.5,-160.5},force=p.force,auto_connect=false}
+  local state={player=p,surface=surface,direction_choice="west",coords={gx=-150,gy=-140,tw=80,th=80},
+   _collected_ghosts={},_render_objects={},_preview_specs={},preview_only=mode=="forced"}
+  local create=builder_test.create_entity_builder(state)
+  for _,pos in ipairs{{0,0},{8,0},{16,0},{0,8},{8,8},{16,8}} do
+   assert(create{name="medium-electric-pole",grid_x=pos[1],grid_y=pos[2],quality="normal"})
+  end
+  -- Quality poles must bridge farther than the normal prototype reach.
+  local quality_reach=math.floor(prototypes.entity["medium-electric-pole"].get_max_wire_distance("legendary"))
+  assert(quality_reach>prototypes.entity["medium-electric-pole"].get_max_wire_distance("normal"))
+  for _,x in ipairs{24,24+quality_reach} do assert(create{name="medium-electric-pole",grid_x=x,grid_y=0,quality="legendary"}) end
+  if mode=="forced" then assert(forced_test.apply(state,defines.build_mode.superforced))
+  else wire_test.connect(state) end
+  assert(connected_poles(state._collected_ghosts)==8)
+  assert(#external.get_wire_connector(defines.wire_connector_id.pole_copper,false).connections>0,"nearby existing grid not connected")
+  assert(not far.get_wire_connector(defines.wire_connector_id.pole_copper,false) or
+   #far.get_wire_connector(defines.wire_connector_id.pole_copper,false).connections==0,"out-of-reach pole connected")
+  local revived={}
+  for _,e in ipairs(state._collected_ghosts) do
+   local _,built=e.silent_revive{raise_revive=true}
+   assert(built and built.valid,"could not build pole ghost");revived[#revived+1]=built
+  end
+  assert(connected_poles(revived)==8,"revival lost wires")
+  for _,e in ipairs(revived) do e.destroy() end
+  assert(#external.get_wire_connector(defines.wire_connector_id.pole_copper,false).connections==0,"ghost removal left dangling external wires")
+  external.destroy();far.destroy()
+  log("PLACEMENT "..mode.." poles PASS: connected ghosts, mixed quality reach, existing grid and revived wires")
+ end
+end
+
 local function start()
  local p=game.get_player(1)
  conf.initialize_global(p.index);p.set_controller{type=defines.controllers.god}
@@ -67,6 +127,7 @@ local function start()
  p.force.research_all_technologies()
 
  native_modes(p,surface)
+ native_poles(p,surface)
  local d=storage.players[1];local c=d.choices
  c.layout_choice="beacon_rows";c.direction_choice="east";c.miner_choice="big-mining-drill";c.miner_quality_choice="normal"
  c.module_choice="speed-module-3";c.module_quality_choice="normal"
@@ -122,6 +183,7 @@ script.on_nth_tick(1,function()
  elseif t.phase=="applied" then
   assert(not v and d.last_state,"force apply failed: "..helpers.table_to_json(v and v.error or {}))
   assert(t.chest.to_be_deconstructed(p.force),"forced output did not remove conflicting chest")
+  log("PLACEMENT forced mine copper network PASS: "..connected_poles(d.last_state._collected_ghosts).." poles")
   assert(d.last_state.balanced_output_count==4,"force changed requested output count")
   script.get_event_handler(defines.events.on_gui_click){player_index=1,element=d.gui.undo_button,button=defines.mouse_button_type.left}
   assert(not t.chest.to_be_deconstructed(p.force) and t.surface.count_entities_filtered{type="entity-ghost"}==0,"full force Undo failed")
@@ -131,6 +193,7 @@ script.on_nth_tick(1,function()
   assert(v.ready and preview.apply(d));t.phase="mine-applied"
  elseif t.phase=="mine-applied" then
   assert(not v and d.last_state)
+  log("PLACEMENT normal mine copper network PASS: "..connected_poles(d.last_state._collected_ghosts).." poles")
   t.original_count=#d.last_state._collected_ghosts
   assert(output_test.begin(d,p))
   preview.set_belt_target(d,{position={x=120.5,y=20.5},direction=defines.direction.east})

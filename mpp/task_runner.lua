@@ -1,3 +1,4 @@
+local pole_connections = require("mpp.pole_connections")
 local mpp_util = require("mpp.mpp_util")
 local belt_planner = require("mpp.belt_planner")
 local preview = require("mpp.preview")
@@ -69,6 +70,7 @@ function task_runner.mining_patch_task(state)
 			preview.invalidate(data,state.preview_error)
 			return
 		end
+		if not state._forced_applied then pole_connections.connect(state) end
 		local player = state.player
 		if state._obstacle_skipped and state._obstacle_skipped > 0 then
 			player.print({"mpp.msg_obstacle_skipped",state._obstacle_skipped})
