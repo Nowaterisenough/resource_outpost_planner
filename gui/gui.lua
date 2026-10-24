@@ -469,6 +469,26 @@ local function create_blueprint_entry(player_data, table_root, blueprint_item, c
 	end
 end
 
+---Height budget for the settings frame on this player's screen.
+---The body scroll pane inherits `vertically_squashable` from the vanilla
+---`scroll_pane` style, so capping the frame is enough to make the settings
+---scroll instead of pushing the footer below the bottom of the screen.
+---@param player LuaPlayer
+---@return number
+local function settings_frame_max_height(player)
+	local screen_height = math.floor(player.display_resolution.height / player.display_scale)
+	return math.max(320, screen_height - 48)
+end
+
+---Reapplies the height cap after a resolution or UI scale change.
+---@param player LuaPlayer
+function gui.resize_interface(player)
+	local frame = player.gui.screen["mpp_settings_frame"]
+	if frame and frame.valid then
+		frame.style.maximal_height = settings_frame_max_height(player)
+	end
+end
+
 ---@param player LuaPlayer
 function gui.create_interface(player)
 	---@type LuaGuiElement
@@ -480,15 +500,27 @@ function gui.create_interface(player)
 	local equipment_width = script.feature_flags.quality and 260 or 172
 	local secondary_width = 172
 	frame.style.minimal_width = 340
+	frame.style.maximal_height = settings_frame_max_height(player)
 
 	local titlebar = frame.add{type="flow", name="mpp_titlebar", direction="horizontal"}
+	titlebar.style.vertically_squashable = false
 	titlebar.add{type="label", style="frame_title", name="mpp_titlebar_label", caption={"mpp.settings_frame"}}
 	titlebar.add{type="empty-widget", name="mpp_titlebar_spacer", horizontally_strechable=true}
 	player_gui.quality_toggle, player_gui.advanced_settings, player_gui.filtering_settings = nil, nil, nil
 	player_gui.unified = true
 	player_gui.workflow_version = workflow_version
+
+	local body = frame.add{
+		type="scroll-pane", direction="vertical",
+		horizontal_scroll_policy="never", vertical_scroll_policy="auto-and-reserve-space",
+	}
+	player_gui.settings_body = body
+	body.style.left_padding = 0
+	body.style.right_padding = 0
+	body.style.vertically_squashable = true
+
 	do -- Miner selection
-		local row = frame.add{type="flow", direction="horizontal"}
+		local row = body.add{type="flow", direction="horizontal"}
 		row.style.horizontal_spacing = 12
 		local table_root, section = create_setting_section(player_data, row, "miner", {column_count=4})
 		section.style.width = equipment_width
@@ -498,15 +530,6 @@ function gui.create_interface(player)
 		modules.style.width = secondary_width
 		append_quality_table(player_data,modules,"module_quality")
 	end
-
-	local body = frame.add{
-		type="scroll-pane", direction="vertical",
-		horizontal_scroll_policy="never", vertical_scroll_policy="auto",
-	}
-	player_gui.settings_body = body
-	body.style.left_padding = 0
-	body.style.right_padding = 0
-	body.style.maximal_height = math.max(180, math.min(640, math.floor(player.display_resolution.height / player.display_scale) - 280))
 	local mining = body.add{type="flow", direction="vertical", style="mpp_section"}
 	player_gui.mining_settings_root = mining
 	local layout_row = mining.add{type="flow", direction="horizontal", style="mpp_settings_columns"}
@@ -709,6 +732,7 @@ function gui.create_interface(player)
 	end
 
 	local footer=frame.add{type="flow",direction="vertical",style="mpp_section"}
+	footer.style.vertically_squashable = false
 	player_gui.preview_status=footer.add{type="label",caption="",visible=false}
 	player_gui.preview_status.style.single_line=false
 	player_gui.preview_status.style.maximal_width=440
@@ -2003,5 +2027,14 @@ script.on_event(defines.events.on_gui_text_changed, function(event)
 		else preview.invalidate(data,{"mpp.preview_invalid_utility"}) end
 	end
 end)
+
+---@param event EventData.on_player_display_resolution_changed|EventData.on_player_display_scale_changed
+local function on_display_changed(event)
+	local player = game.get_player(event.player_index)
+	if player then gui.resize_interface(player) end
+end
+
+script.on_event(defines.events.on_player_display_resolution_changed, on_display_changed)
+script.on_event(defines.events.on_player_display_scale_changed, on_display_changed)
 
 return gui
