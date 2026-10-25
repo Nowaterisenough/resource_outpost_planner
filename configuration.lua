@@ -207,7 +207,7 @@ conf.default_config = {
 }
 
 local function pass_same_type(old, new)
-	if old and type(old) == type(new) then
+	if type(old) == type(new) then
 		return old
 	end
 	return new

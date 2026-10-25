@@ -97,4 +97,29 @@ for _,remove in ipairs{false,true} do
 	configuration.migrate_terrain_choices(saved)
 	check(saved.remove_entities_choice==remove and saved.deconstruction_choice==nil, "new facility choice overwritten")
 end
+-- Exercise the complete default merge, not just the legacy field conversion.
+local function deepcopy(value)
+	if type(value) ~= "table" then return value end
+	local copy = {}; for key, item in pairs(value) do copy[key] = deepcopy(item) end
+	return copy
+end
+table.deepcopy = deepcopy
+configuration.get_locked_qualities = function() return {} end
+game = {get_player=function() return {} end, create_inventory=function() return {} end}
+for _, keep in ipairs{false,true} do
+	local saved = deepcopy(configuration.default_config)
+	saved.choices.remove_entities_choice = nil
+	saved.choices.deconstruction_choice = keep
+	storage = {players={[1]=saved}}
+	configuration.update_player_data(1)
+	check(storage.players[1].choices.remove_entities_choice == not keep, "full upgrade loses legacy retention preference")
+	check(storage.players[1].choices.deconstruction_choice == nil, "full upgrade retains deprecated control")
+	configuration.update_player_data(1)
+	check(storage.players[1].choices.remove_entities_choice == not keep, "repeated upgrade resets cleanup preference")
+end
+local saved = deepcopy(configuration.default_config)
+saved.choices.remove_entities_choice = "false"
+storage = {players={[1]=saved}}
+configuration.update_player_data(1)
+check(storage.players[1].choices.remove_entities_choice == true, "invalid choice type bypasses default")
 print("Terrain OK: "..cases.." independent modes, hazard covers and demolition ownership checks")
