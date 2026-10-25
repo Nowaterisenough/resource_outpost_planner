@@ -1,4 +1,16 @@
 ---------------------------------------------------------------------------------------------------
+Version: 1.10.3
+Date: 2026-10-24
+  Bugfixes:
+    - Preserve explicitly disabled options when merging saved configuration with new defaults, including migrated Keep/Clear preferences.
+    - Connect newly placed pole ghosts with copper wires after ordinary and forced placement, using short bridges within both poles' quality-dependent wire reach.
+    - Connect nearby existing poles and preserve copper connections when construction ghosts are built.
+  Changes:
+    - Replace Keep with Clear: when enabled, ordinary Apply marks obstructing facilities, trees and rocks for deconstruction and places construction ghosts; when disabled, retain and avoid all three.
+    - Keep cliff removal and terrain filling independent of Clear, and prevent automatic cleanup from bypassing terrain validation.
+    - Migrate existing retention choices, share cleanup settings with oil outposts, and refresh the settings panel and cached previews.
+    - Include newly issued cleanup orders in Undo for mining layouts and output-only placement.
+---------------------------------------------------------------------------------------------------
 Version: 1.10.2
 Date: 2026-10-19
   Features:
