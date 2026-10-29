@@ -154,7 +154,6 @@ preview.request(data,true)
 assert(draft.output_basis and draft.output_change,"output request discarded reusable mining basis")
 preview.request(data)
 assert(not draft.output_basis and not draft.output_change,"equipment request kept an obsolete mining basis")
-print("Preview lifecycle OK: validation, successful build handoff, overlay cleanup, both failure paths and stale results")
 
 draft=fixture();draft.ready=false;draft.error={"mpp.output_balance_blocked"}
 draft.specs={{name="entity-ghost",position={x=0,y=0},preview_blocked=true}}
@@ -202,3 +201,14 @@ assert(preview.apply(data));validation=storage.tasks[1];validation.preview_error
 preview.complete(validation)
 assert(not calls.forced and #storage.tasks==1 and not draft.applying and draft.error,
  "automatic facility removal bypasses terrain validation")
+
+-- Explicit Shift/Force Apply must not turn off a checked Clear control.
+for _,mode in ipairs{defines.build_mode.forced,defines.build_mode.superforced} do
+ draft=fixture();data.choices.remove_entities_choice=true
+ assert(preview.apply(data,mode));validation=storage.tasks[1]
+ assert(validation._native_build_mode==defines.build_mode.superforced, "forced Apply ignores checked cleanup")
+ assert(not validation._facility_removal, "explicit force lost its routing override")
+ preview.complete(validation)
+ assert(calls.forced==defines.build_mode.superforced, "checked cleanup did not reach native building removal")
+end
+print("Preview lifecycle OK: validation, build handoff, cleanup click modes, overlay cleanup and failure paths")

@@ -59,8 +59,9 @@ function output.refresh(data)
 end
 
 function output.apply(data,mode,facility_removal)
-	if mode==nil and data.choices.remove_entities_choice then
-		mode=defines.build_mode.superforced;facility_removal=true
+	if data.choices.remove_entities_choice then
+		facility_removal=facility_removal or mode==nil
+		mode=defines.build_mode.superforced
 	end
 	if not mode and not output.refresh(data) then return false end
 	local fallback=not facility_removal and data.preview.error and mode or nil

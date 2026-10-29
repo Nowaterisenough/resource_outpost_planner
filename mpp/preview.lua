@@ -330,7 +330,9 @@ function preview.apply(data,mode)
 	if not draft or draft.applying or draft.refresh_at then return false end
 	if not draft.ready and not (mode and draft.error and #(draft.specs or {})>0) then return false end
 	local facility_removal=mode==nil and data.choices.remove_entities_choice==true
-	if facility_removal then mode=defines.build_mode.superforced end
+	-- Clear also applies to explicit Shift/Force clicks. Keep facility_removal
+	-- limited to ordinary Apply so only a manual force can relax route validation.
+	if data.choices.remove_entities_choice then mode=defines.build_mode.superforced end
 	local player=game.get_player(draft.player_index)
 	if not player or player.surface~=draft.surface then return false end
 	if draft.output_only then

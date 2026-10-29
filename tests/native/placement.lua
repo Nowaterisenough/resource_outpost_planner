@@ -1,6 +1,41 @@
 local forced_test=require("mpp.forced_build")
 local obstacle_test=require("mpp.obstacles")
 local output_test=require("mpp.output_preview")
+local cleanup_clicks={
+ {name="Apply",button="preview_apply"},
+ {name="Shift Apply",button="preview_apply",shift=true},
+ {name="Force Apply",button="preview_force"},
+ {name="Ctrl Force Apply",button="preview_force",control=true},
+ {name="Ctrl Shift Apply",button="preview_apply",shift=true,control=true},
+}
+local function cleanup_apply(d,t)
+ local click=cleanup_clicks[t.cleanup_case or 1]
+ script.get_event_handler(defines.events.on_gui_click){player_index=1,element=d.gui[click.button],
+  button=defines.mouse_button_type.left,shift=click.shift,control=click.control}
+end
+
+-- Let real construction robots finish a demolition job, including chest contents.
+local function robot_cleanup(p,t)
+ local surface=t.surface
+ t.cleanup_port=surface.create_entity{name="roboport",position={-70,85},force=p.force}
+ t.cleanup_port.energy=100000000
+ t.cleanup_port.get_inventory(defines.inventory.roboport_robot).insert{name="construction-robot",count=20}
+ t.cleanup_storage=surface.create_entity{name="storage-chest",position={-75.5,85.5},force=p.force}
+ t.cleanup_entities={}
+ local specs={}
+ for i,name in ipairs{"electric-mining-drill","steel-chest","beacon","transport-belt","tree-01","big-rock"} do
+  local position={x=-85.5+i*5,y=100.5}
+  local e=surface.create_entity{name=name,position=position,force=i>4 and "neutral" or p.force}
+  assert(e,"robot cleanup fixture could not create "..name)
+  if name=="steel-chest" then e.insert{name="iron-plate",count=100} end
+  t.cleanup_entities[#t.cleanup_entities+1]=e
+  specs[#specs+1]={name="entity-ghost",inner_name="assembling-machine-2",
+   position=position,direction=defines.direction.east}
+ end
+ assert(forced_test.apply({player=p,surface=surface,_preview_specs=specs},defines.build_mode.superforced))
+ for _,e in ipairs(t.cleanup_entities) do assert(e.to_be_deconstructed(p.force),"robot cleanup order missing: "..e.name) end
+ t.cleanup_started=game.tick;t.phase="robots"
+end
 
 local function native_modes(p,surface) local function ghost(name,x,y,extra)
   local spec={name="entity-ghost",inner_name=name,position={x=x,y=y},direction=defines.direction.east}
@@ -269,20 +304,23 @@ script.on_nth_tick(1,function()
   assert(v.ready)
   for _,spec in ipairs(v.specs) do
    if spec.inner_name=="big-mining-drill" then
-    if not t.facility then t.facility=t.surface.create_entity{name="steel-chest",position=spec.position,force=p.force}
+    if not t.facility then t.facility=t.surface.create_entity{name="electric-mining-drill",position=spec.position,force=p.force}
     elseif not t.clear_tree then t.clear_tree=t.surface.create_entity{name="tree-01",position=spec.position,force="neutral"}
-    else t.clear_rock=t.surface.create_entity{name="big-rock",position=spec.position,force="neutral"};break end
+    elseif not t.clear_rock then t.clear_rock=t.surface.create_entity{name="big-rock",position=spec.position,force="neutral"}
+    elseif not t.clear_beacon then t.clear_beacon=t.surface.create_entity{name="beacon",position=spec.position,force=p.force}
+    else t.clear_belt=t.surface.create_entity{name="transport-belt",position=spec.position,force=p.force};break end
    end
   end
-  assert(t.facility and t.clear_tree and t.clear_rock)
+  assert(t.facility and t.clear_tree and t.clear_rock and t.clear_beacon and t.clear_belt)
   preview.request(d,true);t.phase="facility-preview"
  elseif t.phase=="facility-preview" then
   assert(v.ready,"facility-removal checkbox still blocks mine")
   assert(not t.facility.to_be_deconstructed(p.force) and not t.clear_tree.to_be_deconstructed(p.force) and not t.clear_rock.to_be_deconstructed(p.force),"preview demolished an obstruction")
-  assert(preview.apply(d));t.phase="facility-applied"
+  cleanup_apply(d,t);t.phase="facility-applied"
  elseif t.phase=="facility-applied" then
   assert(not v and t.facility.to_be_deconstructed(p.force) and t.clear_tree.to_be_deconstructed(p.force) and t.clear_rock.to_be_deconstructed(p.force),"checked cleanup did not remove facilities, trees and rocks")
-  log("PLACEMENT checked cleanup PASS: facilities, trees and rocks marked for removal")
+  assert(t.clear_beacon.to_be_deconstructed(p.force) and t.clear_belt.to_be_deconstructed(p.force),"checked cleanup leaves existing beacon or belt")
+  log("PLACEMENT checked cleanup "..cleanup_clicks[t.cleanup_case or 1].name.." PASS: built drill, beacon, belt, tree and rock marked")
   log("PLACEMENT automatic facility removal and copper network PASS: "..connected_poles(d.last_state._collected_ghosts).." poles")
   assert(output_test.begin(d,p))
   preview.set_belt_target(d,{position={x=120.5,y=20.5},direction=defines.direction.east})
@@ -292,13 +330,27 @@ script.on_nth_tick(1,function()
   t.output_facility=t.surface.create_entity{name="steel-chest",position=v.belt_target.position,force=p.force}
   preview.request(d,true);t.phase="facility-output-blocked"
  elseif t.phase=="facility-output-blocked" then
-  assert(v.ready and preview.apply(d),"automatic output-only facility removal failed")
+  assert(v.ready,"output-only cleanup preview invalid")
+  cleanup_apply(d,t)
   assert(not d.preview and t.output_facility.to_be_deconstructed(p.force))
   script.get_event_handler(defines.events.on_gui_click){player_index=1,element=d.gui.undo_button,button=defines.mouse_button_type.left}
   assert(t.facility.valid and not t.facility.to_be_deconstructed(p.force) and not t.output_facility.to_be_deconstructed(p.force))
   assert(t.surface.count_entities_filtered{type="entity-ghost"}==0,"automatic facility removal Undo left ghosts")
   assert(not t.clear_tree.to_be_deconstructed(p.force) and not t.clear_rock.to_be_deconstructed(p.force),"cleanup Undo left natural demolition")
-  t.clear_tree.destroy();t.clear_rock.destroy();t.facility.destroy();t.output_facility.destroy()
-  t.phase="done";log("PLACEMENT COMPLETE: facility toggle, copper wires, coherent forced output, output-only, station and Undo PASS")
+  assert(not t.clear_beacon.to_be_deconstructed(p.force) and not t.clear_belt.to_be_deconstructed(p.force),"cleanup Undo left facility demolition")
+  t.clear_tree.destroy();t.clear_rock.destroy();t.facility.destroy();t.output_facility.destroy();t.clear_beacon.destroy();t.clear_belt.destroy()
+  t.clear_tree=nil;t.clear_rock=nil;t.facility=nil;t.output_facility=nil;t.clear_beacon=nil;t.clear_belt=nil
+  t.cleanup_case=(t.cleanup_case or 1)+1
+  if cleanup_clicks[t.cleanup_case] then
+   preview.select{player_index=1,surface=t.surface,entities=t.resources};t.phase="facility-clear";return
+  end
+  robot_cleanup(p,t)
+ elseif t.phase=="robots" then
+  t.cleanup_port.energy=100000000
+  assert(game.tick-t.cleanup_started<3600,"construction robots failed to finish cleanup")
+  for _,e in ipairs(t.cleanup_entities) do if e.valid then return end end
+  if t.cleanup_storage.get_inventory(defines.inventory.chest).get_item_count("iron-plate")<100 then return end
+  log("PLACEMENT robot cleanup PASS: built facilities removed and chest contents recovered")
+  t.phase="done";log("PLACEMENT COMPLETE: cleanup click modes, robot demolition, copper wires, output-only, station and Undo PASS")
  end
 end)
