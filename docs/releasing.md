@@ -26,7 +26,7 @@
 
 Actions → **Release** → **Run workflow**，保留默认 `dry_run=true`，可只执行检查并生成下载工件。取消该选项会从 `main` 正式发布；推送 `main` 始终正式发布。
 
-失败后优先使用 **Re-run failed jobs**。已成功创建的标签、草稿、附件和模组站版本会核对校验值后复用；遇到同版本不同内容会失败，禁止覆盖。完整重跑也会生成相同版本和相同 ZIP。
+失败后优先使用 **Re-run failed jobs**。已成功创建的标签、草稿、附件和模组站版本会核对校验值后复用；遇到同版本不同内容会失败，禁止覆盖。完整重跑也会生成相同版本和相同 ZIP。模组站版本核对会绕过公开列表的 CDN 缓存，并在上传后等待列表更新，避免将缓存延迟误判为上传失败。
 
 运行中的发布不会被新推送取消。若发布版本提交前 `main` 已更新，旧任务会跳过，由最新任务发布累计变更。GitHub 只保留一个等待中的同组任务，因此密集推送可能合并成一次发布。若旧任务已完成版本提交，重跑仍可补全该版本，但不会把较旧版本设为 latest。
 
@@ -50,7 +50,7 @@ The workflow increments the patch version from the highest version tag in the so
 
 Configure the repository secret **`FACTORIO_API_KEY`** with **`ModPortal: Upload Mods`** permission. GitHub supplies `GITHUB_TOKEN`; the publish job requests `contents: write`. Branch and tag rules must permit the bot to push version metadata to `main` and create release tags. The generated commit uses `[skip ci]`, and pushes made with `GITHUB_TOKEN` do not trigger another workflow. Pull `main` before continuing local development.
 
-The tested archive, checksum and notes are retained as workflow artifacts. Publication validates the Factorio upload key before atomically pushing a version commit and tag, creates a GitHub draft, uploads the same ZIP to Factorio, then publishes the GitHub release after verification. Assets and publication use the draft ID returned by creation, avoiding delays in tag/list visibility. Retries reuse matching artifacts and refuse to overwrite different contents at the same version. Use **Re-run failed jobs** after an interrupted publication.
+The tested archive, checksum and notes are retained as workflow artifacts. Publication validates the Factorio upload key before atomically pushing a version commit and tag, creates a GitHub draft, uploads the same ZIP to Factorio, then publishes the GitHub release after verification. Assets and publication use the draft ID returned by creation, avoiding delays in tag/list visibility. Retries reuse matching artifacts and refuse to overwrite different contents at the same version. Use **Re-run failed jobs** after an interrupted publication. Version verification bypasses the portal’s public CDN cache and waits for the uploaded release to become visible.
 
 A newer push supersedes an older run that has not yet committed its version. Rapid pushes can be combined into a single release; an in-progress publication is not cancelled. Retrying an older draft does not promote it over a higher version.
 

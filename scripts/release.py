@@ -200,7 +200,10 @@ class Factorio:
         return result
 
     def exists(self, m):
-        result = self.json(f"https://mods.factorio.com/api/mods/{m['name']}/full")
+        # This endpoint is publicly cached for up to 15 minutes. Each verification
+        # must bypass that snapshot, including the check before a retried upload.
+        url = f"https://mods.factorio.com/api/mods/{m['name']}/full?release_check={uuid.uuid4().hex}"
+        result = self.json(url, headers={"Cache-Control": "no-cache"})
         release = next((r for r in result.get("releases", []) if r["version"] == m["version"]), None)
         if release and (release.get("sha1") != m["sha1"] or release.get("file_name") != m["archive"]):
             raise ReleaseError("Factorio version already exists with different contents; refusing to overwrite")
@@ -231,7 +234,7 @@ class Factorio:
                            operation="archive upload")
         if result.get("success") is not True:
             raise ReleaseError("Factorio did not confirm upload success")
-        for delay in (0, 2, 4):
+        for delay in (0, 2, 4, 8, 16, 30):
             time.sleep(delay)
             if self.exists(m):
                 return

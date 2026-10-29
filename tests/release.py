@@ -294,6 +294,33 @@ class ReleaseTests(unittest.TestCase):
                 self.publish()
         self.assertFalse((self.out / "published.md").exists())
 
+    def test_portal_version_checks_bypass_cached_release_lists(self):
+        client = release.Factorio("fake-test-key")
+        m = {"name": "test-mod", "version": "1.2.4", "sha1": "same-hash", "archive": "test-mod_1.2.4.zip"}
+        entry = {"version": m["version"], "sha1": m["sha1"], "file_name": m["archive"]}
+        with patch.object(client, "json", side_effect=[{"releases": []}, {"releases": [entry]}]) as api:
+            self.assertFalse(client.exists(m))
+            self.assertTrue(client.exists(m))
+        urls = [call.args[0] for call in api.call_args_list]
+        self.assertNotEqual(urls[0], urls[1], "repeat reads would hit the same CDN snapshot")
+        for call in api.call_args_list:
+            url = release.parse.urlsplit(call.args[0])
+            self.assertEqual(url.hostname, "mods.factorio.com")
+            self.assertEqual(url.path, "/api/mods/test-mod/full")
+            self.assertTrue(release.parse.parse_qs(url.query).get("release_check"))
+            self.assertEqual(call.kwargs["headers"]["Cache-Control"], "no-cache")
+
+    def test_upload_waits_for_delayed_portal_visibility_without_reuploading(self):
+        m = self.prepare()
+        client = release.Factorio("fake-test-key")
+        with patch.object(client, "json", side_effect=[{"upload_url": "https://uploads.factorio.com/signed"}, {"success": True}]) as api:
+            with patch.object(client, "exists", side_effect=[False, False, False, True]) as exists:
+                with patch.object(release.time, "sleep") as sleep:
+                    client.upload(m, self.out / m["archive"])
+        self.assertEqual(api.call_count, 2, "visibility polling must not repeat the upload")
+        self.assertEqual(exists.call_count, 4)
+        self.assertEqual([call.args[0] for call in sleep.call_args_list], [0, 2, 4, 8])
+
     def test_upload_url_validation_and_no_api_key_forwarding(self):
         m = self.prepare()
         client = release.Factorio("fake-test-key")
