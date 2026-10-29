@@ -176,13 +176,23 @@ class Factorio:
     def __init__(self, key):
         self.key = key
         self.opener = request.build_opener(NoRedirect())
+        self.upload_url = None
 
-    def json(self, url, data=None, headers=None):
+    def json(self, url, data=None, headers=None, operation="request"):
         try:
             with self.opener.open(request.Request(url, data=data, headers=headers or {}), timeout=60) as response:
                 result = json.load(response)
         except error.HTTPError as exc:
-            raise ReleaseError(f"Factorio API returned HTTP {exc.code}") from None
+            try:
+                code = json.load(exc).get("error", "")
+            except (ValueError, AttributeError):
+                code = ""
+            finally:
+                exc.close()
+            # Only expose a structured error code, never response messages or signed URLs.
+            detail = f" ({code})" if isinstance(code, str) and re.fullmatch(r"[A-Za-z0-9_.-]{1,80}", code) else ""
+            hint = "; FACTORIO_API_KEY needs a valid key with ModPortal: Upload Mods permission" if code == "InvalidApiKey" else ""
+            raise ReleaseError(f"Factorio {operation} returned HTTP {exc.code}{detail}{hint}") from None
         except (error.URLError, TimeoutError, ValueError):
             raise ReleaseError("Factorio API request failed; retry to reconcile publication state") from None
         if result.get("error"):
@@ -196,21 +206,29 @@ class Factorio:
             raise ReleaseError("Factorio version already exists with different contents; refusing to overwrite")
         return release is not None
 
-    def upload(self, m, archive):
-        boundary = uuid.uuid4().hex
+    def authorize_upload(self, m):
+        """Validate the key before creating any release commits, tags or drafts."""
         init = self.json("https://mods.factorio.com/api/v2/mods/releases/init_upload",
                          parse.urlencode({"mod": m["name"]}).encode(),
-                         {"Authorization": "Bearer " + self.key, "Content-Type": "application/x-www-form-urlencoded"})
+                         {"Authorization": "Bearer " + self.key, "Content-Type": "application/x-www-form-urlencoded"},
+                         operation="upload initialization")
         url = init.get("upload_url", "")
         destination = parse.urlsplit(url)
         if (destination.scheme != "https" or not destination.hostname
                 or not (destination.hostname == "factorio.com" or destination.hostname.endswith(".factorio.com"))
                 or destination.username or destination.password or destination.port not in (None, 443)):
             raise ReleaseError("Unexpected Factorio upload destination")
+        self.upload_url = url
+
+    def upload(self, m, archive):
+        if self.upload_url is None:
+            self.authorize_upload(m)
+        boundary = uuid.uuid4().hex
         body = (f'--{boundary}\r\nContent-Disposition: form-data; name="file"; filename="{archive.name}"\r\n'
                 'Content-Type: application/zip\r\n\r\n').encode() + archive.read_bytes() + f"\r\n--{boundary}--\r\n".encode()
         # The signed upload URL does not need the account API key.
-        result = self.json(url, body, {"Content-Type": f"multipart/form-data; boundary={boundary}"})
+        result = self.json(self.upload_url, body, {"Content-Type": f"multipart/form-data; boundary={boundary}"},
+                           operation="archive upload")
         if result.get("success") is not True:
             raise ReleaseError("Factorio did not confirm upload success")
         for delay in (0, 2, 4):
@@ -346,6 +364,8 @@ def publish(root, output, portal, github):
             raise ReleaseError("GitHub release asset has different contents; refusing to overwrite")
         if release and not release["draft"] and path.name not in assets:
             raise ReleaseError("Published GitHub release is missing an expected asset")
+    if not portal_done:
+        portal.authorize_upload(m)
     commit = release_commit(root, output, m)
     if commit is None:
         (output / "published.md").write_text("A newer push reached main; this stale run skipped publication.\n")

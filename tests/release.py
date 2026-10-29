@@ -2,6 +2,7 @@
 
 import hashlib
 import importlib.util
+import io
 import json
 import os
 import subprocess
@@ -26,11 +27,16 @@ class Portal:
         self.events = events
         self.uploaded = None
         self.fail = False
+        self.invalid_key = False
 
     def exists(self, manifest):
         if self.uploaded and self.uploaded != manifest["sha1"]:
             raise release.ReleaseError("Different portal contents")
         return self.uploaded is not None
+
+    def authorize_upload(self, manifest):
+        if self.invalid_key:
+            raise release.ReleaseError("InvalidApiKey")
 
     def upload(self, manifest, archive):
         self.events.append("portal-upload")
@@ -236,6 +242,17 @@ class ReleaseTests(unittest.TestCase):
         self.assertEqual(self.events, [])
         self.assertEqual(release.git(self.origin, "rev-parse", "main"), self.source)
 
+    def test_invalid_portal_key_fails_before_version_commit_or_draft(self):
+        self.prepare()
+        self.portal.invalid_key = True
+        with self.assertRaisesRegex(release.ReleaseError, "InvalidApiKey"):
+            self.publish()
+        self.assertEqual(release.git(self.root, "rev-parse", "HEAD"), self.source)
+        self.assertEqual(release.git(self.origin, "rev-parse", "main"), self.source)
+        self.assertEqual(release.git(self.origin, "tag", "--list", "v1.2.4"), "")
+        self.assertIsNone(self.github.state)
+        self.assertEqual(self.events, [])
+
     def test_tampered_archive_fails_before_publication(self):
         m = self.prepare()
         (self.out / m["archive"]).write_bytes(b"not a valid archive")
@@ -341,6 +358,20 @@ class GitHubLookupTests(unittest.TestCase):
                 self.assertEqual(api.call_args.args[2], "repos/test/mod/releases/125")
                 self.assertIn("draft=false", api.call_args.args)
                 self.assertIn("make_latest=legacy", api.call_args.args)
+
+    def test_factorio_error_reports_operation_and_code_without_secret_message(self):
+        client = release.Factorio("fake-test-key")
+        body = json.dumps({"error": "InvalidApiKey", "message": "fake-test-key https://uploads.factorio.com/private"}).encode()
+        failure = release.error.HTTPError("https://mods.factorio.com", 400, "Bad Request", {}, io.BytesIO(body))
+        with patch.object(client.opener, "open", side_effect=failure):
+            with self.assertRaises(release.ReleaseError) as caught:
+                client.authorize_upload({"name": "test-mod"})
+        message = str(caught.exception)
+        self.assertIn("upload initialization", message)
+        self.assertIn("InvalidApiKey", message)
+        self.assertIn("ModPortal: Upload Mods", message)
+        self.assertNotIn("fake-test-key", message)
+        self.assertNotIn("https://", message)
 
     def test_api_failure_is_not_treated_as_missing_release(self):
         response = subprocess.CompletedProcess([], 1, b"{}", b"gh: Service unavailable (HTTP 503)")
