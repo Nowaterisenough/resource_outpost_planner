@@ -4,7 +4,7 @@ local planner = require("mpp.belt_planner")
 local builder = require("mpp.builder")
 local common = require("layouts.common")
 local cache = {}
-local geometry_revision = 4 -- The cleanup switch now retains trees and rocks together with facilities.
+local geometry_revision = 5 -- Filtered outputs reserve their rejected-ore ports.
 
 local ignored_types={"resource","character","unit","corpse","item-entity","tile-ghost"}
 local hazard_names
@@ -105,7 +105,8 @@ function cache.capture(state)
 	end
 	local planned={}
 	for _,list in ipairs{state.builder_miners or {},state.builder_pipes or {},state.builder_belts or {},
-		state.builder_power_poles or {},state.builder_lamps or {},state.builder_beacons or {},state.builder_all or {}} do
+		state.builder_power_poles or {},state.builder_lamps or {},state.builder_beacons or {},state.builder_all or {},
+		state._ore_filter_reserved or {}} do
 		for _,spec in ipairs(list) do
 			planned[#planned+1]={name=spec.name,grid_x=spec.grid_x,grid_y=spec.grid_y,direction=spec.direction}
 		end

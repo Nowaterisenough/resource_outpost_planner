@@ -1,3 +1,4 @@
+local ore_filter = require("mpp.ore_filter")
 local algorithm = require("algorithm")
 local mpp_util = require("mpp.mpp_util")
 local enums = require("mpp.enums")
@@ -217,10 +218,27 @@ local function create_setting_selector(player_data, root, action_type, action, v
 		local button_root = root
 		if action == "misc" and value.type ~= "choose-elem-button" and not opts.icon_only then
 			local parent = root
+			if value.value == "ore_filtering" then
+				parent = root.add{type="flow", direction="horizontal", style="mpp_preference_row"}
+			end
 			local checked = value.value == "cliff_mode" and player_data.choices.cliff_mode_choice == "remove" or toggle_value == true
 			local control = parent.add{type="checkbox", state=checked,
 				caption={"mpp.preference_"..value.value}, tooltip=mpp_util.wrap_tooltip(value.tooltip),
 				tags={mpp_checkbox=value.value}, enabled=not value.disabled}
+			if value.value == "ore_filtering" then
+				local resource = player_data.choices.ore_filter_resource_choice
+				local items, names, selected = {{"mpp.ore_filter_placeholder"}}, {"none"}, 1
+				for _, entry in ipairs(ore_filter.resource_filters()) do
+					names[#names+1] = entry.name
+					items[#items+1] = {"", "[item="..ore_filter.product(entry.name).."] ", prototypes.entity[entry.name].localised_name}
+					if entry.name == resource then selected = #names end
+				end
+				player_data.gui.ore_filter_resources = names
+				player_data.gui.ore_filter_resource = parent.add{type="drop-down", items=items, selected_index=selected,
+					visible=toggle_value == true, tooltip={"mpp.ore_filter_resource_tooltip"},
+					tags={mpp_drop_down="ore_filter_resource",mpp_value_map="ore_filter_resource"}}
+				player_data.gui.ore_filter_resource.style.width = 170
+			end
 			action_class[value.value] = control
 			goto continue
 		end
@@ -1871,6 +1889,8 @@ local function on_gui_selection_state_changed(event)
 	local value
 	if value_map == "layout" then
 		value = player_data.gui.layout_values[element.selected_index]
+	elseif value_map == "ore_filter_resource" then
+		value = player_data.gui.ore_filter_resources[element.selected_index]
 	elseif value_map == "beacon_density" then
 		value = beacons.density_values[element.selected_index]
 	else
@@ -1945,6 +1965,7 @@ script.on_event(defines.events.on_gui_checked_state_changed,function(event)
 		abort_blueprint_mode(game.get_player(event.player_index))
 		local value=event.element.tags.mpp_checkbox
 		data.choices[value.."_choice"]=value=="cliff_mode" and (event.element.state and "remove" or "avoid") or event.element.state
+		if value=="ore_filtering" then data.gui.ore_filter_resource.visible=event.element.state end
 		if value=="statistics" and data.last_state then
 			for _,object in pairs(data.last_state._render_objects or {}) do
 				if object.valid and object.only_in_alt_mode then object.visible=event.element.state end

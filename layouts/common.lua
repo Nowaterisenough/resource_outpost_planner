@@ -637,7 +637,7 @@ function common.get_mining_drill_production_from_state(state, resource_name, min
 	end
 	speed = clamp_effect(speed, receiver and receiver.speed_limits, -0.8)
 	productivity = clamp_effect(productivity, receiver and receiver.productivity_limits, 0)
-	local resource = prototypes.entity[resource_name or state.resource_counts[1].name].mineable_properties
+	local resource = prototypes.entity[resource_name or state.ore_filtering_selected or state.resource_counts[1].name].mineable_properties
 	local yield = 0
 	for _, product in pairs(resource.products or {}) do
 		if product.type == "item" then
@@ -1216,6 +1216,7 @@ function common.create_belt_planner_specification(state)
 		output_count = state.output_station_choice and train_station.output_count(state)
 			or state.output_balance_choice and state.output_belt_count_choice or nil,
 		station_choices = state.output_station_choice and train_station.choices(state) or nil,
+		ore_filter_reserved = state._ore_filter_reserved,
 		count = 0,
 		ungrouped = true,
 		_renderables = {},
@@ -1286,7 +1287,8 @@ function common.prepare_belt_connection(state)
 	connection.grid = state.grid
 	connection.planned = {}
 	for _, list in pairs{state.builder_miners or {}, state.builder_pipes or {}, state.builder_belts or {},
-		state.builder_power_poles or {}, state.builder_lamps or {}, state.builder_beacons or {}, state.builder_all or {}} do
+		state.builder_power_poles or {}, state.builder_lamps or {}, state.builder_beacons or {}, state.builder_all or {},
+		state._ore_filter_reserved or {}} do
 		for _, entity in ipairs(list) do connection.planned[#connection.planned+1] = entity end
 	end
 	local ok, entities, diagnostic = belt_planner.plan(connection)

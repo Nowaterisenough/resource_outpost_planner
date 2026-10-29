@@ -1,3 +1,4 @@
+local ore_filter = require("mpp.ore_filter")
 local common = require("layouts.common")
 local base = require("layouts.base")
 local grid_mt = require("mpp.grid_mt")
@@ -269,8 +270,10 @@ function layout:process_grid(state)
 		tile.amount = amount
 
 		if filtering_choice and state.ore_filtering_selected ~= ent.name then
-			grid:forbid(tx-extent_positive, ty-extent_positive, area)
-			cost = cost + price2
+			if not state.ore_filter_with_splitters or state._beacon_logistics then
+				grid:forbid(tx-extent_positive, ty-extent_positive, area)
+				cost = cost + price2
+			end
 		else
 			-- grid:convolve_separable_horizontal(tx-size+1, ty-size+1, extent_negative, size, area, convlist)
 			grid:convolve_separable_horizontal(tx-size+1, ty-size+1, extent_negative, size, area, convlist, amount)
@@ -1762,6 +1765,12 @@ function layout:prepare_connections(state)
 		if next_step~=nil then return next_step end
 		state._capacity_checked=true
 		if state.preview_error then return "prepare_beacons" end
+	end
+	local filter_ok, filter_error = ore_filter.prepare(state)
+	if not filter_ok then
+		state.preview_error = filter_error
+		if not state.preview_only then state.player.print(filter_error); return false end
+		return "prepare_beacons"
 	end
 	output_cache.capture(state)
 	local ok, err = common.prepare_belt_connection(state)

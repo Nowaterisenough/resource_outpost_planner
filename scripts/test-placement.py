@@ -24,6 +24,7 @@ parser.add_argument("--scene", choices=["shoreline", "gui"], help="Capture the l
 parser.add_argument("--locale", choices=["en", "zh-CN"], default="zh-CN")
 parser.add_argument("--ui-scale", type=float, default=1)
 parser.add_argument("--window-size", default="1600x1000")
+parser.add_argument("--suite", choices=["placement", "ore-filter"], default="placement", help="Headless native checks")
 args = parser.parse_args()
 visual = args.visual or args.scene is not None
 repo = Path(__file__).resolve().parents[1]
@@ -46,7 +47,7 @@ for phase in ("placement",):
         archive.extractall(root / "mods")
     mod = next(p for p in (root / "mods").iterdir() if p.is_dir())
     control = mod / "control.lua"
-    fixture = ("gui.lua" if args.scene == "gui" else "shoreline-artwork.lua") if args.scene else "underground-artwork.lua" if args.visual else "placement.lua"
+    fixture = ("gui.lua" if args.scene == "gui" else "shoreline-artwork.lua") if args.scene else "underground-artwork.lua" if args.visual else args.suite + ".lua"
     control.write_text(control.read_text() + "\n" + (repo / "tests/native" / fixture).read_text())
     names = ["base", "quality", "elevated-rails", "recycler", "space-age", "resource-outpost-planner"]
     (root / "mods/mod-list.json").write_text(json.dumps({"mods": [{"name": name, "enabled": True} for name in names]}))

@@ -76,6 +76,7 @@ local belt_load = require("mpp.belt_load")
 ---@field dumb_power_connectivity_choice boolean
 ---@field debugging_choice string Debugging only value
 ---@field ore_filtering_choice boolean
+---@field ore_filter_resource_choice string
 ---@field balancer_choice boolean
 ---@field belt_planner_choice boolean
 ---@field output_balance_choice boolean
@@ -105,6 +106,8 @@ local belt_load = require("mpp.belt_load")
 ---@field workflow_version integer
 ---@field oil_mode boolean
 ---@field settings_body LuaGuiElement
+---@field ore_filter_resource LuaGuiElement
+---@field ore_filter_resources string[]
 ---@field oil_settings_root LuaGuiElement
 ---@field blueprint_add_button LuaGuiElement
 ---@field blueprint_add_section LuaGuiElement
@@ -178,6 +181,7 @@ conf.default_config = {
 		dumb_power_connectivity_choice = false,
 		debugging_choice = "none",
 		ore_filtering_choice = false,
+		ore_filter_resource_choice = "none",
 		belt_planner_choice = false,
 		output_balance_choice = false,
 		output_belt_count_choice = 8,

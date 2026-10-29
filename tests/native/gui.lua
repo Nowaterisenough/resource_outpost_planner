@@ -110,6 +110,16 @@ script.on_nth_tick(1,function()
    gui_test_check(p,d.gui.selections.misc[key],false)
   end
   assert(c.cliff_mode_choice=="avoid" and not c.fill_lava_choice and not c.remove_trees_choice)
+  assert(not d.gui.ore_filter_resource.visible)
+  gui_test_check(p,d.gui.selections.misc.ore_filtering,true)
+  assert(d.gui.ore_filter_resource.visible)
+  for i,name in ipairs(d.gui.ore_filter_resources) do
+   if name=="iron-ore" then gui_test_dropdown(p,d.gui.ore_filter_resource,i);break end
+  end
+  assert(c.ore_filter_resource_choice=="iron-ore")
+  gui_test_check(p,d.gui.selections.misc.ore_filtering,false)
+  assert(not d.gui.ore_filter_resource.visible and c.ore_filter_resource_choice=="iron-ore")
+  gui_test_check(p,d.gui.selections.misc.ore_filtering,true)
   gui_test_check(p,d.gui.belt_load_toggle,false)
   assert(not c.belt_merge_choice and not d.gui.belt_load_fields.max.enabled)
   gui_test_check(p,d.gui.belt_load_toggle,true)

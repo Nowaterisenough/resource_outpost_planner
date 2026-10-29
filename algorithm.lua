@@ -1,3 +1,4 @@
+local ore_filter = require("mpp.ore_filter")
 local enums = require("mpp.enums")
 local mpp_util = require("mpp.mpp_util")
 local compatibility = require("mpp.compatibility")
@@ -369,23 +370,10 @@ function algorithm.on_player_selected_area(event)
 		return nil, {"mpp.msg_miner_err_0"}
 	end
 
-	if state.ore_filtering_choice then -- determine filtered ore
-		local current_resource = event.entities[1].name
-		local homogenous_selection = true
-
-		for _, ent in pairs(event.entities) do
-			if ent.name ~= current_resource then
-				homogenous_selection = false
-				break
-			end
-		end
-
-		if homogenous_selection then
-			state.ore_filtering_selected = current_resource
-		else
-			state.ore_filtering_selected = resource_counts[1].name
-		end
-	end
+	local filter_ok, filter_error = ore_filter.select(state)
+	if not filter_ok then return nil, filter_error end
+	state.ore_filter_with_splitters = state.ore_filtering_choice and layout.restrictions.belt_available
+		and not layout.restrictions.logistics_available
 
 	if state.ore_filtering_selected then
 		local proto = prototypes.entity[state.ore_filtering_selected]

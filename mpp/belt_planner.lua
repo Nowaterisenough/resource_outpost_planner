@@ -266,6 +266,7 @@ function belt_planner.create_state(spec, target, choices)
 		belt_x=floor(x+0.5), belt_y=floor(y+0.5), belt_direction=direction,
 		belt_choice=spec.belt_choice, belt_quality_choice=spec.belt_quality_choice,
 		belt_target=target, _belt_routing=true,
+		planned=spec.ore_filter_reserved,
 		_force_build_mode=choices._force_build_mode,
 		output_balance_choice=choices.output_balance_choice==true,
 		output_belt_count_choice=choices.output_belt_count_choice or output_balancer.default_count,

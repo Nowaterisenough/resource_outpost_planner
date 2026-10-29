@@ -128,6 +128,7 @@ function task_runner.mining_patch_task(state)
 				fill_lava_choice = state.fill_lava_choice,
 				fill_oil_ocean_choice = state.fill_oil_ocean_choice,
 				fill_other_choice = state.fill_other_choice,
+				_ore_filter_reserved = state._ore_filter_reserved,
 				_render_objects = state._render_objects,
 				_lane_info_rendering = state._lane_info_rendering,
 			}
