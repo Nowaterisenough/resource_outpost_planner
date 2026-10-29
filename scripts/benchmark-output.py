@@ -24,7 +24,7 @@ def main():
     baseline = parser.add_mutually_exclusive_group()
     baseline.add_argument("--ref", help="Git revision to compare with the working tree")
     baseline.add_argument("--package", type=Path, help="Previously packaged runtime to compare with the working tree")
-    parser.add_argument("--scenario", choices=("outputs", "large", "move", "apply", "irregular", "contour", "load", "load-repeat", "load-output-only", "dense-repeat", "fill"), default="outputs",
+    parser.add_argument("--scenario", choices=("outputs", "large", "move", "apply", "irregular", "contour", "load", "load-repeat", "load-output-only", "dense-repeat", "dense-station", "fill"), default="outputs",
                         help="Output previews, large/irregular mines, beacon contours, station moves, or application")
     parser.add_argument("--timing-only", action="store_true",
                         help="Skip correctness snapshots and their allocations between measured requests")

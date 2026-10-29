@@ -1112,4 +1112,43 @@ do
 	cases=cases+8
 end
 
+-- Facing back toward a station left of the mine must not trigger a broad A*
+-- search for every lane. Check both sides of the mine and all world rotations.
+for _,rotation in ipairs{"west","north","east","south"} do
+	for _,above in ipairs{true,false} do for _,count in ipairs{4,24,44} do
+		local spec=fixture(rotation,count)
+		local outlet_y=above and -80 or spec[count].y+80
+		local state=assert(planner.create_state(spec,target(spec,-120,outlet_y,E),{output_balance_choice=true}))
+		state.output_balance_choice=false
+		state.interchangeable_belt_inputs=true;state.belt_input_targets={}
+		for i=1,count do state.belt_input_targets[i]={x=-120,y=outlet_y+count-i} end
+		local original,probes=obstacles.can_place,0
+		obstacles.can_place=function(...) probes=probes+1;return original(...) end
+		local ok,route=planner.plan(state)
+		obstacles.can_place=original
+		assert(ok,"return-facing station cannot receive the mining bundle")
+		verify(state,route)
+		assert(probes<=#route+count*2,"return-facing station expands a broad search")
+		for i,stat in ipairs(route_stats(state,route)) do
+			local rank=above and i or count-i+1
+			assert(stat.turns==2,"return-facing station adds unnecessary turns")
+			assert(stat.first_turn.x==-120-rank,"station turn wastes an outer belt column")
+		end
+		cases=cases+1
+	end end
+	local spec=fixture(rotation,4)
+	local state=assert(planner.create_state(spec,target(spec,-30,-16,E),{}))
+	state.interchangeable_belt_inputs=true
+	state.belt_input_targets={{x=-30,y=-13},{x=-30,y=-14},{x=-30,y=-15},{x=-30,y=-16}}
+	local bx,by=-31,spec[1].y
+	state.grid={get_tile=function(_,x,y) if x==bx and y==by then return {built_thing="obstacle"} end end}
+	local ok,route=planner.plan(state)
+	assert(ok,"blocked direct station corridor fails to fall back to search")
+	verify(state,route)
+	for _,piece in ipairs(route) do assert(piece.grid_x~=bx or piece.grid_y~=by,"station shortcut crosses a selected obstacle") end
+	state.grid={get_tile=function(_,x,y) if x==-30 and y==-14 then return {built_thing="obstacle"} end end}
+	assert(not planner.plan(state),"station shortcut permits a blocked destination")
+	cases=cases+2
+end
+
 print("Belt planner OK: "..cases.." route and preview cases")

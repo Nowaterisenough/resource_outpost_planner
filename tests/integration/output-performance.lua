@@ -9,8 +9,9 @@ local perf_station=require('mpp.train_station')
 local perf_simple=require('layouts.simple')
 local perf_cache=require('mpp.preview_output_cache')
 local perf_balancer=require('mpp.output_balancer')
+local perf_util=require('mpp.mpp_util')
 local scenario=output_performance_scenario or 'outputs'
-local dense_scenario=scenario=='dense-repeat'
+local dense_scenario=scenario=='dense-repeat' or scenario=='dense-station'
 local load_scenario=scenario=='load' or scenario=='load-repeat' or scenario=='load-output-only' or dense_scenario
 local capture_snapshots=output_performance_capture~=false
 local perf_active,perf_stats,perf_calls=false,{},{}
@@ -42,6 +43,41 @@ wrap(perf_preview,'complete','complete')
 wrap(perf_output,'refresh','output_refresh')
 wrap(perf_cache,'resume','cache_validate')
 wrap(perf_cache,'refresh','cache_refresh')
+local function verify_station_ingress(state,route)
+ local cells,ports,used={},{},{}
+ local function key(x,y) return x..','..y end
+ for _,p in ipairs(route) do
+  local k=key(p.grid_x,p.grid_y);assert(not cells[k],'station ingress overlaps');cells[k]=p
+ end
+ for _,p in ipairs(state.belt_input_targets) do ports[key(p.x,p.y)]=true end
+ for _,source in ipairs(state.belt_specification) do
+  local node=cells[key(source.x_start-1,source.y)]
+  assert(node,'station source disconnected')
+  local seen,arrival={},defines.direction.west
+  while node do
+   local k=key(node.grid_x,node.grid_y)
+   assert(not seen[k] and node.direction~=(arrival+8)%16,'station ingress loops or reverses')
+   seen[k]=true
+   local delta=perf_util.direction_coord[node.direction]
+   local next=cells[key(node.grid_x+delta.x,node.grid_y+delta.y)]
+   if not next then
+    assert(node.direction==state.belt_direction and ports[k] and not used[k],'station ingress misses or shares a port')
+    used[k]=true
+   end
+   arrival=node.direction;node=next
+  end
+ end
+ assert(table_size(used)==#state.belt_input_targets,'unconnected station port')
+ if perf_active then perf_calls.verified_station_lanes=(perf_calls.verified_station_lanes or 0)+#state.belt_input_targets end
+end
+local perf_station_plan=perf_station.plan
+perf_station.plan=function(state,route)
+ return timing('station_total',perf_station_plan,state,function(connection)
+  local ok,result,diagnostic=timing('routing_bundle',route,connection)
+  if ok and capture_snapshots then verify_station_ingress(connection,result) end
+  return ok,result,diagnostic
+ end)
+end
 local perf_balance_plan=perf_balancer.plan
 perf_balancer.plan=function(state,route)
  return timing('balancer_total',perf_balance_plan,state,function(...) return timing('routing_bundle',route,...) end)
@@ -102,6 +138,11 @@ if scenario=='load-repeat' or scenario=='load-output-only' or dense_scenario the
  cases={}
  for i=1,24 do cases[#cases+1]={name='load-repeat-'..i,balance=true,
   x=(dense_scenario and -275.5 or -130.5)-2*((i-1)%5),y=-16.5+2*((i-1)%3),dir=i%6==0 and 0 or 12} end
+end
+if scenario=='dense-station' then
+ cases={}
+ for i=1,8 do cases[#cases+1]={name='dense-station-'..i,station=true,
+  x=-300+2*((i-1)%2),y=-180+2*((i-1)%3),dir=({0,0,4,4,8,8,12,12})[i],mirror=i%2==0} end
 end
 local phase,index,player,data,surface,start_tick=0,0
 local total

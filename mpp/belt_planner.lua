@@ -696,7 +696,9 @@ local function route_bundle(state, reverse, negotiate, outer_corridor, backward_
 			end
 			-- Opposite-facing exits use nested, parallel corridors when the output band is outside the rows.
 			if not corners and dir==EAST and (output_y2<spec[1].y or output_y1>spec[spec.count].y) then
-				local column=source_left-(exit_y<spec[1].y and i or spec.count-i+1)
+				-- Inputs may face back toward a station in front of the mine. Turn
+				-- beyond that input band instead of searching for each U-shaped lane.
+				local column=min(source_left,approach.x+1)-(exit_y<spec[1].y and i or spec.count-i+1)
 				if approach.x>=column then
 					route=straight_segments({{x=start.x-1,y=start.y},{x=column,y=start.y},
 						{x=column,y=approach.y},approach},allowed)

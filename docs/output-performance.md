@@ -859,3 +859,70 @@ Validation completed on the final packaged runtime:
   runtime digest measured in all three optimized timing runs. The previous
   archive is backed up under `before-optimization/`. The source save digest is
   unchanged. Installation details are in `installation.json`.
+
+## 2026-10-29: return-facing station ingress
+
+The previous round's installed archive is the baseline for this fix:
+`dist/performance-station-20261029/baseline.zip`, SHA-256
+`f5d7db4b9b7262f548cbcaaa9049f96937c822b2a037a0c5e8e49c5fecb57547`.
+Only `mpp/belt_planner.lua` changes in the runtime archive.
+
+The station benchmark exposed a separate routing stall. When the station is in
+front of the mining rows but its input belts face back toward them, the previous
+nested-turn formula chose its turning column relative to the mine alone. That
+column was beyond the input approach, so the direct candidate was rejected and
+each lane fell through to a broad A* search even on clear ground.
+
+The turning column now uses the outermost of the mining-row boundary and the
+station's input approach, retaining the existing per-lane nesting. The first lane
+can turn directly on its approach column; subsequent lanes turn progressively
+farther out. Existing clearance, reservations and per-cell obstacle checks apply
+to every proposed segment. A blocked candidate still falls back to search.
+
+`dense-station` uses the same 17,965-tile irregular mine as `dense-repeat`, with
+44 internal collecting outputs feeding a 2-locomotive, 4-wagon, double-sided
+loading station. Eight placements cover all four directions, with and without
+mirroring. Three sequential baseline/optimized timing pairs use one copied source
+save. Values below are medians of the three per-run statistics, with snapshot
+and connectivity assertions excluded by `--timing-only`.
+
+| Measurement | Before | After | Reduction |
+| --- | ---: | ---: | ---: |
+| Mean request, previously slow station orientation | 4476.08 ms | 915.47 ms | 79.5% |
+| Mean ingress routing, same orientation | 3720.73 ms | 165.69 ms | 95.5% |
+| Largest script-update pause, same orientation | 4166.85 ms | 562.52 ms | 86.5% |
+| Mean request across all eight station cases | 1650.67 ms | 758.44 ms | 54.1% |
+
+Slow-orientation per-run means are 4358.40 / 4476.08 / 4487.77 ms before and
+915.47 / 917.51 / 785.10 ms after. The other six cases are essentially unchanged:
+708.86 versus 729.64 ms, with allocation/GC variation. Refresh scheduling remains
+two ticks. These values are instrumented script work, not full input-to-display
+latency. Large output previews still involve tens of thousands of belt entities
+and sprite layers, and retain visible rendering pauses.
+
+Correctness checks:
+
+- All eight dense station cases retain identical entity geometry, counts,
+  readiness, sprite content and draw order. Native route-graph checks trace each
+  of the 44 sources to a distinct station port, rejecting overlap, loops and
+  reversal in every rotation/mirror combination.
+- Another 38 native snapshots retain identical results: ten ordinary/blocked/
+  station outputs, four moved/rotated/mirrored stations, and 24 independent
+  outputs on an already applied mine.
+- Routing tests pass 374 cases, including 32 new checks for 4/24/44 inputs,
+  entry bands above and below the mine, four world rotations, bounded probe
+  counts, tight turn positions, obstacle fallback and blocked ports.
+- Search, station loading/underground pairs, balancer flow, obstacles, preview
+  cache/rendering/lifecycle, terrain, rail artwork and throughput suites pass.
+
+Reproduce with `scripts/benchmark-output.py --scenario dense-station`, adding
+`--timing-only` for timing or `--package /path/to/baseline.zip` for comparison.
+Reports and runtime digests are in `dist/performance-station-20261029/summary.json`.
+
+The native placement suite also passes real placement, forced modes, existing
+belts/rails, robot cleanup, copper wiring, station/output-only construction and
+Undo. The final package's 143 runtime files match the tested working tree and
+all three optimized timing runs. It has been installed as the local test mod,
+with the previous archive retained under `before-optimization/`. Installation
+hashes and the 46-case comparison inventory are in `installation.json`; the
+source save remains unchanged.
