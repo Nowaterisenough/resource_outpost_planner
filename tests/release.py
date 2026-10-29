@@ -318,6 +318,30 @@ class GitHubLookupTests(unittest.TestCase):
             with patch.object(release, "run", return_value="[[]]"):
                 self.assertIsNone(release.GitHub("test/mod").release("v1.2.4"))
 
+    def test_created_draft_uses_response_id_for_assets_and_publication(self):
+        client = release.GitHub("test/mod")
+        state = {"id": 125, "tag_name": "v1.2.4", "draft": True, "assets": []}
+        m = {"tag": "v1.2.4", "title": "Test mod", "version": "1.2.4"}
+        with tempfile.TemporaryDirectory() as directory:
+            notes = Path(directory) / "notes.md"
+            notes.write_text("Release notes with 中文")
+            with patch.object(release, "run", return_value=json.dumps(state)) as api:
+                self.assertEqual(client.create_draft(m, "source-commit", notes), state)
+                payload = json.loads(api.call_args.kwargs["input_text"])
+                self.assertEqual(payload["body"], notes.read_text())
+                self.assertEqual(payload["target_commitish"], "source-commit")
+                self.assertTrue(payload["draft"])
+                self.assertEqual(api.call_args.args[2], "repos/test/mod/releases")
+                client.upload("v1.2.4", Path("test.zip"))
+                self.assertEqual(api.call_args.args[2], "https://uploads.github.com/repos/test/mod/releases/125/assets?name=test.zip")
+                self.assertIn("--input", api.call_args.args)
+                self.assertEqual(client.release("v1.2.4"), state)
+                self.assertEqual(api.call_args.args[2], "repos/test/mod/releases/125")
+                client.publish("v1.2.4")
+                self.assertEqual(api.call_args.args[2], "repos/test/mod/releases/125")
+                self.assertIn("draft=false", api.call_args.args)
+                self.assertIn("make_latest=legacy", api.call_args.args)
+
     def test_api_failure_is_not_treated_as_missing_release(self):
         response = subprocess.CompletedProcess([], 1, b"{}", b"gh: Service unavailable (HTTP 503)")
         with patch.object(release.subprocess, "run", return_value=response):

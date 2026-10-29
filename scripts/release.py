@@ -27,8 +27,9 @@ class ReleaseError(Exception):
     pass
 
 
-def run(*args, cwd=ROOT, binary=False):
-    result = subprocess.run(args, cwd=cwd, capture_output=True)
+def run(*args, cwd=ROOT, binary=False, input_text=None):
+    result = subprocess.run(args, cwd=cwd, capture_output=True,
+                            input=None if input_text is None else input_text.encode())
     if result.returncode:
         # gh/git can include credential or signed URL details in errors; do not echo them.
         raise ReleaseError(f"{args[0]} {args[1]} failed (exit {result.returncode})")
@@ -224,8 +225,12 @@ class GitHub:
         if not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", repository):
             raise ReleaseError("Invalid GITHUB_REPOSITORY")
         self.repository = repository
+        self.release_ids = {}
 
     def release(self, tag):
+        if tag in self.release_ids:
+            # Read back by ID: a new draft may not appear in tag/list queries immediately.
+            return json.loads(run("gh", "api", f"repos/{self.repository}/releases/{self.release_ids[tag]}"))
         result = subprocess.run(["gh", "api", f"repos/{self.repository}/releases/tags/{tag}"], capture_output=True)
         if result.returncode:
             if b"(HTTP 404)" in result.stderr:
@@ -233,9 +238,14 @@ class GitHub:
                 # also includes drafts, including one created by an interrupted run.
                 pages = json.loads(run("gh", "api", f"repos/{self.repository}/releases?per_page=100",
                                        "--paginate", "--slurp"))
-                return next((r for page in pages for r in page if r["tag_name"] == tag), None)
+                found = next((r for page in pages for r in page if r["tag_name"] == tag), None)
+                if found:
+                    self.release_ids[tag] = found["id"]
+                return found
             raise ReleaseError("Could not read GitHub release state")
-        return json.loads(result.stdout)
+        found = json.loads(result.stdout)
+        self.release_ids[tag] = found["id"]
+        return found
 
     def asset_matches(self, asset, path):
         expected = hashlib.sha256(path.read_bytes()).hexdigest()
@@ -246,17 +256,28 @@ class GitHub:
         return hashlib.sha256(data).hexdigest() == expected
 
     def create_draft(self, m, commit, notes):
-        run("gh", "release", "create", m["tag"], "--repo", self.repository, "--verify-tag", "--draft",
-            "--title", f"{m['title']} {m['version']}", "--target", commit, "--notes-file", str(notes))
-        return self.release(m["tag"])
+        payload = dict(tag_name=m["tag"], target_commitish=commit, draft=True,
+                       name=f"{m['title']} {m['version']}", body=notes.read_text())
+        created = json.loads(run("gh", "api", f"repos/{self.repository}/releases",
+                                 "--method", "POST", "--input", "-", input_text=json.dumps(payload)))
+        if created.get("tag_name") != m["tag"] or not created.get("draft") or not created.get("id"):
+            raise ReleaseError("GitHub did not return the expected draft identity")
+        self.release_ids[m["tag"]] = created["id"]
+        return created
 
     def upload(self, tag, path):
-        run("gh", "release", "upload", tag, str(path), "--repo", self.repository)
+        if tag not in self.release_ids and not self.release(tag):
+            raise ReleaseError("GitHub release is missing before asset upload")
+        # Upload directly to the known draft instead of doing another tag lookup in gh.
+        endpoint = (f"https://uploads.github.com/repos/{self.repository}/releases/{self.release_ids[tag]}/assets"
+                    f"?name={parse.quote(path.name, safe='')}")
+        run("gh", "api", endpoint, "--method", "POST", "--input", str(path),
+            "-H", "Content-Type: application/octet-stream")
 
     def publish(self, tag):
-        release = self.release(tag)
+        state = self.release(tag)
         # Semver selection prevents a retried older draft from becoming the latest release.
-        run("gh", "api", f"repos/{self.repository}/releases/{release['id']}",
+        run("gh", "api", f"repos/{self.repository}/releases/{state['id']}",
             "--method", "PATCH", "-F", "draft=false", "-f", "make_latest=legacy")
 
 
