@@ -1,0 +1,4 @@
+[
+  {"id":"01-saturated-iron-west","ore":"iron-ore","shape":"lobed","direction":"west","quality":"normal","module":"speed-module-3","bonus":100,"belt":"express-transport-belt","outputs":24,"lamps":true,"measure_lanes":true},
+  {"id":"02-saturated-copper-south","ore":"copper-ore","shape":"crescent","direction":"south","quality":"normal","module":"speed-module-3","bonus":100,"belt":"turbo-transport-belt","outputs":8,"lower":0,"lamps":true,"measure_lanes":true}
+]

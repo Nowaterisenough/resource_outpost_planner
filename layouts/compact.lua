@@ -44,6 +44,19 @@ function layout:initialize(state)
 	state.pole_gap = 0
 end
 
+-- The original interleaved-row router assumes the small drill's output and
+-- pole geometry. Big drills need the same inline router even at low load or
+-- with automatic merging/splitting disabled; its corridor then stays one tile.
+function layout:deconstruct_previous_ghosts(state)
+	local next_step=simple.deconstruct_previous_ghosts(self,state)
+	if state.layout_choice=="compact" and state.miner.size==5 then
+		state._mining_layout_choice="compact"
+		state.layout_choice="capacity_rows"
+		return "initialize_capacity_layout"
+	end
+	return next_step
+end
+
 ---@param state CompactState
 ---@return PlacementAttempt
 function layout:_placement_attempt(state, attempt)

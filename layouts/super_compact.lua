@@ -16,7 +16,7 @@ local layout = table.deepcopy(simple)
 layout.name = "super_compact"
 layout.translation = {"", "[entity=underground-belt] ", {"mpp.settings_layout_choice_super_compact"}}
 
-layout.restrictions.miner_size = {3, 3}
+layout.restrictions.miner_size = {3, 5}
 layout.restrictions.miner_radius = {1, 20}
 layout.restrictions.uses_underground_belts = true
 layout.restrictions.pole_omittable = true
@@ -39,13 +39,22 @@ layout.throughput_direction = EAST
 ---@param self SuperCompactLayout
 ---@param state SuperCompactState
 function layout:validate(state)
+	local miner=mpp_util.miner_struct(state.miner_choice)
+	local belt=mpp_util.belt_struct(state.belt_choice)
+	if miner.size==5 and (belt.underground_reach or 0)<miner.size+3 then
+		return nil,{"mpp.super_compact_underground",miner.size+3}
+	end
+	if miner.size==5 and state.pole_choice~="none" then
+		local pole=mpp_util.pole_struct(state.pole_choice,state.pole_quality_choice)
+		if pole.wire<9 then return nil,{"mpp.super_compact_wire",9} end
+	end
 	return true
 end
 
 ---@param self SuperCompactLayout
 ---@param proto MinerStruct
 function layout:restriction_miner(proto)
-	return proto.symmetric
+	return proto.symmetric and (proto.size==3 or proto.size==5)
 end
 
 ---@param self SuperCompactLayout
@@ -73,10 +82,10 @@ function layout:_placement_attempt(state, attempt)
 	---@param row_start number
 	local function miner_stagger(start_x, start_y, direction, row_start)
 		local row_index = row_start
-		for y = 1 + shift_y + start_y, state.coords.th + 2, size * 3 + 1 do
+		for y = 1 + shift_y + start_y, state.coords.th + size-1, size * 3 + 1 do
 			if not lane_layout[row_index] then lane_layout[row_index] = {y=y, row_index=row_index} end
 			local ix = 1
-			for x = 1 + shift_x + start_x, state.coords.tw + 2, size * 2 do
+			for x = 1 + shift_x + start_x, state.coords.tw + size-1, size * 2 do
 				local tile = grid:get_tile(x, y) --[[@as GridTile]]
 				local mirror = (direction == EAST) and (ix % 2 == 0)
 				---@type MinerPlacementInit
@@ -109,14 +118,14 @@ function layout:_placement_attempt(state, attempt)
 		end
 	end
 
-	miner_stagger(0, -2, SOUTH, 1)
-	miner_stagger(3,  0, EAST,  1)
-	miner_stagger(0,  2, NORTH, 2)
-
-	-- the redundant calculation makes it easier to find the stagger offset
-	miner_stagger(0+size, -2+size+2, SOUTH, 3)
-	miner_stagger(3-size,  0+size+2, EAST,  3)
-	miner_stagger(0+size,  2+size+2, NORTH, 4)
+	local half=(size+1)/2
+	local period=(size*3+1)/2
+	miner_stagger(0, -half, SOUTH, 1)
+	miner_stagger(size, 0, EAST, 1)
+	miner_stagger(0, half, NORTH, 2)
+	miner_stagger(size, -half+period, SOUTH, 3)
+	miner_stagger(0, period, EAST, 3)
+	miner_stagger(size, half+period, NORTH, 4)
 
 	local result = {
 		sx = shift_x,
@@ -144,15 +153,16 @@ end
 ---@param belt BaseBeltSpecification
 ---@param direction defines.direction.west | defines.direction.east | nil direction of the belt
 ---@return number, number
-function layout:_calculate_belt_throughput(state, belt, direction)
+function layout:_calculate_belt_throughput(state, belt, direction, production)
+	production=production or common.mining_production_calculator(state)
 	local belt_speed = state.belt.speed
 	local lane1, lane2 = belt.lane1, belt.lane2
 	
 	local lane1_sum, lane2_sum = 0, 0
 	---@param lane MinerPlacement[]
 	local function sum_miner_directions(lane)
-		local sum1 = function(drill) lane1_sum = lane1_sum + common.get_mining_drill_production_from_state(state,nil,drill) end
-		local sum2 = function(drill) lane2_sum = lane2_sum + common.get_mining_drill_production_from_state(state,nil,drill) end
+		local sum1 = function(drill) lane1_sum = lane1_sum + production(drill) end
+		local sum2 = function(drill) lane2_sum = lane2_sum + production(drill) end
 		if direction == EAST then
 			sum1, sum2 = sum2, sum1
 		end
@@ -187,6 +197,7 @@ end
 ---@param state SuperCompactState
 ---@return List<BaseBeltSpecification>
 function layout:_process_mining_drill_lanes(state)
+	local production=common.mining_production_calculator(state)
 	local G = state.grid
 	local m = state.miner
 	local m_size = m.size
@@ -221,7 +232,7 @@ function layout:_process_mining_drill_lanes(state)
 		local lane1 = miner_lanes[i]
 		local lane2 = miner_lanes[i+1]
 		
-		local y = attempt.sy + 2 + (m.size + 2) * floor(i/2)
+		local y = attempt.sy + (m.size+1)/2 + (m.size*3+1)/2 * floor(i/2)
 
 		if (not lane1 or #lane1 == 0) and (not lane2 or #lane2 == 0) then
 			belts:push{
@@ -292,7 +303,7 @@ function layout:_process_mining_drill_lanes(state)
 			merged_throughput2 = 0,
 		}
 		
-		local throughput1, throughput2 = self:_calculate_belt_throughput(state, belt, EAST)
+		local throughput1, throughput2 = self:_calculate_belt_throughput(state, belt, EAST, production)
 		belt.throughput1, belt.throughput2 = throughput1, throughput2
 		belt.merged_throughput1, belt.merged_throughput2 = throughput1, throughput2
 		
@@ -400,13 +411,14 @@ function layout:prepare_pole_layout(state)
 	---@type List<PowerPoleGhostSpecification>
 	local builder_power_poles = List()
 	state.builder_power_poles = builder_power_poles
+	state.builder_lamps={}
 	
 	local belt_start_adjust = 0
 	
 	for i, belt in ipairs(state.belts) do
 		local y = belt.y
 		local index_x = 1
-		local x_start = belt.x_start + (belt.index % 2) * 3
+		local x_start = belt.x_start + (belt.index % 2) * size
 		for x = x_start, belt.x_end, size * 2 do
 			local miner1 = G:get_tile(x, y-1)
 			local miner2 = G:get_tile(x, y+1)
@@ -416,7 +428,8 @@ function layout:prepare_pole_layout(state)
 			
 			if built then
 				if x == belt.x_start then
-					belt_start_adjust = min(belt_start_adjust, -1)
+					local extra=size==5 and pole_choice~="none" and (state.pole.wire<10 or state.lamp_choice) and 2 or 1
+					belt_start_adjust = min(belt_start_adjust, -extra)
 				end
 				
 				if pole_choice ~= "none" then
@@ -431,6 +444,16 @@ function layout:prepare_pole_layout(state)
 					}
 				end
 				G:build_thing_simple(x, y, "pole")
+				-- A 5x5 motif repeats every ten tiles. Normal medium poles
+				-- cannot bridge that span, so use the other non-receiving pocket.
+				if size==5 and pole_choice~="none" and state.pole.wire<10 then
+					builder_power_poles:push{name=pole_choice,quality=pole_quality,thing="pole",
+						grid_x=x-1,grid_y=y,no_light=true,ix=index_x,iy=i}
+					G:build_thing_simple(x-1,y,"pole")
+				elseif size==5 and pole_choice~="none" and state.lamp_choice then
+					state.builder_lamps[#state.builder_lamps+1]={name="small-lamp",thing="lamp",grid_x=x-1,grid_y=y}
+					G:build_thing_simple(x-1,y,"lamp")
+				end
 			end
 			
 			index_x = index_x + 1

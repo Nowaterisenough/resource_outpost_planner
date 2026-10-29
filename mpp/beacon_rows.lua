@@ -34,6 +34,32 @@ function rows.specifications(state, attempt, selected)
 			end
 		end
 	end
+	if state._capacity_beacon_slots then
+		local specs={}
+		for _,slot in ipairs(attempt.beacon_slots) do
+			-- The lower edge of each 5x5 pocket supplies this row and the
+			-- following row, including across a two-tile belt corridor.
+			local x,y=slot.x+floor((state.miner.size-w)/2),slot.y+state.miner.size-h
+			local spec={name=state.beacon_choice,quality=state.beacon_quality_choice,thing="beacon",
+				grid_x=x+(w-1)/2,grid_y=y+(h-1)/2,extent_w=w/2,extent_h=h/2,row_x=x,row_y=y}
+			local _,box=rows.position(state,spec)
+			local area={left_top={x=box.left_top.x-distance,y=box.left_top.y-distance},
+				right_bottom={x=box.right_bottom.x+distance,y=box.right_bottom.y+distance}}
+			local affected,collision=false,false
+			for bx=floor(area.left_top.x/cell_size),floor(area.right_bottom.x/cell_size) do
+				for by=floor(area.left_top.y/cell_size),floor(area.right_bottom.y/cell_size) do
+					for _,i in ipairs(buckets[bx..","..by] or {}) do
+						if overlap(area,boxes[i]) then affected=true end
+						if overlap(box,boxes[i]) then collision=true end
+					end
+				end
+			end
+			if affected and not collision and (not selected or not obstacles.blocked_box(selected,box)) then
+				specs[#specs+1]=spec
+			end
+		end
+		return specs
+	end
 	local strips = {}
 	for _,miner in ipairs(attempt.miners) do
 		for _,x in ipairs{miner.x-w-gap,miner.x+state.miner.size+gap} do

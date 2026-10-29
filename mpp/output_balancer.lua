@@ -6,6 +6,7 @@ local cache = {}
 
 balancer.default_count = 8
 balancer.max_count = 32
+balancer.max_inputs = 128
 
 function balancer.valid_count(value)
 	return type(value)=="number" and value==math.floor(value) and value>=1 and value<=balancer.max_count
@@ -63,6 +64,54 @@ local function geometry(inputs, outputs, belt_name, preference)
 	local matrix=preference=="matrix" or inputs<=8 and outputs<=8
 	local cache_key = inputs..":"..outputs..":"..belt_name..":"..tostring(matrix)
 	if cache[cache_key] then return cache[cache_key] end
+	-- Preserve independent mining feeds. When they exceed the reference book's
+	-- input width, fold them outside the mine before the normal output balancer.
+	-- The final output count is unchanged; each fold preserves both belt sides.
+	if inputs>balancer.max_count then
+		local channels=math.max(balancer.max_count,math.ceil(inputs/2))
+		local core,err=geometry(channels,outputs,belt_name,preference)
+		if not core then return nil,err end
+		local specs,keepout,ports={},{},{}
+		for _,piece in ipairs(core.specs) do specs[#specs+1]=piece end
+		for _,point in ipairs(core.keepout) do keepout[#keepout+1]=point end
+		local front,offset=math.huge,0
+		for i,port in ipairs(core.inputs) do front=math.min(front,port.y);offset=math.max(offset,port.x-3*(i-1)) end
+		local direct=true
+		for i=2,#core.inputs do
+			if core.inputs[i].x-core.inputs[i-1].x<2 or core.inputs[i].y~=core.inputs[1].y then direct=false end
+		end
+		front=front-channels-3
+		local pairs=inputs-channels
+		local function add(name,x,y,dir)
+			specs[#specs+1]={name=name,x=x,y=y,direction=dir or S}
+		end
+		for i,port in ipairs(core.inputs) do
+			if direct then
+				if i<=pairs then
+					add(splitter,port.x+.5,port.y-1,S)
+					ports[#ports+1]={x=port.x,y=port.y-2};ports[#ports+1]={x=port.x+1,y=port.y-2}
+					keepout[#keepout+1]={x=port.x+1,y=port.y}
+				else add(belt_name,port.x,port.y-1,S);ports[#ports+1]={x=port.x,y=port.y-2} end
+				add(belt_name,port.x,port.y,S)
+			else
+				local x=offset+3*(i-1)
+				if i<=pairs then
+					add(splitter,x+.5,front,S)
+					ports[#ports+1]={x=x,y=front-1};ports[#ports+1]={x=x+1,y=front-1}
+					keepout[#keepout+1]={x=x+1,y=front+1}
+				else add(belt_name,x,front,S);ports[#ports+1]={x=x,y=front-1} end
+				local turn=front+i
+				for y=front+1,turn-1 do add(belt_name,x,y,S) end
+				for column=x,port.x+1,-1 do add(belt_name,column,turn,W) end
+				for y=turn,port.y do add(belt_name,port.x,y,S) end
+			end
+		end
+		local result={specs=specs,keepout=keepout,inputs=ports,output_y=core.output_y,
+			width=direct and core.width or math.max(core.width,offset+3*channels),extent=direct and core.extent+2 or math.max(core.extent,offset+3*channels,core.output_y-front+2),
+			source_label=core.source_label.." + input folds",reference_count=core.reference_count}
+		cache[cache_key]=result
+		return result
+	end
 	local exact=inputs<=8 and outputs<=8
 	local entry
 	if exact then entry=choose_matrix(inputs,outputs,reach)
@@ -255,9 +304,8 @@ function balancer.plan(state, route)
 	local function failure(err)
 		return false,err,{routes={},issues={{position=state.belt_target.position,reason=err}}}
 	end
-	if not balancer.valid_count(outputs) or inputs>balancer.max_count then
-		return failure{"mpp.output_balance_count_error",balancer.max_count}
-	end
+	if not balancer.valid_count(outputs) then return failure{"mpp.output_balance_count_error",balancer.max_count} end
+	if inputs>balancer.max_inputs then return failure{"mpp.output_balance_input_count_error",balancer.max_inputs} end
 	local layout,err=geometry(inputs,outputs,state.belt_choice)
 	if not layout then return failure(err) end
 	state._belt_search_margin=math.max(state._belt_search_margin or 0,layout.extent+16)

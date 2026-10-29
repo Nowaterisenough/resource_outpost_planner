@@ -1113,12 +1113,13 @@ end
 ---@param belt BaseBeltSpecification
 ---@param direction defines.direction.west | defines.direction.east | nil
 ---@return number, number
-function layout:_calculate_belt_throughput(state, belt, direction)
+function layout:_calculate_belt_throughput(state, belt, direction, production)
+	production=production or common.mining_production_calculator(state)
 	local belt_speed = state.belt.speed
 	---@param lane MinerPlacement[]
 	local function lane_capacity(lane)
 		local sum=0
-		for _,miner in ipairs(lane or {}) do sum=sum+common.get_mining_drill_production_from_state(state,nil,miner) end
+		for _,miner in ipairs(lane or {}) do sum=sum+production(miner) end
 		return sum/belt_speed
 	end
 	local lane1, lane2 = belt.lane1, belt.lane2
@@ -1144,6 +1145,7 @@ end
 ---@param state SimpleState
 ---@return List<BaseBeltSpecification>
 function layout:_process_mining_drill_lanes(state)
+	local production=common.mining_production_calculator(state)
 	local m = state.miner
 	local out_rot = m.output_rotated
 	local attempt = state.best_attempt
@@ -1216,7 +1218,7 @@ function layout:_process_mining_drill_lanes(state)
 			merged_throughput2 = 0,
 		}
 		
-		local throughput1, throughput2 = self:_calculate_belt_throughput(state, belt, WEST)
+		local throughput1, throughput2 = self:_calculate_belt_throughput(state, belt, WEST, production)
 		belt.throughput1, belt.throughput2 = throughput1, throughput2
 		belt.merged_throughput1, belt.merged_throughput2 = throughput1, throughput2
 		
@@ -1240,7 +1242,6 @@ function layout:_apply_belt_merge_strategy(state, source, target, direction)
 	local source_total = source_t1 + source_t2
 	local target_t1, target_t2 = target.merged_throughput1, target.merged_throughput2
 	local target_total = target_t1 + target_t2
-	local source_west1, source_west2 = self:_calculate_belt_throughput(state, source, EAST)
 	
 	if (
 		source.has_drills ~= true
@@ -1250,8 +1251,10 @@ function layout:_apply_belt_merge_strategy(state, source, target, direction)
 		or target.merge_strategy
 		or source_total > target_total
 	) then
-		return -- no op
-	elseif direction == SOUTH and source_t1 == 0 and source_total <= capacity - target_t1 then
+		return
+	end
+	local source_west1, source_west2 = self:_calculate_belt_throughput(state, source, EAST)
+	if direction == SOUTH and source_t1 == 0 and source_total <= capacity - target_t1 then
 		source.merge_target = target
 		source.merge_direction = direction
 		source.is_output = false

@@ -85,6 +85,17 @@ for _,name in ipairs{"simple","compact","sparse","super_compact"} do
 	cases=cases+3
 end
 
+-- Bulk calculations read native settings once, and a new calculation sees changed research.
+state=fixture()
+state.module_choice="speed"
+local reads=0
+prototypes.item.speed={get_module_effects=function() reads=reads+1;return {speed=0.5} end}
+local production=common.mining_production_calculator(state)
+for i=1,100 do equal(production({}),1.25,"bulk production") end
+assert(reads==1,"bulk production repeats prototype effects reads")
+state.player.force.mining_drill_productivity_bonus=1
+equal(common.mining_production_calculator(state)({}),2.5,"new phase sees changed force bonus")
+equal(common.get_mining_drill_production_from_state(state),2.5,"uncached getter sees changed force bonus")
 local drawn={}
 local function draw(spec)
 	drawn[#drawn+1]=spec

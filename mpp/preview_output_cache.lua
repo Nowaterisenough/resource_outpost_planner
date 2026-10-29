@@ -4,7 +4,7 @@ local planner = require("mpp.belt_planner")
 local builder = require("mpp.builder")
 local common = require("layouts.common")
 local cache = {}
-local geometry_revision = 5 -- Filtered outputs reserve their rejected-ore ports.
+local geometry_revision = 8 -- Big double corridors distribute production across all four belt sides.
 
 local ignored_types={"resource","character","unit","corpse","item-entity","tile-ghost"}
 local hazard_names

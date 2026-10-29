@@ -50,23 +50,36 @@ local function influence(proto,count)
 	return count*(profile[min(count,#profile)] or 1)
 end
 
-function beacons.effects(state,miner)
-	if not beacons.enabled(state) then return {} end
+-- A short-lived calculator snapshots one planning phase, never stored in storage.
+function beacons.effect_calculator(state)
+	local zero={speed=0,productivity=0}
+	if not beacons.enabled(state) then return function() return zero end end
 	local proto,effects,slots,efficiency=settings(state)
-	local amount
-	if state._beacons_prepared then
-		amount=influence(proto,miner and state._beacon_counts[miner] or 0)
-	else
-		-- Until placements are known, keep merging safe even if every free beacon position is used.
+	local prepared,counts=state._beacons_prepared,state._beacon_counts
+	local upper=0
+	if not prepared then
 		local drill=prototypes.entity[state.miner_choice]
 		local distance=proto.get_supply_area_distance(state.beacon_quality_choice or "normal")
 		local count=(ceil((drill.tile_width+2*distance)/proto.tile_width)+2)
 			*(ceil((drill.tile_height+2*distance)/proto.tile_height)+2)
-		amount=0
-		for n=1,count do amount=max(amount,influence(proto,n)) end
+		for n=1,count do upper=max(upper,influence(proto,n)) end
 	end
-	return {speed=(state._beacons_prepared and (effects.speed or 0) or max(0,effects.speed or 0))*slots*efficiency*amount,
-		productivity=max(0,effects.productivity or 0)*slots*efficiency*amount}
+	local speed=(prepared and (effects.speed or 0) or max(0,effects.speed or 0))*slots*efficiency
+	local productivity=max(0,effects.productivity or 0)*slots*efficiency
+	local cache={}
+	return function(miner)
+		local count=prepared and (miner and counts[miner] or 0) or -1
+		local value=cache[count]
+		if not value then
+			local amount=prepared and influence(proto,count) or upper
+			value={speed=speed*amount,productivity=productivity*amount};cache[count]=value
+		end
+		return value
+	end
+end
+
+function beacons.effects(state,miner)
+	return beacons.effect_calculator(state)(miner)
 end
 
 local function position(state,spec)

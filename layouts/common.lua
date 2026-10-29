@@ -605,8 +605,9 @@ end
 
 ---@param state State
 ---@param resource_name string?
----@return number Items produced per second at full power
-function common.get_mining_drill_production_from_state(state, resource_name, miner)
+---@return fun(miner: MinerPlacement?): number Items/sec at full power for this planning phase
+-- Keep the closure local to a bulk calculation; Factorio storage must remain serializable.
+function common.mining_production_calculator(state, resource_name)
 	local drill = prototypes.entity[state.miner_choice]
 	local receiver = drill.effect_receiver
 	local base_effect = receiver and receiver.base_effect or {}
@@ -625,20 +626,8 @@ function common.get_mining_drill_production_from_state(state, resource_name, min
 		speed = speed + (effects.speed or 0) * count
 		productivity = productivity + (effects.productivity or 0) * count
 	end
-	local transmitted=beacons.effects(state,miner)
-	speed=speed+(transmitted.speed or 0)
-	productivity=productivity+(transmitted.productivity or 0)
-	-- The engine stores effect bonuses at four decimal places, including beacon profile scaling.
-	-- Preserve decimal half steps such as 9 * 0.3333 * 1.5 despite binary floating-point noise.
-	speed=math.floor(speed*10000+0.5+1e-8)/10000
-	productivity=math.floor(productivity*10000+0.5+1e-8)/10000
-	local function clamp_effect(value, limits, default_low)
-		return max(limits and limits.low or default_low, min(limits and limits.high or math.huge, value))
-	end
-	speed = clamp_effect(speed, receiver and receiver.speed_limits, -0.8)
-	productivity = clamp_effect(productivity, receiver and receiver.productivity_limits, 0)
 	local resource = prototypes.entity[resource_name or state.ore_filtering_selected or state.resource_counts[1].name].mineable_properties
-	local yield = 0
+	local base_yield,extra_yield = 0,0
 	for _, product in pairs(resource.products or {}) do
 		if product.type == "item" then
 			local low, high = product.amount or product.amount_min, product.amount or product.amount_max
@@ -653,10 +642,37 @@ function common.get_mining_drill_production_from_state(state, resource_name, min
 			end
 			local shared = product.shared_probability
 			local probability = (product.independent_probability or product.probability or 1) * (shared and shared.max - shared.min or 1)
-			yield = yield + (amount + eligible * productivity) * probability
+			base_yield=base_yield+amount*probability
+			extra_yield=extra_yield+eligible*probability
 		end
 	end
-	return drill.mining_speed / resource.mining_time * (1 + speed) * yield
+	local base_speed,base_productivity=speed,productivity
+	local effects,cache=beacons.effect_calculator(state),{}
+	local mining_rate=drill.mining_speed/resource.mining_time
+	return function(miner)
+		local transmitted=effects(miner)
+		if cache[transmitted] then return cache[transmitted] end
+		local speed,productivity=base_speed,base_productivity
+		speed=speed+(transmitted.speed or 0)
+		productivity=productivity+(transmitted.productivity or 0)
+		-- The engine stores effect bonuses at four decimal places, including beacon profile scaling.
+		-- Preserve decimal half steps such as 9 * 0.3333 * 1.5 despite binary floating-point noise.
+		speed=math.floor(speed*10000+0.5+1e-8)/10000
+		productivity=math.floor(productivity*10000+0.5+1e-8)/10000
+		local function clamp_effect(value, limits, default_low)
+			return max(limits and limits.low or default_low, min(limits and limits.high or math.huge, value))
+		end
+		speed = clamp_effect(speed, receiver and receiver.speed_limits, -0.8)
+		productivity = clamp_effect(productivity, receiver and receiver.productivity_limits, 0)
+		local rate=mining_rate*(1+speed)*(base_yield+extra_yield*productivity)
+		cache[transmitted]=rate
+		return rate
+	end
+end
+
+---@return number Items produced per second at full power
+function common.get_mining_drill_production_from_state(state, resource_name, miner)
+	return common.mining_production_calculator(state,resource_name)(miner)
 end
 
 function common.record_beacon_merge(state,source,target,direction,source_direction)
@@ -669,14 +685,15 @@ end
 function common.prepare_beacons(state,layout)
 	if beacons.prepare(state, common.get_mining_drill_production_from_state) then return true end
 	if not beacons.enabled(state) or not state.belt then return end
+	local production=common.mining_production_calculator(state)
 	for _,belt in ipairs(state.belts or {}) do
-		local a,b=layout:_calculate_belt_throughput(state,belt,layout.throughput_direction or WEST)
+		local a,b=layout:_calculate_belt_throughput(state,belt,layout.throughput_direction or WEST,production)
 		belt.throughput1,belt.throughput2=a,b
 		belt.merged_throughput1,belt.merged_throughput2=a,b
 	end
 	for _,merge in ipairs(state._beacon_merges or {}) do
 		local source,target=merge.source,merge.target
-		local a,b=layout:_calculate_belt_throughput(state,source,merge.source_direction)
+		local a,b=layout:_calculate_belt_throughput(state,source,merge.source_direction,production)
 		source.throughput1,source.throughput2=a,b
 		source.merged_throughput1,source.merged_throughput2=a,b
 		if merge.side==0 then
@@ -949,7 +966,7 @@ function common.create_belt_building_environment(state)
 		local tile_before, tile, tile_ahead = nil, row[x1], row[x1+1]
 		
 		if tile_ahead.built_thing ~= nil then
-			create_underground(x1, y, WEST, "output")
+			create_underground(x1, y, EAST, "input")
 		else
 			create_belt(x1, y, EAST)
 		end
@@ -1186,7 +1203,10 @@ end
 function common.commit_built_tiles_to_grid(grid, things, typ)
 	typ = typ or "other"
 	for _, v in pairs(things) do
-		grid[v.grid_y][v.grid_x].built_thing = typ
+		-- Long output corridors may extend beyond the ore convolution grid.
+		local row=grid[v.grid_y]
+		local tile=row and row[v.grid_x]
+		if tile then tile.built_thing=typ end
 	end
 end
 

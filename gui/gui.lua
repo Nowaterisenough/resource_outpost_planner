@@ -1266,7 +1266,9 @@ local function update_misc_selection(player)
 		values:push{value=name, terrain=true, tooltip={"mpp.choice_"..name}}
 	end
 
-	if layout.restrictions.lamp_available then
+	if layout.restrictions.lamp_available or (layout.name=="super_compact"
+		and mpp_util.miner_struct(choices.miner_choice).size==5
+		and (mpp_util.pole_struct(choices.pole_choice,choices.pole_quality_choice).wire or 0)>=10) then
 		values:push{
 			value="lamp",
 			tooltip={"mpp.choice_lamp"},

@@ -199,4 +199,5 @@ local two_to_eight=assert(balancer.geometry(2,8,"transport-belt"))
 assert(two_to_eight.source_label=="2_8_balancer" and two_to_eight.reference_count==21)
 assert(balancer.geometry(1,1,"transport-belt").reference_count==11)
 assert(balancer.geometry(2,2,"transport-belt").reference_count==16)
+for _,n in ipairs{33,39,64,65,128} do for _,m in ipairs{8,24,32} do verify(n,m) end end
 print("Output balancer OK: "..cases.." physical flow shares, tunnel pairing, rotations-ready geometry and configurable outputs")

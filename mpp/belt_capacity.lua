@@ -41,9 +41,10 @@ function capacity.overloaded(state)
 end
 
 function capacity.single_error(state)
+	local production=common.mining_production_calculator(state)
 	local limit=capacity.limit(state)
 	for _,miner in ipairs(state.best_attempt.miners) do
-		local rate=common.get_mining_drill_production_from_state(state,nil,miner)
+		local rate=production(miner)
 		if rate>limit+1e-8 then
 			return {"mpp.belt_capacity_single",string.format("%.2f",rate),string.format("%.2f",limit)}
 		end
@@ -61,6 +62,7 @@ function capacity.output_warning(state,choices)
 	local required=load.required_outputs(state.belts,capacity.limit(state)/state.belt.speed)
 	local loss=load.loss_percent(state.belts,common.get_belt_capacity_multiplier(state),count)
 	return load.output_warning(required,count,loss)
+		or state._capacity_tight_big and loss>1e-8 and {"mpp.belt_capacity_dense",string.format("%.1f",loss)} or nil
 end
 
 function capacity.can_split(state)
@@ -96,7 +98,7 @@ function capacity.groups(miners,limit,production)
 	return groups
 end
 
-function capacity.row_groups(lanes,lane_count,limit,production,budget)
+function capacity.row_groups(lanes,lane_count,limit,production,budget,row_budget)
 	local rates,high={},limit
 	for i=1,lane_count do
 		local total=0
@@ -109,22 +111,100 @@ function capacity.row_groups(lanes,lane_count,limit,production,budget)
 		local result,count={},0
 		for i=1,lane_count do
 			result[i]=capacity.groups(lanes[i],bound,function(m) return rates[m] end)
-			count=count+#result[i]
+			-- Move the contiguous cut toward equal production without increasing either group
+			-- above its previous peak. This also reduces avoidable single-side losses.
+			local row=result[i]
+			for j=1,#row-1,2 do
+				local a,b=row[j],row[j+1]
+				local joined={};for _,m in ipairs(a.miners) do joined[#joined+1]=m end
+				for _,m in ipairs(b.miners) do joined[#joined+1]=m end
+				local total=a.rate+b.rate
+				local best,pivot,left=math.max(a.rate,b.rate),#a.miners,a.rate
+				local sum=0
+				for k=1,#joined-1 do
+					sum=sum+rates[joined[k]]
+					local peak=math.max(sum,total-sum)
+					if peak<best-1e-8 then best,pivot,left=peak,k,sum end
+				end
+				if pivot~=#a.miners then
+					a.miners={};b.miners={};a.rate=left;b.rate=total-left
+					for k,m in ipairs(joined) do local list=k<=pivot and a.miners or b.miners;list[#list+1]=m end
+				end
+			end
+			count=count+#row
 		end
 		return result,count
 	end
-	local result,count=group(limit)
-	if not budget or count<=budget then return result end
-	local best,minimum=group(high)
-	if minimum>budget then return best end
-	-- Relax the load target only as much as needed to fit the fixed lane budget.
+	local function fits(bound)
+		local count=0
+		for i=1,lane_count do
+			local sum,row_count=nil,0
+			for _,miner in ipairs(lanes[i] or {}) do
+				local rate=rates[miner]
+				if not sum or sum+rate>bound+1e-8 then
+					count=count+1;row_count=row_count+1;sum=0
+					if budget and count>budget or row_budget and row_count>row_budget then return false end
+				end
+				sum=sum+rate
+			end
+		end
+		return true
+	end
+	if fits(limit) then return group(limit) end
+	if not fits(high) then return group(high) end
+	-- Search counts only; allocate miner groups once after finding the bound.
 	local low=limit
 	for _=1,32 do
 		local middle=(low+high)/2
-		local candidate,n=group(middle)
-		if n<=budget then high=middle;best=candidate else low=middle end
+		if fits(middle) then high=middle else low=middle end
 	end
-	return best
+	return group(high)
+end
+
+-- A compact big-drill row owns at most two physical belts. Partition its
+-- production across their four sides independently of other rows and the final
+-- balancer's outlet count. A low-load row still needs only one receiving lane.
+function capacity.compact_row_groups(lanes,lane_count,limit,production,retained_gaps,max_groups)
+	local result={}
+	for i=1,lane_count do
+		local miners=lanes[i] or {}
+		local rates,total={},0
+		for _,miner in ipairs(miners) do
+			rates[miner]=production(miner);total=total+rates[miner]
+		end
+		local split=total>limit+1e-8 or retained_gaps and retained_gaps[i]==2
+		local count=split and math.min(max_groups or 4,#miners) or math.min(1,#miners)
+		if count<=1 then
+			result[i]=count==0 and {} or {{miners=miners,rate=total}}
+		else
+			-- Find the lowest achievable peak side load for this row. In
+			-- particular, one very productive row must not coarsen other rows.
+			local grouped=capacity.row_groups({miners},1,0,function(m) return rates[m] end,nil,count)
+			local row=grouped[1]
+			-- An indivisible high-rate drill can make the optimum use fewer
+			-- groups. Fill the remaining sides without raising that optimum.
+			while #row<count do
+				local index
+				for j,g in ipairs(row) do
+					if #g.miners>1 and (not index or g.rate>row[index].rate) then index=j end
+				end
+				local group=row[index]
+				local sum,best,pivot,left=0,math.huge,1,0
+				for j=1,#group.miners-1 do
+					sum=sum+rates[group.miners[j]]
+					local peak=math.max(sum,group.rate-sum)
+					if peak<best then best,pivot,left=peak,j,sum end
+				end
+				local a,b={miners={},rate=left},{miners={},rate=group.rate-left}
+				for j,m in ipairs(group.miners) do
+					local side=j<=pivot and a or b;side.miners[#side.miners+1]=m
+				end
+				row[index]=a;table.insert(row,index+1,b)
+			end
+			result[i]=row
+		end
+	end
+	return result
 end
 
 return capacity

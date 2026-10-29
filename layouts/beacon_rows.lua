@@ -21,6 +21,17 @@ function layout:initialize(state)
 	state.miner_stride = state.miner.size+prototypes.entity[state.beacon_choice].tile_width+2*state.beacon_pipe_gap
 end
 
+function layout:deconstruct_previous_ghosts(state)
+	local next_step=compact.deconstruct_previous_ghosts(self,state)
+	local proto=prototypes.entity[state.beacon_choice]
+	if state._mining_layout_choice=="compact" and state.miner.size==5
+		and proto.tile_width<=3 and proto.tile_height<=3 then
+		state.layout_choice="capacity_rows"
+		return "initialize_capacity_layout"
+	end
+	return next_step
+end
+
 function layout:_placement_attempt(state,attempt)
 	local M,C = state.miner,state.coords
 	local miners,postponed,lanes = {},{},{}
