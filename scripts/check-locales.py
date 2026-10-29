@@ -32,7 +32,10 @@ def main():
         errors.extend(f"{language}: missing {key}" for key in sorted(expected - set(entries)))
 
     references = set()
-    for path in ROOT.rglob("*.lua"):
+    sources = list(ROOT.glob("*.lua"))
+    for directory in ("gui", "layouts", "mpp", "oil", "prototypes", "tests"):
+        sources.extend((ROOT / directory).rglob("*.lua"))
+    for path in sources:
         references.update(re.findall(r"\{\s*[\"']((?:mpp|mpp-oil)\.[A-Za-z0-9_-]+)[\"']", path.read_text(encoding="utf-8-sig")))
     for key in sorted(references):
         if key.endswith("_"):

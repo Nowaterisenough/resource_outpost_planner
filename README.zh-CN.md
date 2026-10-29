@@ -74,6 +74,8 @@
 
 ## 开发与验证
 
+推送到 `main` 后自动执行离线回归、递增补丁版本，并发布到 GitHub Releases 和 Factorio Mod Portal。配置密钥、预演及失败重试见[自动发布说明](docs/releasing.md)。
+
 执行 `python scripts/check-locales.py` 可检查中英文键名、引用和占位符。`scripts/render-settings-icons.py` 可从本机 Factorio 图像重建设置图标，需要 Pillow。
 
 使用 Lua 5.2 执行 `lua tests/belt-planner.lua` 可检查传送带方向与多出口连接、转角数量、平行和回绕走廊、路线稳定性、避障、预览选点、光标方向保留、失败预览与标记清理、应用前验证、填土和撤销收集。传送带预览、失败诊断红绿图层、恢复后的标记清理、悬崖阻挡、旋转、应用位置一致性及撤销已在 Factorio 2.1.21 验证。

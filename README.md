@@ -76,6 +76,8 @@ Select one fluid-resource type per plan to avoid joining incompatible fluids. Ex
 
 ## Development And Validation
 
+Pushes to `main` automatically run offline checks, increment the patch version, and publish to GitHub Releases and Factorio Mod Portal. See [automatic release setup and retry instructions](docs/releasing.md#english).
+
 Run `python scripts/check-locales.py` to verify English/Chinese key coverage, references and placeholders. `scripts/render-settings-icons.py` rebuilds the settings atlas from installed Factorio artwork and requires Pillow.
 
 Run `lua tests/belt-planner.lua` with Lua 5.2 to check rotated and multiple outputs, turn counts, parallel and return corridors, stable routing, obstacle routing, preview targeting, cursor direction persistence, failed previews and marker cleanup, preflight validation, landfill and undo collection. Belt previews, red/green failure diagnostics, recovery cleanup, targeting, blocked cliffs, rotation, applied placement parity and Undo have also been checked in Factorio 2.1.21.
