@@ -39,8 +39,13 @@ local function gui_test_oil_placement(p)
   local state,err=algorithm.on_player_selected_area{player_index=p.index,surface=surface,entities=resources,preview_only=preview_only}
   assert(state,"oil quality test could not select resources: "..helpers.table_to_json(err or {}))
   assert(algorithm.layouts.oil:start(state)==false and not state.preview_error,"oil quality test could not plan")
-  local pumps=0
+  local pumps,poles=0,0
   for _,entry in ipairs(preview_only and state._preview_specs or state._collected_ghosts) do
+   local name=preview_only and entry.inner_name or entry.valid and entry.ghost_name
+   if name and prototypes.entity[name] and prototypes.entity[name].type=="electric-pole" then
+    assert(name==storage.players[p.index].choices.pole_choice,"oil plan ignored selected pole")
+    poles=poles+1
+   end
    if preview_only and entry.inner_name=="pumpjack" or not preview_only and entry.valid and entry.ghost_name=="pumpjack" then
     local quality=preview_only and entry.quality or entry.quality.name
     assert(quality=="epic","oil quality badge differs from placed pumpjack")
@@ -48,6 +53,7 @@ local function gui_test_oil_placement(p)
    end
   end
   assert(pumps==#resources,"oil quality test lost pumpjacks")
+  assert(poles>0,"oil test did not place selected poles")
   algorithm.cleanup_last_state{last_state=state,gui={}}
  end
  game.delete_surface(surface)
@@ -72,6 +78,15 @@ script.on_nth_tick(1,function()
   c.output_balance_choice=true;c.output_belt_count_choice=8;c.belt_merge_choice=true
   c.belt_load_min_choice=.8;c.belt_load_max_choice=1.1
   gui.show_interface(p)
+  for _,name in ipairs{"big-electric-pole","substation"} do
+   local button=d.gui.selections.pole[name]
+   assert(button and not button.enabled,"unsupported mining pole must stay visible and disabled: "..name)
+   gui_test_click(p,button)
+   assert(c.pole_choice=="medium-electric-pole","disabled mining pole changed the choice")
+   c.pole_choice=name;gui.show_interface(p)
+   assert(c.pole_choice=="medium-electric-pole","legacy mining pole was not normalized")
+   assert(d.gui.selections.pole[c.pole_choice].enabled,"mining fallback is disabled")
+  end
   assert(d.gui.settings_body.type=="scroll-pane")
   assert(d.gui.tables.terrain.column_count==2,"terrain options are not in two columns")
   assert(not d.gui.selections.misc.force_pipe_placement,"redundant forced-pipe checkbox is still shown")
@@ -157,6 +172,12 @@ script.on_nth_tick(1,function()
   end
   assert(d.choices.layout_choice=="oil" and d.gui.oil_settings_root.visible and not d.gui.output_settings_root.visible)
   assert(d.gui.tables.oil_extractor_quality.visible and not d.gui.tables.miner_quality.visible,"oil quality selector is hidden")
+  for _,name in ipairs{"big-electric-pole","substation"} do
+   local button=d.gui.selections.pole[name]
+   assert(button and button.enabled,"oil mode disabled a supported pole: "..name)
+   gui_test_click(p,button)
+   assert(d.choices.pole_choice==name and gui_oil_config.get(d).choices.pole_choice==name,"oil pole choice was not retained")
+  end
   local section=gui_oil_config.get_extractor_section(d)
   for _,quality in ipairs{"normal","uncommon","rare","epic","legendary","epic"} do
    local oil=gui_oil_config.get(d)
@@ -172,6 +193,9 @@ script.on_nth_tick(1,function()
  elseif gui_test_phase==6 then
   gui_test_click(p,d.gui.selections.miner["big-mining-drill"])
   assert(d.choices.layout_choice~="oil" and d.gui.output_settings_root.visible)
+  assert(d.choices.pole_choice=="medium-electric-pole","returning to mining retained an unsupported pole")
+  assert(not d.gui.selections.pole.substation.enabled and not d.gui.selections.pole["big-electric-pole"].enabled)
+  log("GUI POLE MODES PASS: disabled mining poles, legacy choices, oil substation placement and switching back")
   assert(gui_test_quality_badge(d.gui.selections.miner.pumpjack)=="quality/epic","oil quality badge disappeared when returning to mining")
  elseif gui_test_phase==7 then
   log("GUI SCENE COMPLETE: compact mining, station and oil captured")

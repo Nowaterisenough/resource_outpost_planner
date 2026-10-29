@@ -1079,6 +1079,7 @@ end
 ---@param player_data PlayerData
 local function update_pole_selection(player_data)
 	local choices = player_data.choices
+	local is_oil = choices.layout_choice == "oil"
 	local layout = algorithm.get_mining_layout(player_data)
 	local restrictions = layout.restrictions
 
@@ -1096,6 +1097,7 @@ local function update_pole_selection(player_data)
 		if pole.filtered then goto skip_pole end
 		local is_restricted = common.is_pole_restricted(pole, restrictions)
 		local oil_available = oil_config.is_available("pole", pole_proto.name)
+		local disabled = is_oil and not oil_available or not is_oil and is_restricted
 
 		if not player_data.entity_filtering_mode and is_restricted and not oil_available then goto skip_pole end
 
@@ -1106,9 +1108,9 @@ local function update_pole_selection(player_data)
 			"[img=mpp_tooltip_category_supply_area] ", {"description.supply-area"}, (": %ix%i\n"):format(pole.supply_width, pole.supply_width),
 			" [img=tooltip-category-electricity] ", {"description.wire-reach"}, specifier:format(pole.wire),
 		}
-		if restrictions.pole_available and is_restricted and oil_available then
+		if not is_oil and is_restricted and oil_available then
 			tooltip[#tooltip+1] = "\n"
-			tooltip[#tooltip+1] = {"mpp.label_oil_only_pole", prototypes.entity[layout.defaults.pole].localised_name}
+			tooltip[#tooltip+1] = {"mpp.label_oil_only_pole"}
 		end
 
 		values:push{
@@ -1117,9 +1119,9 @@ local function update_pole_selection(player_data)
 			icon=("entity/"..pole_proto.name),
 			order=pole_proto.order,
 			filterable=true,
-			disabled=is_restricted and not oil_available,
+			disabled=disabled,
 		}
-		if pole_proto.name == choices.pole_choice then existing_choice_is_valid = true end
+		if pole_proto.name == choices.pole_choice and not disabled then existing_choice_is_valid = true end
 
 		::skip_pole::
 	end
@@ -1737,6 +1739,7 @@ local function on_gui_click(event)
 		return
 	end
 	if evt_ele_tags["mpp_action"] then
+		if evt_ele_tags.mpp_action == "pole" and not event.element.enabled then return end
 		abort_blueprint_mode(player)
 
 		local action = evt_ele_tags["mpp_action"]
