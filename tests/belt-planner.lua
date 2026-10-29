@@ -986,4 +986,130 @@ for _,rotation in ipairs{"west","north","east","south"} do
 	for _,piece in ipairs(route) do assert(not state.grid:get_tile(piece.grid_x,piece.grid_y),"fast corridor ignored its blocker") end
 	cases=cases+1
 end
+-- Successful synchronous previews can reuse the router's collision result;
+-- a later world change, failed route, native check or Apply must still reject it.
+do
+	local spec=fixture("west",1)
+	local state=assert(planner.create_state(spec,target(spec,-12,5,W),{avoid_cliffs_choice=true}))
+	state.preview_only=true;state._preview_specs={}
+	local ok,route=planner.plan(state);assert(ok)
+	local original,checks=obstacles.can_place,0
+	obstacles.can_place=function(...) checks=checks+1;return original(...) end
+	local create=builder.create_entity_builder(state,{diagnostic=true,obstacles_checked=true})
+	for _,piece in ipairs(route) do create(table.deepcopy(piece)) end
+	assert(checks==0 and #state._preview_specs==#route,"successful preview repeats route collision checks")
+	local first=state._preview_specs[1].position
+	local cliff={valid=true,type="cliff",prototype={collision_mask={layers={}}},
+		bounding_box={left_top={x=first.x-.4,y=first.y-.4},right_bottom={x=first.x+.4,y=first.y+.4}}}
+	spec.surface.find_entities_filtered=function() return {cliff} end
+	game.tick=game.tick+1
+	create(table.deepcopy(route[1]))
+	assert(checks>0 and state._preview_specs[#state._preview_specs].preview_blocked,"later tick hides new obstacle")
+	local diagnostic=builder.create_entity_builder(state,{diagnostic=true,obstacles_checked=false})
+	diagnostic(table.deepcopy(route[1]))
+	assert(state._preview_specs[#state._preview_specs].preview_blocked,"failed-route diagnostics lose blocked artwork")
+	local actual=builder.create_entity_builder(state,{obstacles_checked=true})
+	state.preview_only=false
+	actual(table.deepcopy(route[1]))
+	assert(#spec.surface.created==0,"Apply reuses a preview-only collision result")
+	state.preview_only=true
+	spec.surface.can_place_entity=function() return false end
+	local count=#state._preview_specs
+	builder.create_entity_builder(state,{obstacles_checked=true})(table.deepcopy(route[1]),true)
+	assert(#state._preview_specs==count,"prechecked route bypasses explicit native placement validation")
+	local c=state.coords
+	local pos=util.revert_world(c.gx,c.gy,state.direction_choice,route[1].grid_x,route[1].grid_y,c.tw,c.th)
+	local shared={valid=true,name="transport-belt",type="transport-belt",position={x=pos[1],y=pos[2]},
+		direction=state._preview_specs[1].direction,quality={name="legendary"}}
+	spec.surface.find_entities_filtered=function() return {shared} end
+	state.output_only=true
+	builder.create_entity_builder(state,{obstacles_checked=true})(table.deepcopy(route[1]))
+	assert(state._preview_specs[#state._preview_specs].preview_existing,"prechecked route loses shared-belt identity")
+	obstacles.can_place=original
+	cases=cases+6
+end
+
+-- Query only hazardous tiles, but preserve exact route footprints, ordering,
+-- cover choices and undo ownership, including rotated multicell entities.
+do
+	local saved_tiles=prototypes.tile
+	prototypes.tile={}
+	local function tile_proto(name,layers,cover)
+		local p={name=name,collision_mask={layers=layers},default_cover_tile=cover and {name=cover}}
+		prototypes.tile[name]=p;return p
+	end
+	local grass=tile_proto("grass-1",{ground_tile=true})
+	local water=tile_proto("water",{water_tile=true},"landfill")
+	local lava=tile_proto("lava",{lava_tile=true},"foundation")
+	local oil=tile_proto("oil-ocean-deep",{water_tile=true},"foundation")
+	local void=tile_proto("out-of-map",{out_of_map=true})
+	local modded=tile_proto("mod-liquid",{object=true},"mod-cover")
+	local space=tile_proto("se-space",{})
+	tile_proto("scaffold",{ground_tile=true})
+	local tiles,queries,reads={},0,0
+	local function add(proto,x,y) tiles[#tiles+1]={name=proto.name,prototype=proto,position={x=x,y=y}} end
+	local map=surface()
+	map.find_tiles_filtered=function(q)
+		queries=queries+1
+		local names={};for _,name in ipairs(q.name) do names[name]=true end
+		assert(not names[grass.name] and names[modded.name] and names[space.name],"landfill filter misses mod hazards or includes grass")
+		local result={}
+		for _,t in ipairs(tiles) do
+			local p=t.position
+			if names[t.name] and p.x>=q.area[1][1] and p.x<q.area[2][1] and p.y>=q.area[1][2] and p.y<q.area[2][2] then result[#result+1]=t end
+		end
+		return result
+	end
+	map.get_tile=function(p)
+		reads=reads+1
+		for _,t in ipairs(tiles) do if t.position.x==p.x and t.position.y==p.y then return t end end
+		return {name=grass.name,prototype=grass,position=p}
+	end
+	local spec=fixture("west",1,map)
+	local function new_state()
+		local s=assert(planner.create_state(spec,target(spec,-12,5,W),{}))
+		s.preview_only=true;s._preview_specs={};s.space_landfill_choice="scaffold"
+		return s
+	end
+	local function belt(x,y) return {name="entity-ghost",inner_name="transport-belt",position={x=x+.5,y=y+.5},direction=W} end
+	local long={};for x=-2500,2500 do long[#long+1]=belt(x,0) end
+	planner.place_landfill(new_state(),long)
+	assert(queries==1 and reads==0,"dry route materializes individual ground tiles")
+	add(water,0,0);add(lava,2,0);add(oil,4,0);add(water,6,0);add(void,8,0);add(modded,10,0);add(space,12,0)
+	local route={belt(2,0),belt(0,0),belt(4,0),belt(2,0),belt(8,0),belt(10,0),belt(12,0)}
+	prototype("test-wide-splitter","splitter",1)
+	prototypes.entity["test-wide-splitter"].tile_width=2
+	prototypes.entity["test-wide-splitter"].collision_box={left_top={x=-.9,y=-.4},right_bottom={x=.9,y=.4}}
+	route[#route+1]={inner_name="test-wide-splitter",position={20,.5},direction=N}
+	route[#route+1]={inner_name="test-wide-splitter",position={22.5,2},direction=E}
+	add(water,19,0);add(water,20,0);add(water,22,1);add(water,22,2)
+	local expected={"foundation:2,0","landfill:0,0","foundation:4,0","mod-cover:10,0","scaffold:12,0",
+		"landfill:19,0","landfill:20,0","landfill:22,1","landfill:22,2"}
+	local function signature(s)
+		local result={}
+		for _,g in ipairs(s._preview_specs) do result[#result+1]=g.inner_name..":"..g.position.x..","..g.position.y end
+		return table.concat(result,";")
+	end
+	local s=new_state();planner.place_landfill(s,route)
+	assert(signature(s)==table.concat(expected,";"),"landfill changes footprint, cell order, deduplication or cover")
+	planner.place_landfill(s,route)
+	assert(#s._preview_specs==#expected,"repeated route adds duplicate landfill")
+	local fallback=new_state();local query=map.find_tiles_filtered;map.find_tiles_filtered=nil
+	planner.place_landfill(fallback,route);map.find_tiles_filtered=query
+	assert(signature(s)==signature(fallback),"filtered and per-cell landfill disagree")
+	s=new_state();s.fill_water_choice=false;s.fill_lava_choice=true;s.fill_oil_ocean_choice=false;s.fill_other_choice=false
+	planner.place_landfill(s,route)
+	assert(signature(s)=="foundation:2,0","independent cover settings ignored")
+	s=new_state();s.avoid_water_choice=true;local before=queries
+	planner.place_landfill(s,route)
+	assert(#s._preview_specs==0 and queries==before,"avoid terrain scans or fills tiles")
+	add(water,24,0);s=new_state();planner.place_landfill(s,{belt(24,0)})
+	assert(signature(s)=="landfill:24,0","fresh terrain changes hidden by tile caching")
+	s=new_state();s.preview_only=false;s._collected_ghosts={}
+	planner.place_landfill(s,route)
+	assert(#map.created==#expected and #s._collected_ghosts==#expected,"landfill construction missing from Undo")
+	prototypes.tile=saved_tiles
+	cases=cases+8
+end
+
 print("Belt planner OK: "..cases.." route and preview cases")

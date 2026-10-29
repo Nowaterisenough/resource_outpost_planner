@@ -45,7 +45,7 @@ function output.refresh(data)
 	draft.issues=diagnostic and diagnostic.issues or {{position=draft.belt_target.position,reason=err}}
 	draft.specs={}
 	if state and diagnostic then
-		local create=builder.create_entity_builder(state,{diagnostic=true})
+		local create=builder.create_entity_builder(state,{diagnostic=true,obstacles_checked=err==nil})
 		for _,spec in ipairs(diagnostic.routes or {}) do create(spec) end
 		planner.place_landfill(state,diagnostic.routes)
 		draft.specs=state._preview_specs

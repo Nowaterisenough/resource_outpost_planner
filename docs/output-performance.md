@@ -781,3 +781,81 @@ Evidence: `dist/output-latency-20261028/final-results.json`, `summary.json`,
 Reproduce with `scripts/benchmark-output.py --scenario load-repeat` and
 `--scenario load-output-only`, supplying the Factorio binary, data and save paths
 as above. Add `--package /path/to/baseline.zip` for the baseline.
+
+## 2026-10-29: dense mine output terrain and duplicate validation
+
+Baseline: the locally installed, unpublished dual-sided big-drill runtime,
+archived at `dist/performance-dense-20261029/baseline.zip` (archive SHA-256
+`45e6b8d2fe407f7c8550077d0638b9527af7e21066461f484b04a68b6ccfdcd7`).
+Comparing with HEAD would also include earlier GUI, density and throughput work,
+so this round compares the packaged runtimes directly.
+
+The new `dense-repeat` fixture uses 17,965 irregularly distributed ore tiles,
+527 normal big drills in the first output snapshot, normal speed-module-3 modules,
+blue belts, four-item stacks, productivity bonus 4, poles and lamps, no beacons,
+and 24 final outputs. It measures 24 moves, rotating every sixth output, with
+roughly 18,000 entities and 30,000 sprite layers per preview. Natural entities and decoratives are disabled, and the fixture is covered with
+grass before adding ore. All runs use an
+isolated copy of the same source save.
+
+Changes:
+
+- Find hazardous tiles through one engine-filtered query over the route bounds.
+  Dry corridors stop there instead of reading every ground tile through Lua.
+  Mixed terrain is looked up by numeric tile coordinates while retaining the
+  original per-spec footprint order, cover selection and deduplication. Space
+  scaffolds and modded coverable tiles use the same terrain rules. Gaps between
+  routes are not filled. Tile data is queried afresh for each call.
+- When a successful output plan is immediately converted into preview specs,
+  reuse its selected-obstacle validation in that synchronous tick. The builder
+  still identifies shared belts/rails and honors explicit native placement
+  probes. Failed diagnostics, later ticks and actual construction validate as
+  before; the renderer retains its live placement checks. Both cached mine
+  previews and independent outputs use this path.
+
+Three sequential baseline/optimized pairs use `--timing-only`, with no other
+benchmark running concurrently. Each table entry is the median of three per-run
+measurements. Phase means overlap and must not be added together.
+
+| Measurement | Baseline | Optimized | Reduction |
+| --- | ---: | ---: | ---: |
+| Mean script work per output request | 777.25 ms | 626.33 ms | 19.4% |
+| Mean output-cache refresh work | 498.58 ms | 329.70 ms | 33.9% |
+| Mean output landfill scan | 140.96 ms | 44.84 ms | 68.2% |
+| Largest script-update pause per run | 763.19 ms | 603.39 ms | 20.9% |
+| Selected-obstacle probes across 24 requests | 719,968 | 359,984 | 50.0% |
+
+Per-run mean request times were 827.12 / 767.68 / 777.25 ms before and
+623.41 / 626.33 / 668.63 ms after. Scheduling remains two game ticks. These are
+instrumented LuaProfiler work measurements, not stopwatch click-to-screen
+latency. Rendering remains about 255 ms per request in this fixture. Routing,
+rendering and garbage collection can still cause visible stalls, particularly
+when rotating such a large output; this change does not make every placement
+instantaneous.
+
+Reproduce with `scripts/benchmark-output.py --scenario dense-repeat --timing-only`,
+passing `--package dist/performance-dense-20261029/baseline.zip` for the baseline.
+Omit `--timing-only` for entity, sprite and drawing-order comparisons. The `fill`
+scenario additionally exercises water, lava and oil-ocean output construction.
+Raw timings, snapshot comparisons and native tests are retained under
+`dist/performance-dense-20261029/`; `summary.json` records each run and digest.
+
+Validation completed on the final packaged runtime:
+
+- 63 native snapshot states match the baseline: 24 dense mine moves, 10 ordinary /
+  balanced / station / blocked outputs, three hazardous-terrain fills, 24
+  independent outputs on an applied mine, and the station preview/Apply pair.
+  Entity geometry, readiness and counts match; sprite content and order also
+  match wherever a preview is present. Fill cases retain native tile ghosts.
+- Native save/reload, five cache invalidations, cached/full-plan parity, Apply
+  and Undo pass. The placement suite also passes force modes, robot demolition,
+  existing belts/rails, copper wiring and station/output-only workflows.
+- Standalone routing/preview tests pass 342 cases, including 14 added regressions
+  for dry scanning, mixed/rotated footprints, dynamic terrain, diagnostics,
+  shared belts, next-tick changes, native checks and real construction. Search,
+  balancer flow, obstacle, cache, renderer, lifecycle, terrain, train, rail,
+  capacity and throughput suites pass; 81 Lua files pass syntax compilation.
+- The installed test archive's 143 runtime files match the working tree and the
+  runtime digest measured in all three optimized timing runs. The previous
+  archive is backed up under `before-optimization/`. The source save digest is
+  unchanged. Installation details are in `installation.json`.

@@ -172,7 +172,7 @@ function cache.refresh(state)
 		local ok,result,diagnostic=planner.plan(connection)
 		if ok then routes=result;state.balanced_output_count=connection.balanced_output_count
 		else err=result;routes=diagnostic and diagnostic.routes or {};issues=diagnostic and diagnostic.issues or {} end
-		local create=builder.create_entity_builder(connection,{diagnostic=true})
+		local create=builder.create_entity_builder(connection,{diagnostic=true,obstacles_checked=ok})
 		connection._preview_specs={}
 		for _,spec in ipairs(routes) do create(spec) end
 		planner.place_landfill(connection,routes)

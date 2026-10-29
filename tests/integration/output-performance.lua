@@ -1,5 +1,5 @@
-local perf_output=require('mpp.output_preview')
 local perf_preview=require('mpp.preview')
+local perf_output=require('mpp.output_preview')
 local perf_gui=require('gui.gui')
 local perf_conf=require('configuration')
 local perf_obstacles=require('mpp.obstacles')
@@ -7,8 +7,11 @@ local perf_planner=require('mpp.belt_planner')
 local perf_renderer=require('mpp.preview_renderer')
 local perf_station=require('mpp.train_station')
 local perf_simple=require('layouts.simple')
+local perf_cache=require('mpp.preview_output_cache')
+local perf_balancer=require('mpp.output_balancer')
 local scenario=output_performance_scenario or 'outputs'
-local load_scenario=scenario=='load' or scenario=='load-repeat' or scenario=='load-output-only'
+local dense_scenario=scenario=='dense-repeat'
+local load_scenario=scenario=='load' or scenario=='load-repeat' or scenario=='load-output-only' or dense_scenario
 local capture_snapshots=output_performance_capture~=false
 local perf_active,perf_stats,perf_calls=false,{},{}
 local function timing(label,fn,...)
@@ -31,10 +34,18 @@ local function wrap(module,name,label)
 end
 wrap(perf_obstacles,'collect','obstacle_scan')
 wrap(perf_planner,'plan','routing_total')
+wrap(perf_planner,'place_landfill','landfill')
 wrap(perf_renderer,'render','render')
 wrap(perf_station,'geometry','station_geometry')
 wrap(perf_planner,'update_blueprint','cursor')
 wrap(perf_preview,'complete','complete')
+wrap(perf_output,'refresh','output_refresh')
+wrap(perf_cache,'resume','cache_validate')
+wrap(perf_cache,'refresh','cache_refresh')
+local perf_balance_plan=perf_balancer.plan
+perf_balancer.plan=function(state,route)
+ return timing('balancer_total',perf_balance_plan,state,function(...) return timing('routing_bundle',route,...) end)
+end
 local profiled={}
 for _,layout in pairs(algorithm.layouts) do if not profiled[layout] then
  local old_tick=layout.tick
@@ -57,7 +68,11 @@ local cases={
  {name='belts-water-wall',x=-25,y=-25,dir=0,water=true},
  {name='blocked-output',x=-25,y=-25,dir=0,blocked=true},
 }
-if scenario=='large' then cases={
+if scenario=='fill' then cases={
+ {name='belts-water-fill',x=-25,y=-25,dir=0,water=true,fill=true},
+ {name='balance-lava-fill',balance=true,x=13,y=-43,dir=0,water=true,fill=true,tile='lava'},
+ {name='station-oil-fill',station=true,x=13,y=-43,dir=0,water=true,fill=true,tile='oil-ocean-deep'},
+} elseif scenario=='large' then cases={
  {name='large-belts',x=-25,y=-25,dir=0},
  {name='large-balanced',balance=true,x=13,y=-43,dir=0},
  {name='large-station',station=true,x=101,y=101,dir=0},
@@ -83,10 +98,10 @@ elseif scenario=='load' then cases={
  {name='load-moved-again',balance=true,x=-134.5,y=-14.5,dir=12},
 }
 elseif scenario=='apply' then cases={{name='station-apply',station=true,x=65,y=65,dir=0}} end
-if scenario=='load-repeat' or scenario=='load-output-only' then
+if scenario=='load-repeat' or scenario=='load-output-only' or dense_scenario then
  cases={}
  for i=1,24 do cases[#cases+1]={name='load-repeat-'..i,balance=true,
-  x=-130.5-2*((i-1)%5),y=-16.5+2*((i-1)%3),dir=i%6==0 and 0 or 12} end
+  x=(dense_scenario and -275.5 or -130.5)-2*((i-1)%5),y=-16.5+2*((i-1)%3),dir=i%6==0 and 0 or 12} end
 end
 local phase,index,player,data,surface,start_tick=0,0
 local total
@@ -123,10 +138,12 @@ local function report(name,ready,entities)
 end
 local function initialize()
  player=game.get_player(1);perf_conf.initialize_global(player.index);player.set_controller{type=defines.controllers.god}
- surface=game.create_surface('output-performance',{width=640,height=640,autoplace_controls={}})
- surface.request_to_generate_chunks({0,0},10);surface.force_generate_chunk_requests()
+ surface=game.create_surface('output-performance',{width=dense_scenario and 2048 or 640,height=dense_scenario and 2048 or 640,
+  autoplace_controls={},default_enable_all_autoplace_controls=false,
+  autoplace_settings={entity={treat_missing_as_default=false,settings={}},decorative={treat_missing_as_default=false,settings={}}}})
+ surface.request_to_generate_chunks({0,0},dense_scenario and 20 or 10);surface.force_generate_chunk_requests()
  for _,e in pairs(surface.find_entities()) do e.destroy() end
- local tiles={};for x=-300,300 do for y=-300,300 do tiles[#tiles+1]={name='grass-1',position={x,y}} end end;surface.set_tiles(tiles)
+ local tiles={};local span=dense_scenario and 600 or 300;for x=-span,span do for y=-span,span do tiles[#tiles+1]={name='grass-1',position={x,y}} end end;surface.set_tiles(tiles)
  player.teleport({-10,-10},surface);player.force.research_all_technologies()
  data=storage.players[player.index]
  local c=data.choices;c.layout_choice='simple';c.miner_choice='electric-mining-drill';c.direction_choice='north';c.belt_choice='express-transport-belt';c.pole_choice='medium-electric-pole';c.beacon_choice='none';c.module_choice='none';c.belt_merge_choice=false
@@ -142,21 +159,28 @@ local function initialize()
   c.output_balance_choice=true;c.output_belt_count_choice=8
   player.force.mining_drill_productivity_bonus=4;player.force.belt_stack_size_bonus=3
  end
+ if dense_scenario then
+  c.miner_quality_choice='normal';c.pole_quality_choice='normal';c.beacon_choice='none'
+  c.module_choice='speed-module-3';c.module_quality_choice='normal';c.belt_choice='express-transport-belt'
+  c.output_belt_count_choice=24;c.lamp_choice=true
+ end
  perf_gui.show_interface(player)
  local edge=(scenario=='large' or scenario=='move') and 63 or 23
  local resources={}
  if scenario=='irregular' or scenario=='contour' or load_scenario then
-  for x=-48,47 do for y=-37,38 do
+  local scale=dense_scenario and 2 or 1
+  for gx=-48*scale,48*scale-1 do for gy=-37*scale,39*scale-1 do
+   local x,y=gx/scale,gy/scale
    local angle=math.atan2(y/35,x/46)
    local radius=1+0.15*math.sin(angle*5)+0.09*math.cos(angle*9)
    local inside=(x/46)^2+(y/35)^2<radius*radius
    local notch=x>14 and y>4 and y<18+7*math.sin(x/9)
    local hole=(x+11)^2+(y+4)^2<25 or (x-4)^2+(y-19)^2<12
    if inside and not notch and not hole then
-    resources[#resources+1]=surface.create_entity{name='iron-ore',position={x+.5,y+.5},amount=50000}
+    resources[#resources+1]=surface.create_entity{name='iron-ore',position={gx+.5,gy+.5},amount=50000}
    end
   end end
-  assert(#resources==4508,'irregular fixture changed')
+  assert(dense_scenario and #resources==17965 or not dense_scenario and #resources==4508,'irregular fixture changed')
  else
   for x=0,edge do for y=0,edge do resources[#resources+1]=surface.create_entity{name='iron-ore',position={x+.5,y+.5},amount=50000} end end
  end
@@ -195,8 +219,8 @@ local function step()
  if phase==1 then
   index=index+1;if not cases[index] then log('OUTPUT PERF COMPLETE');phase=4;return end
   local c=cases[index];local choices=data.choices
-  choices.output_station_choice=c.station==true;choices.output_balance_choice=c.balance==true;choices.output_belt_count_choice=8;choices.output_locomotive_count_choice=2;choices.output_wagon_count_choice=c.wagons or 4;choices.output_loading_side_choice='double';choices.belt_planner_choice=true
-  local tiles={};for x=-40,40 do for y=-15,-5 do tiles[#tiles+1]={name=c.water and 'water' or 'grass-1',position={x,y}} end end;surface.set_tiles(tiles);choices.terrain_mode_choice=c.water and 'avoid' or 'fill';choices.deconstruction_choice=c.blocked==true
+  choices.output_station_choice=c.station==true;choices.output_balance_choice=c.balance==true;choices.output_belt_count_choice=dense_scenario and 24 or 8;choices.output_locomotive_count_choice=2;choices.output_wagon_count_choice=c.wagons or 4;choices.output_loading_side_choice='double';choices.belt_planner_choice=true
+  local tiles={};for x=-40,40 do for y=-15,-5 do tiles[#tiles+1]={name=c.water and (c.tile or 'water') or 'grass-1',position={x,y}} end end;surface.set_tiles(tiles);choices.terrain_mode_choice=c.water and not c.fill and 'avoid' or 'fill';choices.deconstruction_choice=c.blocked==true
   if c.blocked then for x=-27,-21 do for y=-28,-23 do surface.create_entity{name='steel-chest',position={x+.5,y+.5},force=player.force} end end end
   if (scenario=='move' or load_scenario) and index>1 then phase=2;return end
   data.preview.belt_target=nil;perf_preview.request(data);phase=2;return

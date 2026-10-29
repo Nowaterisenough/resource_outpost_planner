@@ -57,6 +57,7 @@ end
 ---@class EntityBuilderOptions
 ---@field do_deconstruction boolean?
 ---@field diagnostic boolean? Capture rejected entities for a failed preview without changing the world or grid
+---@field obstacles_checked boolean? Successful output plan checked these specs synchronously in this tick (preview only)
 
 --- Builder for a convenience function that automatically translates
 --- internal grid state for a surface.create_entity call
@@ -65,6 +66,9 @@ end
 ---@return EntityBuilderFunction
 function builder.create_entity_builder(state, opts)
 	opts = opts or {}
+	-- Only callers immediately materializing a successful preview route can
+	-- reuse its obstacle checks. Apply and later ticks always validate again.
+	local checked_tick=opts.obstacles_checked and state.preview_only and game.tick
 	local c = state.coords
 	local grid = state.grid
 	local DIR = state.direction_choice
@@ -92,7 +96,7 @@ function builder.create_entity_builder(state, opts)
 		ghost.direction=direction_conv[ghost.direction or defines.direction.north]
 		local shared=obstacles.shared_entity(state,ghost.inner_name,{x=position[1],y=position[2]},ghost.direction,ghost.quality)
 		ghost.preview_existing=shared~=nil or nil
-		if not shared and not obstacles.can_place(state,ghost.inner_name,
+		if not shared and not (state.preview_only and checked_tick and checked_tick==game.tick) and not obstacles.can_place(state,ghost.inner_name,
 			{x=position[1],y=position[2]},ghost.direction) then
 			state._obstacle_skipped = (state._obstacle_skipped or 0) + 1
 			if not (opts.diagnostic and state.preview_only) then return end
