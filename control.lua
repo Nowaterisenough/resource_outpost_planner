@@ -208,7 +208,15 @@ end
 
 script.on_event(defines.events.on_player_cursor_stack_changed, cursor_stack_check)
 
-script.on_event(defines.events.on_player_changed_surface, cursor_stack_check)
+script.on_event(defines.events.on_player_changed_surface, function(event)
+	cursor_stack_check(event)
+	local player = game.get_player(event.player_index)
+	if player then gui.update_terrain_warnings(player) end
+end)
+script.on_event(defines.events.on_player_changed_force, function(event)
+	local player = game.get_player(event.player_index)
+	if player then gui.update_terrain_warnings(player) end
+end)
 
 local function toggle_interface(event)
 	local player = game.get_player(event.player_index)
@@ -230,8 +238,17 @@ script.on_event(defines.events.on_lua_shortcut, function(event)
 	if event.prototype_name == "resource-outpost-planner-shortcut" then toggle_interface(event) end
 end)
 
+local function refresh_terrain_research(force)
+	for _, player in pairs(force.players) do gui.update_terrain_warnings(player) end
+end
+
+script.on_event(defines.events.on_research_reversed, function(event)
+	refresh_terrain_research(event.research.force)
+end)
+
 script.on_event(defines.events.on_research_finished, function(event)
 	---@cast event EventData.on_research_finished
+	refresh_terrain_research(event.research.force)
 	local effects = event.research.prototype.effects
 	local qualities_to_unhide = List()
 	for _, effect in pairs(effects) do

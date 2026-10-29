@@ -15,6 +15,7 @@ local belt_planner = require("mpp.belt_planner")
 local train_station = require("mpp.train_station")
 local conf = require("configuration")
 local belt_capacity = require("mpp.belt_capacity")
+local fill_warnings = require("mpp.fill_warnings")
 
 local layouts = algorithm.layouts
 
@@ -1250,6 +1251,23 @@ local function update_beacon_selection(player_data)
 		"beacon_module_quality",mpp_util.quality_list())
 end
 
+function gui.update_terrain_warnings(player)
+	local data = storage.players[player.index]
+	local selections = data and data.gui and data.gui.selections and data.gui.selections.misc
+	if not selections or not selections.fill_water or not selections.fill_water.valid then return end
+	local warnings = fill_warnings.for_player(player, data.choices)
+	for _, name in ipairs{"fill_water", "fill_lava", "fill_oil_ocean", "fill_other"} do
+		local control = selections[name]
+		if control and control.valid then
+			local warning = warnings[name.."_choice"]
+			control.caption = warning and {"mpp.fill_research_warning_caption", {"mpp.preference_"..name}}
+				or {"mpp.preference_"..name}
+			control.tooltip = mpp_util.wrap_tooltip(warning and {"", {"mpp.choice_"..name}, "\n\n", warning}
+				or {"mpp.choice_"..name})
+		end
+	end
+end
+
 local function update_misc_selection(player)
 	local player_data = storage.players[player.index]
 	local choices = player_data.choices
@@ -1367,6 +1385,7 @@ local function update_misc_selection(player)
 		for key, button in pairs(player_data.gui.selections.misc) do selections[key]=button end
 	end
 	player_data.gui.selections.misc = selections
+	gui.update_terrain_warnings(player)
 end
 
 ---@param player_data PlayerData

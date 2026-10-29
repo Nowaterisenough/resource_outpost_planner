@@ -8,12 +8,16 @@ end
 local tile_choices = {"fill_water_choice", "fill_lava_choice", "fill_oil_ocean_choice", "fill_other_choice"}
 terrain.tile_choices = tile_choices
 
+function terrain.fill_setting(tile)
+	local name, layers = tile.name, tile.prototype.collision_mask.layers
+	return (layers.lava_tile or name:find("lava", 1, true)) and "fill_lava_choice"
+		or (name:find("oil-ocean", 1, true) or name:find("lightning", 1, true)) and "fill_oil_ocean_choice"
+		or layers.water_tile and "fill_water_choice" or "fill_other_choice"
+end
+
 function terrain.avoid_tiles(choices, tile)
 	if tile then
-		local name, layers = tile.name, tile.prototype.collision_mask.layers
-		local setting = (layers.lava_tile or name:find("lava", 1, true)) and "fill_lava_choice"
-			or (name:find("oil-ocean", 1, true) or name:find("lightning", 1, true)) and "fill_oil_ocean_choice"
-			or layers.water_tile and "fill_water_choice" or "fill_other_choice"
+		local setting = terrain.fill_setting(tile)
 		if choices[setting] ~= nil then return choices[setting] ~= true end
 	else
 		local independent = false

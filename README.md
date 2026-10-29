@@ -105,3 +105,5 @@ Based on **Mining Patch Planner** by **Rimbas**, with the planning engine from *
 Repository: [Nowaterisenough/resource_outpost_planner](https://github.com/Nowaterisenough/resource_outpost_planner).
 
 Run `python3 scripts/test-placement.py --factorio <binary> --data <game-data> --save <fixture.zip>` to verify shared facility/tree/rock cleanup, ordinary and forced copper connections, mixed qualities, existing electric networks, ghost revival, shoreline beacons, output-only placement and Undo in an isolated save copy.
+
+Fill options warn when their materials’ crafting recipes are locked, but remain selectable and allow preview/apply. Lava and oil oceans use foundation; Aquilo oceans use ice platforms through **Fill water**. Actual construction requires materials. Run `--suite terrain-warnings` to verify live research warnings and editable controls.
