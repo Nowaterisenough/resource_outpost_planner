@@ -715,3 +715,69 @@ To compare an unpublished baseline, first keep its installable archive and pass
 `--ref` are mutually exclusive. Detailed samples are retained under
 `dist/performance-preview-round2-20261013/repeat-timing/`, with native comparisons
 in `correctness/` and persistence results in `native/`.
+
+
+## 2026-10-28: output-click latency and perpendicular routing
+
+Baseline: the working-tree package installed after the compact capacity-row and
+power-coverage checks, including all earlier uncommitted GUI/terrain changes.
+SHA-256: `fd6ab57629cca44d0f07c7be3288def1002f46ab21fff1a3e00479c86145443d`.
+This comparison isolates the subsequent output-click optimizations.
+
+The fixture has 4508 ore tiles, legendary big mining drills, beacons, an eight-belt
+output budget and 24 output moves/rotations. `load-repeat` keeps the mine in preview;
+`load-output-only` first applies the mine, then moves its independent output preview.
+All cases report ready. Measurements use the same harness and source save in isolated
+Factorio processes; the original save is not changed.
+
+| Scenario | Before request-to-ready ticks | After ticks | Before script time | After script time |
+| --- | ---: | ---: | ---: | ---: |
+| Mine preview, all 24 placements | 9 | 2 | 71.42 ms | 59.37 ms |
+| Mine preview, perpendicular middle-band cases | 9 | 2 | 125.86 ms | 68.09 ms |
+| Applied mine, all 24 independent output previews | 8 | 1 | 56.05 ms | 36.90 ms |
+| Applied mine, perpendicular middle-band cases | 8 | 1 | 121.29 ms | 38.72 ms |
+
+Mine-preview timings are medians of the per-run means over three alternating
+before/after rounds. Applied-mine timings are from one before/after pair. The primary
+24-case run means were before 69.47, 73.84, 71.42
+ms and after 63.28, 59.37, 58.50 ms.
+Script time is accumulated LuaProfiler work, not wall-clock click latency.
+At 60 UPS, removing seven idle scheduling ticks removes about 117 ms of fixed wait;
+slow frames or reduced UPS still add latency. The next-tick route and subsequent
+render are kept on separate ticks for the cached mine preview.
+
+Changes:
+
+- Discrete output clicks refresh next tick. Rapid configuration edits retain their
+  eight-tick debounce, and duplicate held clicks still do not cancel/restart work.
+- Perpendicular output bands use verified direct bends or nested U corridors,
+  including bands cutting through the source rows. Each proposed cell is checked
+  against planned entities, earlier lanes, selected obstacles and balancer geometry.
+  A blocked candidate falls back to the existing search.
+- Empty-ground route probes use the obstacle index before asking the engine for
+  an existing reusable belt. Overlapping belts still require direction/quality matching.
+
+For the first rotated case, placement probes decreased from 4830 to 1632, and
+shared-entity checks from 5646 to 816. Its entity count stayed at 2091 for the full
+preview and 816 for the independent output preview. The 20 unrotated cases in each
+workflow retain identical entity geometry, sprite content and sprite order.
+The four rotated cases use the new corridors and retain the same entity count.
+
+Validation:
+
+- 328 belt routing/preview cases, including 28 new four-direction corridor,
+  search-size and obstruction-fallback regressions.
+- 123 search oracle/budget checks; 205 obstacle checks, including empty-ground
+  query avoidance and native existing-belt direction/quality reuse.
+- 14054 balancer flow/pairing checks; preview lifecycle/cache/renderer, terrain,
+  ore filtering, locales and whitespace checks pass.
+- Native save/reload, five cache invalidations, cached/full-plan parity, Apply and Undo pass.
+- Native placement, existing facilities, robot demolition, copper wiring,
+  output-only workflow and station/rail checks pass.
+
+Evidence: `dist/output-latency-20261028/final-results.json`, `summary.json`,
+`final/`, `native-cache/` and `native-placement/`.
+
+Reproduce with `scripts/benchmark-output.py --scenario load-repeat` and
+`--scenario load-output-only`, supplying the Factorio binary, data and save paths
+as above. Add `--package /path/to/baseline.zip` for the baseline.

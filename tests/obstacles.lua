@@ -121,4 +121,27 @@ assert(shape_reads==4,"prototype shape is recomputed for every route cell")
 prototypes.entity.machine={tile_width=2,tile_height=3,collision_box=box(-.7,-1.1,.9,1.4),has_flag=function() return true end}
 local free=obstacles.entity_box("machine",{x=2.2,y=3.2},0)
 assert(math.abs(free.left_top.x-1.5)<1e-9 and math.abs(free.left_top.y-2.1)<1e-9,"off-grid geometry or prototype replacement uses stale offsets")
+-- Empty output corridors need no per-cell engine lookup. A real overlapping
+-- belt still needs direction/quality matching before it can be reused.
+do
+	local native_queries,existing=0,{}
+	local proto={type="transport-belt",tile_width=1,tile_height=1,collision_box=box(-.4,-.4,.4,.4),
+		collision_mask={layers={object=true}},has_flag=function() return false end}
+	prototypes.entity["test-belt"]=proto
+	local map={find_tiles_filtered=function() return {} end,find_entities_filtered=function(query)
+		if query.position then native_queries=native_queries+1 end
+		return existing
+	end}
+	local state={surface=map,coords={x1=0,y1=0,x2=10,y2=10},player={index=1,force={}},output_only=true,remove_entities_choice=false}
+	for x=1,20 do assert(obstacles.can_place(state,"test-belt",{x=x+.5,y=.5},0)) end
+	assert(native_queries==0,"empty output probes query the engine for existing belts")
+	existing[1]={valid=true,name="test-belt",type="transport-belt",position={x=.5,y=.5},direction=0,
+		quality={name="normal"},prototype=proto,bounding_box=box(.1,.1,.9,.9)}
+	game.tick=game.tick+1
+	assert(obstacles.can_place(state,"test-belt",{x=.5,y=.5},0),"matching placed belt no longer reusable")
+	assert(not obstacles.can_place(state,"test-belt",{x=.5,y=.5},4),"opposing existing belt treated as reusable")
+	state.belt_quality_choice="legendary"
+	assert(not obstacles.can_place(state,"test-belt",{x=.5,y=.5},0),"existing belt quality is ignored")
+	cases=cases+4
+end
 print("Obstacles OK: "..cases.." collision comparisons, engine entity/terrain filters, local queries and scan bounds")

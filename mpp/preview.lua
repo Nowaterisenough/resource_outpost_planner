@@ -124,7 +124,8 @@ function preview.request(data,output_change)
 	draft.ready=false
 	draft.error=nil
 	draft.warning=nil
-	draft.refresh_at=game.tick+8
+	-- Output clicks are discrete commands; only rapidly edited settings need debouncing.
+	draft.refresh_at=game.tick+(output_change and 1 or 8)
 	preview.update_gui(data)
 	script.on_event(defines.events.on_tick,task_runner_handler)
 end

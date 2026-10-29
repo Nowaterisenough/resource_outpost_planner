@@ -124,6 +124,7 @@ assert(calls.render==0 and calls.validation==0 and calls.commit==0 and overlays[
 draft=fixture()
 preview.request(data)
 assert(data.gui.preview_status.visible and data.gui.preview_status.caption[1]=="mpp.preview_updating","output recalculation has no visible feedback")
+assert(draft.refresh_at==game.tick+8,"rapid settings edits lost their debounce")
 preview.complete(state{entities=draft.resources,preview_only=true,preview_revision=draft.revision})
 assert(not data.gui.preview_status.visible,"successful preview retained a stale error/progress label")
 draft=fixture()
@@ -131,6 +132,7 @@ draft.belt_specification={count=26,minimum_output_count=23}
 data.choices.output_balance_choice=true;data.choices.output_belt_count_choice=8
 preview.request(data,true)
 assert(not draft.error and draft.refresh_at and data.gui.preview_status.visible,"fixed output count blocks layout replanning")
+assert(draft.refresh_at==game.tick+1,"output click retains the settings debounce delay")
 local capped=state{entities=draft.resources,preview_revision=draft.revision}
 capped.preview_warning={"mpp.belt_capacity_outputs",8,"63.6"}
 preview.complete(capped)

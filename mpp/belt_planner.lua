@@ -583,6 +583,13 @@ local function route_bundle(state, reverse, negotiate, outer_corridor, backward_
 		x1,y1=min(x1,start.x,finish.x),min(y1,start.y,finish.y)
 		x2,y2=max(x2,start.x,finish.x),max(y2,start.y,finish.y)
 	end
+	local perpendicular_backwards=0
+	if (dir==NORTH or dir==SOUTH) and output_y1==output_y2 then
+		local dy=util.direction_coord[dir].y
+		for i=1,spec.count do
+			if (sources[i].y-(outputs[i].y-dy))*dy>0 then perpendicular_backwards=perpendicular_backwards+1 end
+		end
+	end
 	local middle_turn_ranks
 	if dir==WEST and exit_x<source_left and output_y2>=spec[1].y and output_y1<=spec[spec.count].y then
 		local ordered,south_rank=true,0
@@ -692,6 +699,22 @@ local function route_bundle(state, reverse, negotiate, outer_corridor, backward_
 				if approach.x>=column then
 					route=straight_segments({{x=start.x-1,y=start.y},{x=column,y=start.y},
 						{x=column,y=approach.y},approach},allowed)
+				end
+			end
+			-- Perpendicular ports in front of the mine use a direct bend or nested U turns.
+			-- The output band can cut through the source rows; validate each corridor before
+			-- falling back to search, including earlier lanes and the balancer footprint.
+			if not corners and approach.x<source_left and output_y1==output_y2 and (dir==NORTH or dir==SOUTH) then
+				if (start.y-approach.y)*delta.y<=0 then
+					route=straight_segments({{x=start.x-1,y=start.y},{x=approach.x,y=start.y},approach},allowed)
+				else
+					local rank=dir==NORTH and i-1 or spec.count-i
+					local column=source_left-perpendicular_backwards+rank
+					local row=approach.y-delta.y*rank
+					if approach.x<column then
+						route=straight_segments({{x=start.x-1,y=start.y},{x=column,y=start.y},
+							{x=column,y=row},{x=approach.x,y=row},approach},allowed)
+					end
 				end
 			end
 			-- A perpendicular outlet needs nested bends; the nearest lane must leave room for the outer lanes.

@@ -960,4 +960,30 @@ do
 	station.geometry=original_geometry
 	cases=cases+2
 end
+-- Perpendicular output bands both outside and through the middle of a large mine.
+-- Each independent lane must reach its own port without search expanding into open ground.
+for _,rotation in ipairs{"west","north","east","south"} do
+	for _,dir in ipairs{N,S} do for _,y in ipairs{-20,38,100} do
+		local spec=fixture(rotation,8)
+		for i,belt in ipairs(spec) do belt.x_start=-8;belt.y=({3,17,24,38,45,52,60,73})[i] end
+		local state=assert(planner.create_state(spec,target(spec,-82,y,dir),{}))
+		local original,probes=obstacles.can_place,0
+		obstacles.can_place=function(...) probes=probes+1;return original(...) end
+		local ok,route=planner.plan(state)
+		obstacles.can_place=original
+		assert(ok,"perpendicular output corridor failed")
+		verify(state,route)
+		assert(probes<=#route+64,"open perpendicular output expands into a broad search")
+		cases=cases+1
+	end end
+	local spec=fixture(rotation,8)
+	for i,belt in ipairs(spec) do belt.x_start=-8;belt.y=({3,17,24,38,45,52,60,73})[i] end
+	local state=assert(planner.create_state(spec,target(spec,-82,38,N),{}))
+	state.grid={get_tile=function(_,x,y) if x==-40 and y==45 then return {built_thing="obstacle"} end end}
+	local ok,route=planner.plan(state)
+	assert(ok,"blocked fast corridor did not fall back to routing")
+	verify(state,route)
+	for _,piece in ipairs(route) do assert(not state.grid:get_tile(piece.grid_x,piece.grid_y),"fast corridor ignored its blocker") end
+	cases=cases+1
+end
 print("Belt planner OK: "..cases.." route and preview cases")

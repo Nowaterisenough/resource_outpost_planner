@@ -1,3 +1,4 @@
+local perf_output=require('mpp.output_preview')
 local perf_preview=require('mpp.preview')
 local perf_gui=require('gui.gui')
 local perf_conf=require('configuration')
@@ -7,7 +8,7 @@ local perf_renderer=require('mpp.preview_renderer')
 local perf_station=require('mpp.train_station')
 local perf_simple=require('layouts.simple')
 local scenario=output_performance_scenario or 'outputs'
-local load_scenario=scenario=='load' or scenario=='load-repeat'
+local load_scenario=scenario=='load' or scenario=='load-repeat' or scenario=='load-output-only'
 local capture_snapshots=output_performance_capture~=false
 local perf_active,perf_stats,perf_calls=false,{},{}
 local function timing(label,fn,...)
@@ -82,7 +83,7 @@ elseif scenario=='load' then cases={
  {name='load-moved-again',balance=true,x=-134.5,y=-14.5,dir=12},
 }
 elseif scenario=='apply' then cases={{name='station-apply',station=true,x=65,y=65,dir=0}} end
-if scenario=='load-repeat' then
+if scenario=='load-repeat' or scenario=='load-output-only' then
  cases={}
  for i=1,24 do cases[#cases+1]={name='load-repeat-'..i,balance=true,
   x=-130.5-2*((i-1)%5),y=-16.5+2*((i-1)%3),dir=i%6==0 and 0 or 12} end
@@ -160,11 +161,21 @@ local function initialize()
   for x=0,edge do for y=0,edge do resources[#resources+1]=surface.create_entity{name='iron-ore',position={x+.5,y+.5},amount=50000} end end
  end
  assert(perf_preview.select{player_index=player.index,surface=surface,entities=resources})
- phase=1
+ phase=scenario=='load-output-only' and 6 or 1
 end
 local function step()
  if phase==0 then initialize();return end
  if phase==4 then return end
+ if phase==6 then
+  if data.preview.refresh_at or #storage.tasks>0 then return end
+  assert(data.preview.ready and perf_preview.apply(data),'initial mine Apply failed')
+  phase=7;return
+ end
+ if phase==7 then
+  if data.preview or #storage.tasks>0 then return end
+  assert(perf_output.begin(data,player),'applied mine output did not start')
+  phase=1;return
+ end
  if phase==5 then
   if data.preview or #storage.tasks>0 then return end
   perf_active=false
@@ -191,7 +202,7 @@ local function step()
   data.preview.belt_target=nil;perf_preview.request(data);phase=2;return
  end
  if phase==2 then
-  assert(data.preview.ready,'base mining preview failed')
+  assert(data.preview.ready or data.preview.output_only,'base mining preview failed')
   perf_preview.give_belt_planner(data)
   local c=cases[index];perf_stats={};perf_calls={};perf_active=true;total=helpers.create_profiler(true);start_tick=game.tick
   timing('click',perf_preview.set_belt_target,data,{position={x=c.x,y=c.y},direction=c.dir,mirror=c.mirror})

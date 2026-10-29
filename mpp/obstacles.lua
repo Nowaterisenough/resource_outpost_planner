@@ -164,8 +164,10 @@ function obstacles.can_place(state, name, position, direction)
 	-- The router still checks planned entities and lane connectivity itself.
 	if state._force_build_mode and state._belt_routing then return true end
 	if not obstacles.active(state) then return true end
-	if obstacles.shared_entity(state,name,position,direction,state.belt_quality_choice) then return true end
-	return not obstacles.blocked_box(obstacles.get(state), obstacles.entity_box(name,position,direction))
+	-- Most route probes are empty ground. Only query the engine for a reusable
+	-- entity when the broad phase actually found an obstruction at this position.
+	if not obstacles.blocked_box(obstacles.get(state), obstacles.entity_box(name,position,direction)) then return true end
+	return obstacles.shared_entity(state,name,position,direction,state.belt_quality_choice)~=nil
 end
 
 function obstacles.mark_grid(state)
