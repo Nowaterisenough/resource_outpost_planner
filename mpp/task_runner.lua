@@ -122,6 +122,12 @@ function task_runner.mining_patch_task(state)
 				cliff_mode_choice = state.cliff_mode_choice,
 				terrain_mode_choice = state.terrain_mode_choice,
 				remove_entities_choice = state.remove_entities_choice,
+				remove_trees_choice = state.remove_trees_choice,
+				remove_rocks_choice = state.remove_rocks_choice,
+				fill_water_choice = state.fill_water_choice,
+				fill_lava_choice = state.fill_lava_choice,
+				fill_oil_ocean_choice = state.fill_oil_ocean_choice,
+				fill_other_choice = state.fill_other_choice,
 				_render_objects = state._render_objects,
 				_lane_info_rendering = state._lane_info_rendering,
 			}

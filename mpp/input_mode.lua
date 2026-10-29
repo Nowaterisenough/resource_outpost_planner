@@ -44,7 +44,7 @@ function input_mode.update_gui(data)
 	local applying = data.preview and data.preview.applying
 	for mode, button in pairs{select=ui.select_tool, output=ui.output_tool} do
 		if button.valid then
-			button.style = data.input_mode == mode and "mpp_tool_button_active" or "button"
+			button.style = data.input_mode == mode and "mpp_tool_button_active" or "mpp_tool_button"
 			button.enabled = not applying and (mode == "select"
 				or input_mode.output_specification(data, game.get_player(button.player_index)) ~= nil)
 		end

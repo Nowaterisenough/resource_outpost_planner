@@ -147,6 +147,9 @@ function config.get(player_data)
 			end
 			shared.terrain_mode_choice = data.add_landfill == false and "avoid" or "fill"
 			shared.remove_entities_choice = data.remove_existing == true
+			for _, setting in ipairs(terrain.tile_choices) do shared[setting] = data.add_landfill ~= false end
+			shared.remove_trees_choice = shared.remove_entities_choice
+			shared.remove_rocks_choice = shared.remove_entities_choice
 		end
 		data.shared_choices_version = 1
 	end

@@ -12,6 +12,7 @@ function gui.update(player, player_data, root, helpers)
 		if section.name == "heat-pipe" then target.clear() end
 		local group = target.add{type="flow", direction="vertical", style="mpp_section"}
 		group.style.natural_width = 0
+		group.add{type="label",caption={"mpp-oil.settings_"..section.name.."_label"},style="subheader_caption_label"}
 		local values = {}
 		for _, proto in ipairs(section.values) do
 			values[#values + 1] = {value=proto.name, icon="entity/"..proto.name,

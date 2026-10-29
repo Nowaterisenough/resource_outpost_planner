@@ -1,3 +1,4 @@
+local terrain_options_test=require("mpp.terrain")
 -- Reproducible visual regression resembling the user's long Vulcanus ore patch.
 local shore_obstacles=require("mpp.obstacles")
 local shore_started=false
@@ -46,6 +47,8 @@ local function shore_start()
  c.belt_merge_choice=true;c.belt_load_min_choice=.8;c.belt_load_max_choice=1.1
  c.belt_planner_choice=true;c.output_balance_choice=true;c.output_belt_count_choice=8;c.output_station_choice=false
  c.terrain_mode_choice="avoid";c.cliff_mode_choice="avoid";c.remove_entities_choice=false;c.statistics_choice=true
+ for _,key in ipairs(terrain_options_test.tile_choices) do c[key]=false end
+ c.remove_trees_choice=false;c.remove_rocks_choice=false
  c.lamp_choice=false;c.force_pipe_placement_choice=false
  storage.shoreline_scene={phase="mine",surface=s,resources=resources,report={ore_tiles=#resources}}
  gui.show_interface(p)

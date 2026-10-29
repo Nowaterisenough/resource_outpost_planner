@@ -10,7 +10,7 @@ Plan mining patches and oil outposts in one interface. Select resources, inspect
 - Plan mining drills, belts, underground belts, poles, lamps, beacons, modules and fluid inputs, with mining blueprint templates.
 - Plan pumpjacks, pipe networks, poles, beacons, qualities and heating on cold surfaces.
 - Place beacon rows on both sides of drill columns, with independent drill and beacon modules. Keep useful towers, adjust blocked rows along their length and omit optional towers without a feasible position; production uses actual retained coverage.
-- Choose cliff avoidance or removal, and water/lava/lightning-pool avoidance or filling. Unsafe connections stay visible in red so you can adjust the plan.
+- Use independent checkboxes for cliff removal, filling water/lava/oil oceans, and removing facilities/trees/rocks. Unsafe connections stay visible in red so you can adjust the plan.
 - Position belt outputs with a native blueprint cursor; rotate with **R / Shift+R**. Same-facing connections turn along the equipment boundary to keep the footprint compact.
 - Enable **Balance Outputs** when needed for railway loading. It starts disabled with **8** output belts for four cargo wagons loaded on both sides; choose 1 to 32 outputs and position the balancer with **Output**. Blocked sections turn red.
 - Enable **Auto merge / split** in Output and set a load range, defaulting to **0.8–1.0**; **1.1 means 110% belt load**. Merge underloaded belts and split overloaded drill rows using actual equipment, beacon coverage, productivity and stacking.
@@ -24,7 +24,7 @@ Plan mining patches and oil outposts in one interface. Select resources, inspect
 - Preview rendering reuses connection shapes, collision bounds and positions to reduce temporary allocations and pauses.
 - Select equipment qualities with compact icons below each picker. **Statistics** combines placement reports and belt load overlays.
 - Apply the plan to place construction ghosts, or cancel the current preview. Reselecting resources clears the planner's latest unfinished plan and old overlays, retaining completed buildings and other plans.
-- **Clear** controls facilities, trees and rocks together: enable it to mark obstructions for deconstruction when applying; disable it to retain and avoid all three. Cliffs and terrain follow their own settings. New pole ghosts receive copper wires and can connect to nearby existing poles within quality-dependent wire reach.
+- **Remove facilities**, **Remove trees** and **Remove rocks** independently control deconstruction on ordinary Apply. Remove facilities also applies to Force apply. Cliffs and terrain follow their own settings. New pole ghosts receive copper wires and can connect to nearby existing poles within quality-dependent wire reach.
 - Use **Force apply** or **Shift-click Apply** for native forced placement. **Ctrl-click Force apply** or **Ctrl+Shift-click Apply** also marks conflicting buildings for removal. Blocked outputs are replanned coherently; skipped pieces are counted and marked red for 10 seconds. Undo includes new ghosts and deconstruction orders.
 
 ## How To Use
@@ -63,7 +63,7 @@ Belt balancer layouts use **Raynquist's** designs from [Dogmai's balancer collec
 - 采矿支持矿机、传送带、地下传送带、电杆、灯光、插件塔、插件、流体输入和蓝图模板。
 - 油田支持抽油机、管网、电杆、插件塔、实体品质和寒冷星球供热。
 - 在矿机两侧摆放插件塔排，设备内插件和塔内插件分别配置。只保留覆盖实际矿机的塔，受阻时尝试沿列微调，仍无法放置的辅助塔会省略；产量按实际保留的覆盖计算。
-- 悬崖可选择避让或拆除，水、岩浆、雷池可选择避让或填补；无法连通的位置保留红色预览，方便调整。
+- 悬崖拆除、水域／岩浆／雷池填补，以及设施／树木／岩石清理分别独立勾选；无法连通的位置保留红色预览，方便调整。
 - 用原生蓝图光标放置传送带出口，按 **R / Shift+R** 旋转；同向出口优先贴着设备轮廓转弯，压紧占地。
 - 接火车时可开启 **均分输出**：默认关闭，路数默认 **8**，适合 4 节货厢双面上货；可修改为 1 至 32 路，用 **输出** 放置均分器，受阻部分显示红色。
 - 在输出区域开启 **自动并带/分带**，设置负载范围，默认 **0.8–1.0**；**1.1 表示 110% 传送带负载**。根据实际设备、插件塔覆盖、采矿产能和堆叠能力，合并低负载传送带并拆分过载矿机行。
@@ -78,7 +78,7 @@ Belt balancer layouts use **Raynquist's** designs from [Dogmai's balancer collec
 - 品质使用设备下方的小图标选择；**统计** 合并放置报告和传送带负载显示。
 - 点击应用后才生成建设蓝图；重新选区会清掉本规划器上次未施工的规划和旧叠层，保留已建成设备和其他规划。
 
-- **清障** 统一控制已有设施、树木和岩石：勾选后，普通应用会标记遮挡布局的三类实体拆除并放置虚影；未勾选则全部保留并避让。悬崖与水域由各自选项控制。电线杆虚影自动连接铜线，并按各自品质线长接入附近已有电杆。
+- **清除设施**、**清除树木**、**清除岩石** 分别控制普通应用时对应障碍的拆除；清除设施同样适用于强制应用。悬崖与水域由各自选项控制。电线杆虚影自动连接铜线，并按各自品质线长接入附近已有电杆。
 - 点击 **强制应用** 或 **Shift 点击应用** 使用原生强制放置；**Ctrl 点击强制应用** 或 **Ctrl+Shift 点击应用** 还会标记冲突建筑拆除。受阻输出会先重新规划，未放下的位置提示数量并标红 10 秒；撤销包含新增虚影及拆除命令。
 
 ## 使用方法

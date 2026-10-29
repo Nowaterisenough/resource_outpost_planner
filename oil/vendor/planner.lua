@@ -206,7 +206,7 @@ local function AddLandfillUnder(args)
 
     for _, tile in pairs(tiles)
     do
-      if tile.name == "out-of-map"
+      if tile.name == "out-of-map" or terrain.blocks_tile(tile, args.terrain_choices or {})
       then
         goto skip_tile
       end

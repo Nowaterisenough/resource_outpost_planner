@@ -24,27 +24,6 @@ default_style.mpp_auto_resource_label = {
 	font_color={0.72,0.72,0.72}, bottom_margin=8,
 }
 
-default_style.mpp_setting_cell = {
-	type = "vertical_flow_style",
-	parent = "vertical_flow",
-	vertical_spacing = 1,
-	horizontal_align = "center",
-	natural_width = 40,
-}
-
-default_style.mpp_setting_caption = {
-	type = "label_style",
-	parent = "label",
-	single_line = false,
-	font = "default-small",
-	font_color = {0.82, 0.82, 0.82},
-	horizontal_align = "center",
-	minimal_width = 40,
-	maximal_width = 40,
-	minimal_height = 40,
-	maximal_height = 40,
-}
-
 --- taken from flib
 default_style.mpp_selected_frame_action_button = {
 	type = "button_style",
@@ -71,6 +50,9 @@ default_style.mpp_blueprint_mode_button = {
 
 default_style.mpp_tool_button_active = table.deepcopy(default_style.mpp_selected_frame_action_button)
 default_style.mpp_tool_button_active.parent = "button"
+default_style.mpp_tool_button_active.width = 108
+default_style.mpp_tool_button_active.height = 32
+default_style.mpp_tool_button = {type="button_style", parent="button", width=108, height=32}
 
 default_style.mpp_blueprint_mode_button_active = {
 	type = "button_style",
@@ -208,4 +190,23 @@ default_style.mpp_label_warning_style = {
 	single_line = false,
 	horizontally_squashable = "on",
 	horizontally_stretchable = "on",
+}
+
+-- Native shallow frame and controls, with compact content-sized columns.
+default_style.mpp_settings_scroll = {
+	type="scroll_pane_style", parent="scroll_pane", padding=0, extra_padding_when_activated=0,
+}
+default_style.mpp_settings_group_column = {
+	type="vertical_flow_style", parent="vertical_flow", width=364, vertical_spacing=12,
+}
+default_style.mpp_preference_row = {
+	type="horizontal_flow_style", parent="horizontal_flow",
+	horizontal_spacing=8, vertical_align="center",
+}
+default_style.mpp_preference_label = {
+	type="label_style", parent="label", width=160,
+}
+default_style.mpp_settings_hint = {
+	type="label_style", parent="label", font="default-small", single_line=false,
+	maximal_width=360, font_color={0.7,0.7,0.7},
 }

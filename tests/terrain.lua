@@ -122,4 +122,27 @@ saved.choices.remove_entities_choice = "false"
 storage = {players={[1]=saved}}
 configuration.update_player_data(1)
 check(storage.players[1].choices.remove_entities_choice == true, "invalid choice type bypasses default")
+
+for mask=0,127 do
+	local c={cliff_mode_choice="avoid",terrain_mode_choice="avoid",remove_entities_choice=mask%2==1,
+		remove_trees_choice=math.floor(mask/2)%2==1,remove_rocks_choice=math.floor(mask/4)%2==1,
+		fill_water_choice=math.floor(mask/8)%2==1,fill_lava_choice=math.floor(mask/16)%2==1,
+		fill_oil_ocean_choice=math.floor(mask/32)%2==1,fill_other_choice=math.floor(mask/64)%2==1}
+	check(terrain.blocks_entity({type="tree"},c)==not c.remove_trees_choice,"tree choice is coupled")
+	check(terrain.blocks_entity({type="simple-entity"},c)==not c.remove_rocks_choice,"rock choice is coupled")
+	check(terrain.blocks_entity({type="assembling-machine"},c)==not c.remove_entities_choice,"facility choice is coupled")
+	for i,t in ipairs(hazards) do
+		local flag=i==1 and c.fill_water_choice or false
+		if i==2 then flag=c.fill_lava_choice elseif i>=3 then flag=c.fill_oil_ocean_choice end
+		check(terrain.blocks_tile(t,c)==not flag,"per-terrain fill choice is coupled: "..t.name)
+	end
+	local snapshot=deepcopy(c)
+	configuration.migrate_terrain_choices(c)
+	for k,v in pairs(snapshot) do check(c[k]==v,"migration resets independent setting "..k) end
+end
+local legacy={cliff_mode_choice="remove",terrain_mode_choice="fill",remove_entities_choice=false}
+configuration.migrate_terrain_choices(legacy)
+check(legacy.fill_water_choice and legacy.fill_lava_choice and legacy.fill_oil_ocean_choice and legacy.fill_other_choice,
+	"legacy fill mode was not expanded")
+check(not legacy.remove_trees_choice and not legacy.remove_rocks_choice,"legacy cleanup false was not expanded")
 print("Terrain OK: "..cases.." independent modes, hazard covers and demolition ownership checks")

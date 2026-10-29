@@ -1957,7 +1957,7 @@ function layout:placement_landfill(state)
 		}
 		fill_tiles = {}
 		for _, fill in pairs(surface.find_tiles_filtered{area=area}) do
-			if terrain.blocked_tile(fill) then fill_tiles[#fill_tiles+1] = fill end
+			if terrain.blocked_tile(fill) and not terrain.blocks_tile(fill, state) then fill_tiles[#fill_tiles+1] = fill end
 		end
 		state.fill_tiles = fill_tiles
 	end

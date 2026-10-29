@@ -20,7 +20,10 @@ parser.add_argument("--data", type=Path, required=True)
 parser.add_argument("--save", type=Path, required=True)
 parser.add_argument("--output", type=Path)
 parser.add_argument("--visual", action="store_true", help="Render native underground belts beside preview artwork in an isolated game")
-parser.add_argument("--scene", choices=["shoreline"], help="Capture the large irregular lava-shore scenario")
+parser.add_argument("--scene", choices=["shoreline", "gui"], help="Capture the large irregular lava-shore scenario")
+parser.add_argument("--locale", choices=["en", "zh-CN"], default="zh-CN")
+parser.add_argument("--ui-scale", type=float, default=1)
+parser.add_argument("--window-size", default="1600x1000")
 args = parser.parse_args()
 visual = args.visual or args.scene is not None
 repo = Path(__file__).resolve().parents[1]
@@ -43,11 +46,11 @@ for phase in ("placement",):
         archive.extractall(root / "mods")
     mod = next(p for p in (root / "mods").iterdir() if p.is_dir())
     control = mod / "control.lua"
-    fixture = "shoreline-artwork.lua" if args.scene else "underground-artwork.lua" if args.visual else "placement.lua"
+    fixture = ("gui.lua" if args.scene == "gui" else "shoreline-artwork.lua") if args.scene else "underground-artwork.lua" if args.visual else "placement.lua"
     control.write_text(control.read_text() + "\n" + (repo / "tests/native" / fixture).read_text())
     names = ["base", "quality", "elevated-rails", "recycler", "space-age", "resource-outpost-planner"]
     (root / "mods/mod-list.json").write_text(json.dumps({"mods": [{"name": name, "enabled": True} for name in names]}))
-    (root / "config.ini").write_text(f"[path]\nread-data={args.data.resolve()}\nwrite-data={root / 'data'}\n[other]\ncheck-updates=false\n")
+    (root / "config.ini").write_text(f"[path]\nread-data={args.data.resolve()}\nwrite-data={root / 'data'}\n[other]\ncheck-updates=false\n[general]\nlocale={args.locale}\n[graphics]\nfull-screen=false\n[interface]\nui-scale-mode=manual-pixels\ncustom-ui-scale={args.ui_scale}\n")
     settings = json.loads((args.data / "server-settings.example.json").read_text())
     settings.update(name="Isolated placement verification", visibility={"public": False, "lan": False},
                     auto_pause=False, require_user_verification=False, autosave_interval=0)
@@ -57,7 +60,7 @@ for phase in ("placement",):
         port = probe.getsockname()[1]
     log_path = root / "server.log"
     with log_path.open("w") as output:
-        startup = ["--load-game", str(saved)] if visual else ["--start-server", str(saved),
+        startup = ["--load-game", str(saved), "--window-size", args.window_size] if visual else ["--start-server", str(saved),
                    "--server-settings", str(root / "server.json"), "--bind", "127.0.0.1", "--port", str(port)]
         process = subprocess.Popen([str(args.factorio.resolve()), "--config", str(root / "config.ini"),
                                     "--mod-directory", str(root / "mods"), *startup],
@@ -70,9 +73,12 @@ for phase in ("placement",):
                 time.sleep(0.25)
                 log = log_path.read_text()
                 screenshot = root / "data/script-output/underground-artwork.png"
-                if args.scene:
+                if args.scene == "shoreline":
                     screenshot = root / "data/script-output/shoreline-applied.png"
-                if (args.scene and screenshot.exists() and "PLACEMENT SCENE COMPLETE" in log
+                if args.scene == "gui":
+                    screenshot = root / "data/script-output/gui-oil.png"
+                if (args.scene == "gui" and screenshot.exists() and "GUI SCENE COMPLETE" in log
+                        or args.scene == "shoreline" and screenshot.exists() and "PLACEMENT SCENE COMPLETE" in log
                         or args.visual and not args.scene and screenshot.exists() and screenshot.stat().st_size > 0
                         or not visual and "PLACEMENT COMPLETE" in log):
                     success = True
@@ -92,7 +98,7 @@ for phase in ("placement",):
         if not success:
             print("\n".join(log_path.read_text().splitlines()[-35:]))
             raise SystemExit(f"Native placement verification failed; see {log_path}")
-        print("\n".join(line for line in log_path.read_text().splitlines() if "PLACEMENT" in line), flush=True)
+        print("\n".join(line for line in log_path.read_text().splitlines() if "PLACEMENT" in line or "GUI " in line), flush=True)
         (root / "manifest.json").write_text(json.dumps({"source": str(source), "source_sha256": original,
                                                         "archive_sha256": digest(next((root / "package").glob("*.zip"))),
                                                         "passed": True}, indent=2) + "\n")

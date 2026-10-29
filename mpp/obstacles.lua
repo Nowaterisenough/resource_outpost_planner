@@ -12,9 +12,11 @@ local function key(x, y) return x..","..y end
 obstacles.blocked_tile = terrain.blocked_tile
 
 function obstacles.active(state)
+	for _, setting in ipairs(terrain.tile_choices) do if state[setting] ~= nil then return true end end
 	return state.cliff_mode_choice ~= nil or state.terrain_mode_choice ~= nil
 		or state.avoid_obstacles_choice or state.avoid_water_choice or state.avoid_cliffs_choice
-		or state.remove_entities_choice ~= nil or state.deconstruction_choice or state.landfill_choice
+		or state.remove_entities_choice ~= nil or state.remove_trees_choice ~= nil or state.remove_rocks_choice ~= nil
+		or state.deconstruction_choice or state.landfill_choice
 end
 
 local function overlap(a, b)

@@ -5,12 +5,36 @@ function terrain.avoid_cliffs(choices)
 	return choices.avoid_cliffs_choice == true or choices.avoid_obstacles_choice == true
 end
 
-function terrain.avoid_tiles(choices)
+local tile_choices = {"fill_water_choice", "fill_lava_choice", "fill_oil_ocean_choice", "fill_other_choice"}
+terrain.tile_choices = tile_choices
+
+function terrain.avoid_tiles(choices, tile)
+	if tile then
+		local name, layers = tile.name, tile.prototype.collision_mask.layers
+		local setting = (layers.lava_tile or name:find("lava", 1, true)) and "fill_lava_choice"
+			or (name:find("oil-ocean", 1, true) or name:find("lightning", 1, true)) and "fill_oil_ocean_choice"
+			or layers.water_tile and "fill_water_choice" or "fill_other_choice"
+		if choices[setting] ~= nil then return choices[setting] ~= true end
+	else
+		local independent = false
+		for _, setting in ipairs(tile_choices) do
+			if choices[setting] == true then return false end
+			if choices[setting] ~= nil then independent = true end
+		end
+		if independent then return true end
+	end
 	if choices.terrain_mode_choice then return choices.terrain_mode_choice == "avoid" end
 	return choices.avoid_water_choice == true or choices.landfill_choice == true or choices.avoid_obstacles_choice == true
 end
 
-function terrain.retain_entities(choices)
+function terrain.retain_entities(choices, entity)
+	if entity then
+		local proto = entity.type == "entity-ghost" and entity.ghost_prototype or entity.prototype
+		local kind = proto and proto.type or entity.type
+		local setting = kind == "tree" and "remove_trees_choice"
+			or kind == "simple-entity" and "remove_rocks_choice" or "remove_entities_choice"
+		if choices[setting] ~= nil then return choices[setting] ~= true end
+	end
 	if choices.remove_entities_choice ~= nil then return not choices.remove_entities_choice end
 	return choices.deconstruction_choice == true or choices.avoid_obstacles_choice == true
 end
@@ -30,12 +54,13 @@ function terrain.cover_tile(tile, choices)
 end
 
 function terrain.blocks_tile(tile, choices)
-	return terrain.blocked_tile(tile) and (terrain.avoid_tiles(choices) or not terrain.cover_tile(tile, choices))
+	return terrain.blocked_tile(tile) and (terrain.avoid_tiles(choices, tile) or not terrain.cover_tile(tile, choices))
 end
 
 function terrain.blocks_entity(entity, choices)
-	if entity.type == "cliff" then return terrain.avoid_cliffs(choices) end
-	return terrain.retain_entities(choices)
+	local kind = entity.type == "entity-ghost" and entity.ghost_prototype.type or entity.type
+	if kind == "cliff" then return terrain.avoid_cliffs(choices) end
+	return terrain.retain_entities(choices, entity)
 end
 
 local ignored = {resource=true, character=true, unit=true, corpse=true, ["item-entity"]=true, ["tile-ghost"]=true}

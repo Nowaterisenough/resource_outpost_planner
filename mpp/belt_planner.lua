@@ -278,6 +278,9 @@ function belt_planner.create_state(spec, target, choices)
 		avoid_obstacles_choice=choices.avoid_obstacles_choice,
 		avoid_cliffs_choice=choices.avoid_cliffs_choice, avoid_water_choice=choices.avoid_water_choice,
 		remove_entities_choice=choices.remove_entities_choice,
+		remove_trees_choice=choices.remove_trees_choice, remove_rocks_choice=choices.remove_rocks_choice,
+		fill_water_choice=choices.fill_water_choice, fill_lava_choice=choices.fill_lava_choice,
+		fill_oil_ocean_choice=choices.fill_oil_ocean_choice, fill_other_choice=choices.fill_other_choice,
 		deconstruction_choice=choices.deconstruction_choice, landfill_choice=choices.landfill_choice,
 		_previous_state=choices._previous_state, _collected_ghosts=choices._collected_ghosts,
 		_deconstruction_orders=choices._deconstruction_orders,
@@ -881,7 +884,7 @@ function belt_planner.place_landfill(state, specs)
 		local pos=tile.position
 		local k=key(pos.x,pos.y)
 		local cover=terrain.cover_tile(tile,state)
-		if not state._belt_landfill[k] and terrain.blocked_tile(tile) and cover then
+		if not state._belt_landfill[k] and terrain.blocked_tile(tile) and not terrain.blocks_tile(tile,state) and cover then
 			state._belt_landfill[k]=true
 			local ghost={name="tile-ghost",inner_name=cover.name,position=pos,force=state.player.force,
 				player=state.player,raise_built=true}

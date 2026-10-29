@@ -54,6 +54,12 @@ local belt_load = require("mpp.belt_load")
 ---@field coverage_choice boolean
 ---@field start_choice boolean
 ---@field remove_entities_choice boolean
+---@field remove_trees_choice boolean
+---@field remove_rocks_choice boolean
+---@field fill_water_choice boolean
+---@field fill_lava_choice boolean
+---@field fill_oil_ocean_choice boolean
+---@field fill_other_choice boolean
 ---@field pipe_choice string
 ---@field pipe_quality_choice string
 ---@field module_choice string
@@ -96,6 +102,9 @@ local belt_load = require("mpp.belt_load")
 ---@field beacon_group LuaGuiElement?
 ---@field layout_values string[]
 ---@field unified boolean
+---@field workflow_version integer
+---@field oil_mode boolean
+---@field settings_body LuaGuiElement
 ---@field oil_settings_root LuaGuiElement
 ---@field blueprint_add_button LuaGuiElement
 ---@field blueprint_add_section LuaGuiElement
@@ -150,6 +159,12 @@ conf.default_config = {
 		coverage_choice = false,
 		start_choice = false,
 		remove_entities_choice = true,
+		remove_trees_choice = true,
+		remove_rocks_choice = true,
+		fill_water_choice = true,
+		fill_lava_choice = true,
+		fill_oil_ocean_choice = true,
+		fill_other_choice = true,
 		pipe_choice = "pipe",
 		pipe_quality_choice = "normal",
 		module_choice = "none",
@@ -234,6 +249,12 @@ function conf.migrate_terrain_choices(choices)
 	end
 	if choices.remove_entities_choice == nil then
 		choices.remove_entities_choice = not terrain.retain_entities(choices)
+	end
+	for _, setting in ipairs(terrain.tile_choices) do
+		if choices[setting] == nil then choices[setting] = choices.terrain_mode_choice == "fill" end
+	end
+	for _, setting in ipairs{"remove_trees_choice", "remove_rocks_choice"} do
+		if choices[setting] == nil then choices[setting] = choices.remove_entities_choice end
 	end
 	choices.deconstruction_choice = nil
 	choices.avoid_cliffs_choice = nil

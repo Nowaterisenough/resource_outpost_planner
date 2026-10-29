@@ -1,3 +1,4 @@
+local terrain_options_test=require("mpp.terrain")
 local forced_test=require("mpp.forced_build")
 local obstacle_test=require("mpp.obstacles")
 local output_test=require("mpp.output_preview")
@@ -170,6 +171,8 @@ local function start()
  c.belt_choice="express-transport-belt";c.belt_quality_choice="normal";c.pole_choice="medium-electric-pole";c.pole_quality_choice="normal"
  c.belt_merge_choice=false;c.belt_planner_choice=true;c.output_balance_choice=true;c.output_belt_count_choice=4;c.output_station_choice=false
  c.terrain_mode_choice="avoid";c.cliff_mode_choice="avoid";c.remove_entities_choice=false
+ for _,key in ipairs(terrain_options_test.tile_choices) do c[key]=false end
+ c.remove_trees_choice=false;c.remove_rocks_choice=false
  local lava={};local resources={}
  for x=0,39 do for y=0,39 do
   if x<8+math.floor(5*math.sin(y/5)) then lava[#lava+1]={name="lava",position={x,y}}
@@ -293,11 +296,14 @@ script.on_nth_tick(1,function()
   log("PLACEMENT station Apply modifier and rail/stop preview parity PASS")
   script.get_event_handler(defines.events.on_gui_click){player_index=1,element=d.gui.undo_button,button=defines.mouse_button_type.left}
   d.choices.output_station_choice=false;d.choices.remove_entities_choice=true
+  d.choices.remove_trees_choice=true;d.choices.remove_rocks_choice=true
   gui.show_interface(p)
-  assert(d.gui.selections.misc.remove_entities.style.name=="yellow_slot_button","facility button selection is inverted")
-  script.get_event_handler(defines.events.on_gui_click){player_index=1,element=d.gui.selections.misc.remove_entities,button=defines.mouse_button_type.left}
-  assert(d.choices.remove_entities_choice==false and d.gui.selections.misc.remove_entities.style.name=="slot_button")
-  script.get_event_handler(defines.events.on_gui_click){player_index=1,element=d.gui.selections.misc.remove_entities,button=defines.mouse_button_type.left}
+  assert(d.gui.selections.misc.remove_entities.state==true,"facility checkbox state is inverted")
+  d.gui.selections.misc.remove_entities.state=not d.gui.selections.misc.remove_entities.state
+  script.get_event_handler(defines.events.on_gui_checked_state_changed){player_index=1,element=d.gui.selections.misc.remove_entities}
+  assert(d.choices.remove_entities_choice==false and d.gui.selections.misc.remove_entities.state==false)
+  d.gui.selections.misc.remove_entities.state=not d.gui.selections.misc.remove_entities.state
+  script.get_event_handler(defines.events.on_gui_checked_state_changed){player_index=1,element=d.gui.selections.misc.remove_entities}
   assert(d.choices.remove_entities_choice==true)
   preview.select{player_index=1,surface=t.surface,entities=t.resources};t.phase="facility-clear"
  elseif t.phase=="facility-clear" then
