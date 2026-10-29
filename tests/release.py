@@ -4,6 +4,7 @@ import hashlib
 import importlib.util
 import json
 import os
+import subprocess
 from pathlib import Path
 import tempfile
 import unittest
@@ -290,6 +291,40 @@ class ReleaseTests(unittest.TestCase):
                 client.upload(m, self.out / m["archive"])
         self.assertEqual(api.call_args_list[0].args[2]["Authorization"], "Bearer fake-test-key")
         self.assertNotIn("Authorization", api.call_args_list[1].args[2])
+
+
+class GitHubLookupTests(unittest.TestCase):
+    def test_published_release_uses_tag_endpoint(self):
+        state = {"id": 123, "tag_name": "v1.2.4", "draft": False, "assets": []}
+        response = subprocess.CompletedProcess([], 0, json.dumps(state).encode(), b"")
+        with patch.object(release.subprocess, "run", return_value=response):
+            with patch.object(release, "run") as listing:
+                self.assertEqual(release.GitHub("test/mod").release("v1.2.4"), state)
+                listing.assert_not_called()
+
+    def test_tag_404_finds_draft_in_paginated_authenticated_listing(self):
+        state = {"id": 124, "tag_name": "v1.2.4", "draft": True, "assets": []}
+        response = subprocess.CompletedProcess([], 1, b"{}", b"gh: Not Found (HTTP 404)")
+        pages = [[{"tag_name": "v1.2.5", "draft": False}], [state]]
+        with patch.object(release.subprocess, "run", return_value=response):
+            with patch.object(release, "run", return_value=json.dumps(pages)) as listing:
+                self.assertEqual(release.GitHub("test/mod").release("v1.2.4"), state)
+                listing.assert_called_once_with("gh", "api", "repos/test/mod/releases?per_page=100",
+                                                "--paginate", "--slurp")
+
+    def test_tag_404_with_no_matching_draft_is_missing(self):
+        response = subprocess.CompletedProcess([], 1, b"{}", b"gh: Not Found (HTTP 404)")
+        with patch.object(release.subprocess, "run", return_value=response):
+            with patch.object(release, "run", return_value="[[]]"):
+                self.assertIsNone(release.GitHub("test/mod").release("v1.2.4"))
+
+    def test_api_failure_is_not_treated_as_missing_release(self):
+        response = subprocess.CompletedProcess([], 1, b"{}", b"gh: Service unavailable (HTTP 503)")
+        with patch.object(release.subprocess, "run", return_value=response):
+            with patch.object(release, "run") as listing:
+                with self.assertRaises(release.ReleaseError):
+                    release.GitHub("test/mod").release("v1.2.4")
+                listing.assert_not_called()
 
 
 if __name__ == "__main__":

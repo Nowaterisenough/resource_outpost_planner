@@ -229,7 +229,11 @@ class GitHub:
         result = subprocess.run(["gh", "api", f"repos/{self.repository}/releases/tags/{tag}"], capture_output=True)
         if result.returncode:
             if b"(HTTP 404)" in result.stderr:
-                return None
+                # The tag endpoint only returns published releases. Authenticated listing
+                # also includes drafts, including one created by an interrupted run.
+                pages = json.loads(run("gh", "api", f"repos/{self.repository}/releases?per_page=100",
+                                       "--paginate", "--slurp"))
+                return next((r for page in pages for r in page if r["tag_name"] == tag), None)
             raise ReleaseError("Could not read GitHub release state")
         return json.loads(result.stdout)
 
