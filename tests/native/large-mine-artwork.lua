@@ -20,6 +20,7 @@ local large_player,large_data,large_surface,large_resources,large_state,large_en
 local large_results,large_report={},nil
 local large_start_tick,large_timer,large_mine_state,large_failure
 local large_flow,large_flow_start
+local large_acid
 local large_preview_complete=preview.complete
 preview.complete=function(state)
  large_state=state
@@ -62,7 +63,8 @@ local function large_begin()
   if not large_dense_matrix and not large_capacity_matrix then game.auto_save("large-mine-layouts") end
   large_phase="finish";large_wait=game.tick+90;return
  end
- game.speed=c.measure_lanes and 8 or 1
+ game.speed=(c.measure_lanes or c.measure_acid) and 8 or 1
+ large_acid=nil
  large_player=game.get_player(1);conf.initialize_global(large_player.index)
  large_player.set_controller{type=defines.controllers.god}
  large_data=storage.players[large_player.index]
@@ -98,7 +100,7 @@ local function large_begin()
  choices.belt_choice=c.belt;choices.belt_quality_choice="normal"
  choices.pole_choice=c.pole or "medium-electric-pole";choices.pole_quality_choice=c.pole_quality or "normal";choices.lamp_choice=c.lamps
  if choices.lamp_choice==nil then choices.lamp_choice=not c.dense end
- choices.pipe_choice="pipe";choices.force_pipe_placement_choice=c.fluid or false
+ choices.pipe_choice="pipe";choices.force_pipe_placement_choice=c.fluid and c.force_pipe_placement~=false or false
  choices.belt_merge_choice=large_auto_belts~=false and c.auto_belts~=false
  choices.belt_load_min_choice=c.lower or .8;choices.belt_load_max_choice=c.upper or 1.1
  choices.belt_planner_choice=true;choices.output_balance_choice=c.balance~=false;choices.output_belt_count_choice=c.outputs
@@ -152,7 +154,7 @@ local function large_materialize()
     local inventory=e.get_module_inventory()
     assert(inventory.insert{name=c.module,quality=c.module_quality or "normal",count=#inventory}==#inventory,"native drill module insertion failed")
    end
-   if c.fluid then e.insert_fluid{name="sulfuric-acid",amount=100} end
+   if c.fluid and not c.measure_acid then e.insert_fluid{name="sulfuric-acid",amount=100} end
   elseif e.type=="beacon" then
    local inventory=e.get_module_inventory()
    assert(inventory.insert{name="speed-module-3",quality=c.beacon_module_quality or "normal",count=#inventory}==#inventory,"native beacon module insertion failed")
@@ -165,6 +167,112 @@ local function large_materialize()
  assert(large_supply_pole.get_wire_connector(defines.wire_connector_id.pole_copper,true).connect_to(
   large_poles[1].get_wire_connector(defines.wire_connector_id.pole_copper,true),false,defines.wire_origin.script))
  large_wait=game.tick+240;large_phase="audit"
+end
+-- Supply the generated pipe network through one native infinity pipe. Drills
+-- start empty; direct per-drill injection would hide disconnected fluid inputs.
+local function large_start_acid(belts)
+ local source
+ for _,e in ipairs(large_entities) do if e.type=="pipe" then
+  for _,offset in ipairs{{-1,0},{0,-1},{1,0},{0,1}} do
+   local p={x=e.position.x+offset[1],y=e.position.y+offset[2]}
+   if large_surface.can_place_entity{name="infinity-pipe",position=p,force=large_player.force} then
+    local candidate=large_surface.create_entity{name="infinity-pipe",position=p,force=large_player.force}
+    if candidate.get_fluid_segment_id(1)==large_drills[1].get_fluid_segment_id(1) then source=candidate;break end
+    candidate.destroy()
+   end
+  end
+  if source then break end
+ end end
+ assert(source,"no reachable external acid supply connection")
+ local before=source.get_fluid_segment_fluid(1)
+ assert(not before or before.amount==0,"acid test secretly prefilled drill fluidboxes")
+ large_acid={source=source,start=game.tick,probes={},working={},recovered={},items=0,missing=0,samples=0,
+  report={supply_points=1,source=source.position,fluid_segments=1,warmup_ticks=600,sample_ticks=3600}}
+ local coords=large_mine_state.coords
+ local c=large_cases[large_index]
+ large_acid.report.drain_points=c.acid_drain=="drills" and "drill-drops" or "internal-outlets"
+ if c.acid_drain=="drills" then
+  -- High-quality/beacon fixtures intentionally exceed the two-belt capacity.
+  -- Remove ore at native drop targets to test acid supply at full mining load;
+  -- this mode does not claim sustained collection/output throughput.
+  local seen={}
+  for _,drill in ipairs(large_drills) do
+   local e=assert(belts[large_key(drill.drop_position)],"missing drill drop for acid test")
+   if not seen[e.unit_number] then seen[e.unit_number]=true;large_acid.probes[#large_acid.probes+1]=e end
+  end
+ else
+  for _,belt in ipairs(large_mine_state.belts) do if belt.is_output then
+   local p=mpp_util.revert_world(coords.gx,coords.gy,large_mine_state.direction_choice,belt.x_start,belt.y,coords.tw,coords.th)
+   local e=assert(belts[large_key{x=p[1],y=p[2]}],"missing acid-test output sink")
+   large_acid.probes[#large_acid.probes+1]=e
+  end end
+ end
+ source.set_infinity_pipe_filter{name="sulfuric-acid",percentage=.8,mode="at-least"}
+end
+local function large_measure_acid()
+ local a=large_acid
+ local elapsed=game.tick-a.start
+ local c=large_cases[large_index]
+ -- Prevent belt backpressure from being mistaken for an acid shortage.
+ -- The report names the drain mode; collection geometry is audited separately.
+ for _,e in ipairs(a.probes) do for side=1,2 do
+  local n=e.get_transport_line(side).remove_item{name=c.ore,count=1000}
+  if elapsed>600 and elapsed<=4200 then a.items=a.items+n end
+ end end
+ if elapsed==480 then
+  a.report.fluid_before_consumption_probe=a.source.get_fluid_segment_fluid(1).amount
+  -- Briefly pause replenishment: a falling native segment level proves use.
+  a.source.set_infinity_pipe_filter{name="sulfuric-acid",percentage=0,mode="at-least"}
+  local retained=a.source.get_fluid_segment_fluid(1)
+  assert(retained and math.abs(retained.amount-a.report.fluid_before_consumption_probe)<.001,
+   "pausing test supply discarded acid instead of preserving it for consumption")
+ elseif elapsed==600 then
+  local remaining=a.source.get_fluid_segment_fluid(1)
+  a.report.acid_consumed_in_2_seconds=a.report.fluid_before_consumption_probe-(remaining and remaining.amount or 0)
+  assert(a.report.acid_consumed_in_2_seconds>0,"uranium drills did not consume acid")
+  a.source.set_infinity_pipe_filter{name="sulfuric-acid",percentage=.8,mode="at-least"}
+ end
+ if elapsed>600 and elapsed<=4200 and elapsed%30==0 then
+  a.samples=a.samples+1
+  for i,drill in ipairs(large_drills) do
+   assert(drill.get_fluid_segment_id(1)==a.source.get_fluid_segment_id(1),"drill detached from acid source")
+   if drill.status==defines.entity_status.working then a.working[i]=true end
+   if drill.status==defines.entity_status.missing_required_fluid then a.missing=a.missing+1 end
+  end
+ end
+ if elapsed==4200 then
+  a.report.working_drills=table_size(a.working);a.report.missing_fluid_samples=a.missing
+  a.report.status_samples=a.samples;a.report.output_items=a.items;a.report.items_per_second=a.items/60
+  assert(a.report.working_drills==#large_drills,"some acid-fed drills never worked: "..a.report.working_drills.."/"..#large_drills)
+  assert(a.missing==0 and a.items>0,"single-inlet acid supply starved")
+  a.source.set_infinity_pipe_filter{name="sulfuric-acid",percentage=0,mode="at-least"};a.source.clear_fluid_segment_fluid(1)
+ elseif elapsed>4200 and not a.restart_tick and elapsed%30==0 then
+  -- Full belt buffers can keep a drill waiting for output after acid is gone.
+  -- Allow the planned collection routes to drain before requiring the native
+  -- missing-fluid status; do not clear drop belts or bypass those routes.
+  local stopped,statuses=0,{}
+  for _,drill in ipairs(large_drills) do
+   statuses[drill.status]=(statuses[drill.status] or 0)+1
+   if drill.status==defines.entity_status.missing_required_fluid then stopped=stopped+1 end
+  end
+  if stopped==#large_drills then
+   a.report.stopped_without_acid=stopped;a.report.stop_settle_ticks=elapsed-4200
+   a.restart_tick=game.tick
+   a.source.set_infinity_pipe_filter{name="sulfuric-acid",percentage=.8,mode="at-least"}
+  else assert(elapsed<7800,"acid cut did not stop all drills: "..stopped.."/"..#large_drills.." statuses="..helpers.table_to_json(statuses)) end
+ elseif a.restart_tick and elapsed%30==0 then
+  for i,drill in ipairs(large_drills) do
+   if drill.status==defines.entity_status.working then a.recovered[i]=true end
+  end
+ end
+ if not a.restart_tick or game.tick-a.restart_tick<600 then return end
+ a.report.recovered_drills=table_size(a.recovered)
+ assert(a.report.recovered_drills==#large_drills,"acid recovery left stalled drills")
+ large_report.acid=a.report
+ helpers.write_file("large-mine-result.json",helpers.table_to_json(large_results),false)
+ log("LARGE MINE ACID "..helpers.table_to_json{case=c.id,result=a.report})
+ large_capture("acid-input",a.source.position,{1600,1000},1.3)
+ large_phase="mine-shot";large_wait=game.tick+1
 end
 local function large_audit()
  local belts,reverse,sinks,covered,towers={},{},{},{},{}
@@ -200,6 +308,10 @@ local function large_audit()
   end
  end
  local c=large_cases[large_index]
+ -- Native drills only resolve drop_target after they can start mining.
+ if c.measure_acid and not large_acid then
+  large_start_acid(belts);large_wait=game.tick+240;return
+ end
  counts.side_loading_junctions=0
  if large_mine_state._capacity_tight_big then
   local coords=large_mine_state.coords
@@ -280,11 +392,11 @@ local function large_audit()
   end end
  end
  -- Keep power running, but remove the distant fixture supply wire from photographs.
- if not c.measure_lanes then large_supply_pole.get_wire_connector(defines.wire_connector_id.pole_copper,true).disconnect_all() end
+ if not c.measure_lanes and not c.measure_acid then large_supply_pole.get_wire_connector(defines.wire_connector_id.pole_copper,true).disconnect_all() end
  local pos={x=(left+right)/2,y=(top+bottom)/2}
  local zoom=math.min(2400/((right-left+14)*32),1800/((bottom-top+14)*32),.38)
  large_capture("overview",pos,{2400,1800},zoom)
- large_phase=c.measure_lanes and "flow" or "mine-shot";large_wait=game.tick+1
+ large_phase=c.measure_acid and "acid" or c.measure_lanes and "flow" or "mine-shot";large_wait=game.tick+1
 end
 local function large_measure_flow()
  local c=large_cases[large_index]
@@ -410,6 +522,7 @@ local function large_step()
   large_materialize()
  elseif large_phase=="audit" then large_audit()
  elseif large_phase=="flow" then large_measure_flow()
+ elseif large_phase=="acid" then large_measure_acid()
  elseif large_phase=="mine-shot" then
   large_capture("mine",{0,0},{2400,1800},.30)
   large_phase="detail";large_wait=game.tick+1

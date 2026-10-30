@@ -234,6 +234,8 @@ function layout:prepare_pipe_layout(state)
 		return "prepare_pole_layout"
 	end
 	local specs={}
+	local _,ground_proto=util.find_underground_pipe(state.pipe_choice)
+	local reach=ground_proto and ground_proto.max_underground_distance
 	for i=1,state.miner_lane_count do
 		local direction=state._capacity_tight_big and i%2==0 and N or S
 		local y=attempt.lane_layout[i].y+M.pipe_left[direction]
@@ -243,7 +245,11 @@ function layout:prepare_pipe_layout(state)
 		local cursor=attempt.sx
 		for _,miner in ipairs(state.miner_lanes[i] or {}) do
 			if miner.x>cursor then
-				specs[#specs+1]={structure="horizontal",x=cursor,y=y,w=miner.x-cursor-1}
+				if state._capacity_tight_big then
+					local spans=paired.pipe_spans(state.grid,cursor,y,miner.x-cursor-1,reach)
+					if spans then for _,span in ipairs(spans) do specs[#specs+1]=span end
+					else issue(state,cursor,y,{"mpp.belt_capacity_space"}) end
+				else specs[#specs+1]={structure="horizontal",x=cursor,y=y,w=miner.x-cursor-1} end
 			end
 			cursor=miner.x+M.size
 		end

@@ -5,7 +5,7 @@ local train_station = require("mpp.train_station")
 local common = require("layouts.common")
 local work=require("mpp.preview_construction")
 local cache = {}
-local geometry_revision = 10 -- Facing big-drill pairs share one/two belt corridors.
+local geometry_revision = 11 -- Facing big-drill pairs; fluid relays avoid beacon pockets.
 
 local ignored_types={"resource","character","unit","corpse","item-entity","tile-ghost"}
 local hazard_names

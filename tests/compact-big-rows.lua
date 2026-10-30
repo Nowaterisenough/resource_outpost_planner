@@ -61,4 +61,38 @@ for _,north in ipairs{{x=2,y=0},{x=1,y=-1},{x=4,y=-1},{}} do
  check(next_step=="prepare_pipe_layout" and state.belt_count==0 and reason[1]=="mpp.belt_capacity_geometry",
   "unsupported facing geometry did not stop routing")
 end
-print("Compact big rows: "..checks.." facing-side and partition checks passed")
+-- An independent reachability oracle checks arbitrary reserved tiles. A pipe
+-- span must connect its whole interval without putting an endpoint in a tower.
+for length=1,12 do for mask=0,2^math.max(0,length-2)-1 do
+ local blocked={}
+ for x=1,length-2 do if math.floor(mask/2^(x-1))%2==1 then blocked[x]=true end end
+ local grid={get_tile=function(_,x) return {built_thing=blocked[x] and "beacon" or nil} end}
+ for reach=2,6 do
+  local possible={[length]=true}
+  for x=length-1,0,-1 do if not blocked[x] then
+   possible[x]=possible[x+1]
+   for endpoint=x+2,math.min(length-1,x+reach) do
+    if not blocked[endpoint] and possible[endpoint+1] then possible[x]=true end
+   end
+  end end
+  local spans=paired.pipe_spans(grid,0,7,length-1,reach)
+  check((spans~=nil)==(possible[0]==true),"pipe relay routing differs from exhaustive reachability")
+  if spans then
+   local cursor=0
+   for _,span in ipairs(spans) do
+    check(span.x==cursor and span.y==7 and span.w<=reach,"pipe spans disconnect or exceed underground reach")
+    check(not blocked[span.x] and not blocked[span.x+span.w],"pipe endpoint overlaps a beacon")
+    cursor=span.x+span.w+1
+   end
+   check(cursor==length,"pipe spans omit the last fluid connection")
+  end
+ end
+end end
+local obstacle={get_tile=function(_,x) return {built_thing=x>=67 and x<=69 and "beacon" or nil} end}
+local spans=assert(paired.pipe_spans(obstacle,45,30,25,10))
+for _,span in ipairs(spans) do
+ check(span.x<67 or span.x>69,"long irregular gap puts its input endpoint inside a beacon")
+ check(span.x+span.w<67 or span.x+span.w>69,"long irregular gap puts its output endpoint inside a beacon")
+end
+check(not paired.pipe_spans(obstacle,65,30,6,nil),"surface-only pipes crossed a reserved tower")
+print("Compact big rows: "..checks.." facing-side, partition and fluid relay checks passed")

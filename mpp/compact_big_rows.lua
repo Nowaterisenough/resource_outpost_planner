@@ -100,6 +100,26 @@ local function drop(state,m)
  return m.x+p.x,m.y+p.y
 end
 
+-- Long gaps can contain beacon pockets. Fixed underground spans may put a
+-- relay endpoint inside a pocket; move each relay onto two free adjacent tiles.
+function paired.pipe_spans(grid,x,y,width,reach)
+ local last=x+width
+ local function blocked(at)
+  local tile=grid:get_tile(at,y)
+  return tile and tile.built_thing
+ end
+ local result={}
+ while x<=last do
+  if blocked(x) then return nil end
+  local right=reach and min(last,x+reach) or x
+  while right>x+1 and (blocked(right) or right<last and blocked(right+1)) do right=right-1 end
+  if right<=x+1 then right=x end
+  result[#result+1]={structure="horizontal",x=x,y=y,w=right-x}
+  x=right+1
+ end
+ return result
+end
+
 function paired.poles(state)
  state.builder_power_poles,state.builder_lamps={},{}
  if state.pole_choice=="none" or state.pole_choice=="zero_gap" then return "prepare_belt_layout" end
