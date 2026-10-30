@@ -640,8 +640,8 @@ function layout:layout_attempts(state)
 		
 		if current_attempt.heuristics.drill_count > 0 then
 			saved_attempts[#saved_attempts+1] = current_attempt
-			local heuristics = table.deepcopy(current_attempt.heuristics) --[[@as HeuristicsBlock]]
 			if state.debug_dump == true then
+				local heuristics = table.deepcopy(current_attempt.heuristics) --[[@as HeuristicsBlock]]
 				common.process_postponed(state, current_attempt, current_attempt.miners, current_attempt.postponed)
 				current_attempt.final_heuristics = current_attempt.heuristics
 				current_attempt.heuristics = heuristics

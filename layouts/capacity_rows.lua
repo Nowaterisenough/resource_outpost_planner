@@ -84,11 +84,11 @@ function layout:_placement_attempt(state,attempt)
 		local x=row_x
 		while x<=C.tw+M.size do
 			local tile=state.grid:get_tile(x,y)
-			local miner={x=x,y=y,origin_x=x+M.x,origin_y=y+M.y,tile=tile,line=line,column=column,direction=S}
 			price=price+M.area
 			if state._capacity_beacon_slots and line%2==1 and column%3==2 then
 				beacon_slots[#beacon_slots+1]={x=x,y=y}
 			elseif tile and not tile.forbidden and tile.neighbors_outer>0 then
+				local miner={x=x,y=y,origin_x=x+M.x,origin_y=y+M.y,tile=tile,line=line,column=column,direction=S}
 				if heuristic(tile) then
 					miners[#miners+1]=miner
 					common.add_heuristic_values(H,M,tile)
