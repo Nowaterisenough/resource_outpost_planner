@@ -40,6 +40,14 @@ package.loaded["mpp.obstacles"]={
 	active=function(choices) return choices.cliff_mode_choice or choices.terrain_mode_choice or choices.avoid_cliffs_choice end,
 	entity_box=function() return {left_top={x=-0.5,y=-0.5},right_bottom={x=0.5,y=0.5}} end,
 }
+local mock_obstacles=package.loaded["mpp.obstacles"]
+mock_obstacles.entity_bounds=function(name,x,y,dir)
+ local box=mock_obstacles.entity_box(name,{x=x,y=y},dir)
+ return box.left_top.x,box.left_top.y,box.right_bottom.x,box.right_bottom.y
+end
+mock_obstacles.blocked_bounds=function(index,x1,y1,x2,y2)
+ return mock_obstacles.blocked_box(index,{left_top={x=x1,y=y1},right_bottom={x=x2,y=y2}})
+end
 local renderer=require("mpp.preview_renderer")
 prototypes={entity={},utility_constants={building_buildable_tint={0.4,1,0.4,1},building_not_buildable_tint={1,0.4,0.4,1}}}
 for name,typ in pairs{belt="transport-belt",underground="underground-belt",pipe="pipe",heat="heat-pipe",miner="mining-drill"} do prototypes.entity[name]={type=typ} end
@@ -331,4 +339,11 @@ for i,obj in ipairs(finished) do
  assert(obj==expected[i] and retained[obj.id],"save/load continuation changed ordered sprite reuse")
 end
 cases=cases+3
+-- An in-progress job from the previous boxed representation must also resume.
+local legacy=reloaded.begin(draft,{avoid_cliffs_choice=true})
+legacy.flat_boxes=nil
+assert(not reloaded.step(draft,legacy,3) and legacy.boxes[1].left_top,"legacy bounds were not retained")
+repeat finished,retained=reloaded.step(draft,legacy,3) until finished
+for i,obj in ipairs(finished) do assert(obj==expected[i] and retained[obj.id],"legacy render job changed preview") end
+cases=cases+1
 print("Preview renderer OK: "..cases.." artwork, topology, reuse, invalidation and isolation cases")

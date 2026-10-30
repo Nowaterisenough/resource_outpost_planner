@@ -239,7 +239,7 @@ function renderer.begin(draft,choices)
 	local boxes=obstacles.active(choices) and {} or nil
 	return {nodes=nodes,ports=ports,objects=objects,reusable=reusable,entries=entries,retained=retained,
 		styles=styles,previous_styles=previous_styles,allowed=allowed,blocked=blocked,
-		allowed_key=allowed_key,blocked_key=blocked_key,choices=choices,boxes=boxes,next_spec=1,
+		allowed_key=allowed_key,blocked_key=blocked_key,choices=choices,boxes=boxes,flat_boxes=true,next_spec=1,
 		box_next=boxes and 1 or nil,bounds={math.huge,math.huge,-math.huge,-math.huge}}
 end
 
@@ -253,10 +253,16 @@ function renderer.step(draft,job,limit)
 			local spec=draft.specs[i]
 			if spec.name=="entity-ghost" then
 				local x,y=position(spec.position)
-				local box=obstacles.entity_box(spec.inner_name,{x=x,y=y},spec.direction)
-				job.boxes[i]=box
-				b[1],b[2]=math.min(b[1],box.left_top.x),math.min(b[2],box.left_top.y)
-				b[3],b[4]=math.max(b[3],box.right_bottom.x),math.max(b[4],box.right_bottom.y)
+				local x1,y1,x2,y2=obstacles.entity_bounds(spec.inner_name,x,y,spec.direction)
+				if job.flat_boxes then
+					local k=(i-1)*4
+					job.boxes[k+1],job.boxes[k+2],job.boxes[k+3],job.boxes[k+4]=x1,y1,x2,y2
+				else
+					-- Continue render jobs saved by earlier versions.
+					job.boxes[i]={left_top={x=x1,y=y1},right_bottom={x=x2,y=y2}}
+				end
+				b[1],b[2]=math.min(b[1],x1),math.min(b[2],y1)
+				b[3],b[4]=math.max(b[3],x2),math.max(b[4],y2)
 			end
 		end
 		job.box_next=last+1
@@ -272,6 +278,14 @@ function renderer.step(draft,job,limit)
 	local allowed,blocked=job.allowed,job.blocked
 	local allowed_key,blocked_key=job.allowed_key,job.blocked_key
 	local selected_obstacles,boxes=job.selected_obstacles,job.boxes
+ local surface,force=draft.surface,player.force
+ local can_place_entity=surface.can_place_entity
+ local function selected_blocked(i)
+  if not selected_obstacles then return false end
+  if not job.flat_boxes then return obstacles.blocked_box(selected_obstacles,boxes[i]) end
+  local k=(i-1)*4
+  return obstacles.blocked_bounds(selected_obstacles,boxes[k+1],boxes[k+2],boxes[k+3],boxes[k+4])
+ end
 	local function draw(style,pos,tint)
 		local stored=styles[style.key]
 		if not stored then
@@ -318,9 +332,9 @@ function renderer.step(draft,job,limit)
 		local layers=artwork(spec,tile,variant)
 		local tint=spec.preview_blocked and blocked or allowed
 		if not tile and not spec.preview_blocked and not spec.preview_existing
-			and (selected_obstacles and obstacles.blocked_box(selected_obstacles,boxes[i])
-			or draft.surface.can_place_entity and not draft.surface.can_place_entity{
-			name=spec.inner_name,position=pos,direction=spec.direction,force=player.force,
+			and (selected_blocked(i)
+			or can_place_entity and not can_place_entity{
+			name=spec.inner_name,position=pos,direction=spec.direction,force=force,
 			build_check_type=defines.build_check_type.blueprint_ghost,forced=true}) then tint=blocked end
 		local target=tile and {x+0.5,y+0.5} or pos
 		if layers.rectangle then

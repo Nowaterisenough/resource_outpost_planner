@@ -72,6 +72,7 @@ for x=-5,8 do for y=-5,8 do
 			and probe.left_top.y<b.right_bottom.y and probe.right_bottom.y>b.left_top.y then expected=true;break end
 	end
 	assert(obstacles.blocked_box(index,probe)==expected,"spatial index differs from exact overlap test")
+	assert(obstacles.blocked_bounds(index,probe.left_top.x,probe.left_top.y,probe.right_bottom.x,probe.right_bottom.y)==expected,"numeric bounds differ from exact collision test")
 	cases=cases+1
 end end
 entities={entity(near,"cliff",1),entity(sliver,"container",2),entity(box(5,5,6,6),"entity-ghost",3)}
@@ -162,5 +163,19 @@ do
  obstacles.shared_entity(state,"test-belt",{x=32,y=0},0);obstacles.shared_entity(state,"test-belt",{x=32,y=0},0)
  assert(queries==4,"actual construction reuses the read-only preview cache")
  cases=cases+6
+end
+-- Negative chunk boundaries include neighboring cells, and candidate order
+-- must not hide a matching ghost behind a wrong direction/quality entity.
+do
+ local bad={valid=true,name="test-belt",type="transport-belt",position={x=-32,y=0},direction=4,quality={name="normal"}}
+ local ghost={valid=true,name="entity-ghost",type="entity-ghost",ghost_name="test-belt",
+  position={x=-32.0005,y=-.0005},direction=0,quality={name="legendary"}}
+ local queries=0
+ local map={find_entities_filtered=function() queries=queries+1;return {bad,ghost} end}
+ local state={surface=map,player={force={}},output_only=true,preview_only=true}
+ assert(obstacles.shared_entity(state,"test-belt",{x=-32,y=0},0,"legendary")==ghost,"negative chunk boundary loses matching ghost")
+ assert(not obstacles.shared_entity(state,"test-belt",{x=-32,y=0},0),"wrong quality ghost reused")
+ assert(queries==1,"negative chunk repeats an unchanged query")
+ cases=cases+3
 end
 print("Obstacles OK: "..cases.." collision comparisons, engine entity/terrain filters, local queries and scan bounds")

@@ -6,6 +6,7 @@ local floor, ceil = math.floor, math.ceil
 local ignored_types = {"resource", "character", "unit", "corpse", "item-entity", "tile-ghost"}
 local hazard_tiles
 local geometry_cache={}
+local shared_shapes={}
 local shared_cache=setmetatable({}, {__mode="k"})
 local owned_ids=setmetatable({}, {__mode="k"})
 
@@ -19,11 +20,6 @@ function obstacles.active(state)
 		or state.avoid_obstacles_choice or state.avoid_water_choice or state.avoid_cliffs_choice
 		or state.remove_entities_choice ~= nil or state.remove_trees_choice ~= nil or state.remove_rocks_choice ~= nil
 		or state.deconstruction_choice or state.landfill_choice
-end
-
-local function overlap(a, b)
-	return a.left_top.x < b.right_bottom.x and a.right_bottom.x > b.left_top.x
-		and a.left_top.y < b.right_bottom.y and a.right_bottom.y > b.left_top.y
 end
 
 function obstacles.collect(surface, area, ignored, choices)
@@ -69,30 +65,36 @@ function obstacles.collect(surface, area, ignored, choices)
 	return index
 end
 
-function obstacles.blocked_box(index, box)
-	for x=floor(box.left_top.x + 0.001),ceil(box.right_bottom.x - 0.001)-1 do
-		for y=floor(box.left_top.y + 0.001),ceil(box.right_bottom.y - 0.001)-1 do
+function obstacles.blocked_bounds(index, x1,y1,x2,y2)
+	for x=floor(x1 + 0.001),ceil(x2 - 0.001)-1 do
+		for y=floor(y1 + 0.001),ceil(y2 - 0.001)-1 do
 			if index.tiles[key(x,y)] then return true end
 		end
 	end
 	if index.boxes_by_cell then
-		for x=floor(box.left_top.x),ceil(box.right_bottom.x)-1 do
-			for y=floor(box.left_top.y),ceil(box.right_bottom.y)-1 do
+		for x=floor(x1),ceil(x2)-1 do
+			for y=floor(y1),ceil(y2)-1 do
 				local bucket=index.boxes_by_cell[key(x,y)]
-				if bucket then for _,other in ipairs(bucket) do if overlap(box,other) then return true end end end
+				if bucket then for _,other in ipairs(bucket) do if x1<other.right_bottom.x and x2>other.left_top.x and y1<other.right_bottom.y and y2>other.left_top.y then return true end end end
 			end
 		end
 	else
-		for _, other in ipairs(index.boxes) do if overlap(box, other) then return true end end
+		for _, other in ipairs(index.boxes) do if x1<other.right_bottom.x and x2>other.left_top.x and y1<other.right_bottom.y and y2>other.left_top.y then return true end end
 	end
 	return false
 end
 
-function obstacles.entity_box(name, position, direction)
-	local proto = prototypes.entity[name]
-	local k=name..":"..tostring(direction)
-	local shape=geometry_cache[k]
-	if not shape or shape.prototype~=proto then
+function obstacles.blocked_box(index, box)
+ return obstacles.blocked_bounds(index,box.left_top.x,box.left_top.y,box.right_bottom.x,box.right_bottom.y)
+end
+
+function obstacles.entity_bounds(name, px, py, direction)
+ local proto=prototypes.entity[name]
+ local shapes=geometry_cache[name]
+ if not shapes or shapes.prototype~=proto then shapes={prototype=proto};geometry_cache[name]=shapes end
+ local k=direction or false
+ local shape=shapes[k]
+ if not shape then
 		local box=proto.collision_box
 		local x1,y1,x2,y2=box.left_top.x,box.left_top.y,box.right_bottom.x,box.right_bottom.y
 		local width,height=proto.tile_width,proto.tile_height
@@ -102,14 +104,18 @@ function obstacles.entity_box(name, position, direction)
 		if direction==defines.direction.east or direction==defines.direction.west then width,height=height,width end
 		shape={prototype=proto,x1=x1,y1=y1,x2=x2,y2=y2,ox=(width%2)/2,oy=(height%2)/2,
 			off_grid=proto.has_flag("placeable-off-grid")}
-		geometry_cache[k]=shape
+		shapes[k]=shape
 	end
-	local px,py = position.x,position.y
 	if not shape.off_grid then
 		-- Ghost creation snaps odd-sized buildings to tile centers and even sizes to edges.
 		px,py = floor(px+0.5-shape.ox)+shape.ox,floor(py+0.5-shape.oy)+shape.oy
 	end
-	return {left_top={x=px+shape.x1,y=py+shape.y1},right_bottom={x=px+shape.x2,y=py+shape.y2}}
+ return px+shape.x1,py+shape.y1,px+shape.x2,py+shape.y2
+end
+
+function obstacles.entity_box(name, position, direction)
+ local x1,y1,x2,y2=obstacles.entity_bounds(name,position.x,position.y,direction)
+ return {left_top={x=x1,y=y1},right_bottom={x=x2,y=y2}}
 end
 
 function obstacles.get(state)
@@ -158,43 +164,74 @@ function obstacles.get(state)
 	return index
 end
 
+local function shared_match(entity,name,x,y,direction,quality)
+ if not entity.valid or not (entity.name==name or entity.type=="entity-ghost" and entity.ghost_name==name)
+  or entity.direction~=direction then return end
+ local q=entity.quality
+ if q and q.name~=quality then return end
+ local p=entity.position
+ if math.abs(p.x-x)<.001 and math.abs(p.y-y)<.001 then return entity end
+end
+
 function obstacles.shared_entity(state,name,position,direction,quality)
-	if not state.output_only or not state.surface.find_entities_filtered then return end
-	local proto=prototypes.entity[name]
-	if not proto or (proto.type~="transport-belt" and proto.type~="straight-rail") then return end
-	local entities
-	if state.preview_only then
-		-- Preview queries never create entities. Cache spatial buckets only for this
-		-- tick; real construction still observes entities created earlier in its loop.
-		local saved=shared_cache[state]
-		if not saved or saved.tick~=game.tick then saved={tick=game.tick,chunks={}};shared_cache[state]=saved end
-		local cx,cy=floor(position.x/32),floor(position.y/32)
-		local k=key(cx,cy)
-		local buckets=saved.chunks[k]
-		if not buckets then
-			buckets={};saved.chunks[k]=buckets
-			for _,entity in pairs(state.surface.find_entities_filtered{
-				area={{cx*32-.05,cy*32-.05},{(cx+1)*32+.05,(cy+1)*32+.05}},
-				type={"transport-belt","straight-rail","entity-ghost"},force=state.player.force}) do
-				local p=entity.position
-				local cell=key(floor(p.x),floor(p.y))
-				local list=buckets[cell] or {};buckets[cell]=list;list[#list+1]=entity
-			end
-		end
-		entities={}
-		for x=floor(position.x-.001),floor(position.x+.001) do
-			for y=floor(position.y-.001),floor(position.y+.001) do
-				for _,entity in ipairs(buckets[key(x,y)] or {}) do entities[#entities+1]=entity end
-			end
-		end
-	else
-		entities=state.surface.find_entities_filtered{position=position,radius=.05,force=state.player.force}
-	end
-	for _,entity in pairs(entities) do
-		local matches=entity.valid and (entity.name==name or entity.type=="entity-ghost" and entity.ghost_name==name)
-		if matches and entity.direction==direction and (not entity.quality or entity.quality.name==(quality or "normal"))
-			and math.abs(entity.position.x-position.x)<.001 and math.abs(entity.position.y-position.y)<.001 then return entity end
-	end
+ if not state.output_only then return end
+ local proto=prototypes.entity[name]
+ if not proto then return end
+ local shape=shared_shapes[name]
+ if not shape or shape.prototype~=proto then
+  local kind=proto.type
+  shape={prototype=proto,reusable=kind=="transport-belt" or kind=="straight-rail"};shared_shapes[name]=shape
+ end
+ if not shape.reusable then return end
+ local px,py=position.x,position.y
+ quality=quality or "normal"
+ if state.preview_only then
+  -- Numeric rows avoid per-belt string keys and candidate arrays. Buckets are
+  -- still tick-scoped: construction and subsequent ticks observe world changes.
+  local saved=shared_cache[state]
+  if not saved or saved.tick~=game.tick then saved={tick=game.tick,chunks={}};shared_cache[state]=saved end
+  local cx,cy=floor(px/32),floor(py/32)
+  local row=saved.chunks[cy]
+  if not row then row={};saved.chunks[cy]=row end
+  local buckets=row[cx]
+  if buckets==nil then
+   local query=state.surface.find_entities_filtered
+   if not query then return end
+   local entities=query{
+    area={{cx*32-.05,cy*32-.05},{(cx+1)*32+.05,(cy+1)*32+.05}},
+    type={"transport-belt","straight-rail","entity-ghost"},force=state.player.force}
+   buckets=false
+   for _,entity in pairs(entities) do
+    if not buckets then buckets={} end
+    local p=entity.position
+    local x,y=floor(p.x),floor(p.y)
+    local cells=buckets[x]
+    if not cells then cells={};buckets[x]=cells end
+    local list=cells[y]
+    if not list then list={};cells[y]=list end
+    list[#list+1]=entity
+   end
+   row[cx]=buckets
+  end
+  if not buckets then return end
+  for x=floor(px-.001),floor(px+.001) do
+   local cells=buckets[x]
+   if cells then for y=floor(py-.001),floor(py+.001) do
+    local list=cells[y]
+    if list then for _,entity in ipairs(list) do
+     local result=shared_match(entity,name,px,py,direction,quality)
+     if result then return result end
+    end end
+   end end
+  end
+ else
+  local query=state.surface.find_entities_filtered
+  if not query then return end
+  for _,entity in pairs(query{position=position,radius=.05,force=state.player.force}) do
+   local result=shared_match(entity,name,px,py,direction,quality)
+   if result then return result end
+  end
+ end
 end
 
 -- A routing attempt is synchronous and cannot change the world. Resolve its
@@ -204,7 +241,7 @@ function obstacles.placement_checker(state,name,direction)
 	local index=obstacles.get(state)
 	if not next(index.tiles) and #index.boxes==0 then return function() return true end end
 	return function(position)
-		return not obstacles.blocked_box(index,obstacles.entity_box(name,position,direction))
+		return not obstacles.blocked_bounds(index,obstacles.entity_bounds(name,position.x,position.y,direction))
 			or obstacles.shared_entity(state,name,position,direction,state.belt_quality_choice)~=nil
 	end
 end
@@ -216,7 +253,7 @@ function obstacles.can_place(state, name, position, direction)
 	if not obstacles.active(state) then return true end
 	-- Most route probes are empty ground. Only query the engine for a reusable
 	-- entity when the broad phase actually found an obstruction at this position.
-	if not obstacles.blocked_box(obstacles.get(state), obstacles.entity_box(name,position,direction)) then return true end
+	if not obstacles.blocked_bounds(obstacles.get(state),obstacles.entity_bounds(name,position.x,position.y,direction)) then return true end
 	return obstacles.shared_entity(state,name,position,direction,state.belt_quality_choice)~=nil
 end
 
