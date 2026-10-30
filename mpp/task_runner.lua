@@ -5,7 +5,7 @@ local preview = require("mpp.preview")
 
 local task_runner = {}
 
-function task_runner.mining_patch_task(state)
+local function mining_patch_step(state)
 	local layout = algorithm.layouts[state.layout_choice]
 
 	local last_callback = state._callback
@@ -140,6 +140,20 @@ function task_runner.mining_patch_task(state)
 		if state._from_preview then preview.applied(state) end
 	elseif tick_result ~= true then
 		state._callback = tick_result
+	end
+end
+
+local batchable_preview_steps={process_grid=true,process_grid_convolution=true,layout_attempts=true}
+
+function task_runner.mining_patch_task(state)
+	-- These steps already have deterministic work budgets and usually finish
+	-- well below a frame. Do not spend a full game tick on every small batch,
+	-- or run the following unbounded routing/placement step in the same frame.
+	local callback=state._callback
+	local batches=state.preview_only and not state._apply_after_preview and batchable_preview_steps[callback] and 4 or 1
+	for _=1,batches do
+		mining_patch_step(state)
+		if storage.tasks[1]~=state or state._callback~=callback then break end
 	end
 end
 

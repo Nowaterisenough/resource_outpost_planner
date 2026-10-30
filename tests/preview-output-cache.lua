@@ -1,10 +1,13 @@
 -- Cache invalidation and read-only routing state, without a game process.
 defines={direction={west=12}}
+game={tick=1}
+package.loaded["mpp.train_station"]={output_count=function(c) return (c.output_wagon_count_choice or 4)*(c.output_loading_side_choice=="single" and 1 or 2) end}
 function table.deepcopy(value)
 	if type(value)~="table" then return value end
 	local result={};for k,v in pairs(value) do result[k]=table.deepcopy(v) end;return result
 end
-package.loaded["mpp.mpp_util"]={bp_direction={west={[12]=12}}}
+package.loaded["mpp.mpp_util"]={bp_direction={west={[12]=12}},revert_world=function(_,_,_,x,y) return {x,y} end}
+package.loaded["mpp.obstacles"]={entity_box=function() return {left_top={x=-.4,y=-.4},right_bottom={x=.4,y=.4}} end}
 package.loaded["mpp.terrain"]={blocked_tile=function(t) return t.prototype.hazard end}
 local routing_error,seen_grid
 package.loaded["mpp.belt_planner"]={
@@ -85,7 +88,7 @@ for _,change in ipairs{
 	function(d,s) s.player.force.index=2 end,
 	function(d,s) s.surface.global_effect.speed=1 end,
 	function(d) d.choices.output_belt_count_choice=4 end,
-	function(d) d.choices.output_station_choice=true end,
+	function(d) d.choices.output_station_choice=true;d.choices.output_wagon_count_choice=6 end,
 	function(d) d.choices.belt_load_max_choice=1.2 end,
 	function(d) d.choices.module_choice="speed-module" end,
 	function(d) d.preview.output_basis.geometry_revision=nil end,
@@ -98,6 +101,16 @@ for _,change in ipairs{
 	data,state,ore=fixture();change(data,state,ore)
 	check(not cache.resume(data),"mining input change reused stale geometry")
 end
+
+data,state=fixture()
+data.choices.output_station_choice=true
+check(cache.resume(data),"equivalent station/balancer output budget rebuilt mining layout")
+data.choices.output_locomotive_count_choice=5
+check(cache.resume(data),"locomotive length rebuilt mining layout")
+data.choices.output_belt_count_choice=24
+check(cache.resume(data),"inactive balancer count rebuilt station mining layout")
+data.choices.output_loading_side_choice="single"
+check(not cache.resume(data),"loading side changed the output budget without rebuilding mining layout")
 
 data,state=fixture()
 data.choices.belt_merge_choice=false;data.choices.output_balance_choice=false

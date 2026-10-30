@@ -1,11 +1,30 @@
--- Run in two isolated native-server processes to exercise real save/reload.
+-- Run in three isolated native-server processes to exercise real save/reload.
 local cache_test=require("mpp.preview_output_cache")
+require("mpp.preview_construction").budget=128 -- force several serializable construction batches in this fixture
 local original_refresh=cache_test.refresh
 cache_test.refresh=function(state)
- storage.preview_cache_test.refreshes=storage.preview_cache_test.refreshes+1
+ if not state._output_work then storage.preview_cache_test.refreshes=storage.preview_cache_test.refreshes+1 end
  return original_refresh(state)
 end
 local created_save=false
+local original_runner=task_runner_handler
+task_runner_handler=function(event)
+ local t=storage.preview_cache_test
+ if t and (t.phase=="saved" or t.phase=="saved-output") then
+  if created_save then return end
+  local d=storage.players[1]
+  if t.phase=="saved" then
+   assert(d.preview.render_job and not d.preview.ready,"unfinished rendering job lost during save/reload")
+   assert(not preview.apply(d) and not preview.apply(d,defines.build_mode.superforced),"Apply accepted a partial restored render")
+   t.phase="resume-render"
+  else
+   assert(storage.tasks[1] and storage.tasks[1]._output_work,"unfinished output construction lost during save/reload")
+   t.phase="reloaded"
+  end
+ end
+ return original_runner(event)
+end
+
 local function snapshot(specs)
  local result={}
  for _,s in ipairs(specs) do if s.name=="entity-ghost" then
@@ -33,7 +52,7 @@ local function start()
  c.belt_planner_choice=true;c.output_balance_choice=true;c.output_belt_count_choice=8;c.output_station_choice=false
  c.terrain_mode_choice="fill";c.cliff_mode_choice="remove";c.remove_entities_choice=false
  local resources={}
- for x=0,39 do for y=0,31 do resources[#resources+1]=surface.create_entity{name="iron-ore",position={x+.5,y+.5},amount=100000} end end
+ for x=0,119 do for y=0,95 do resources[#resources+1]=surface.create_entity{name="iron-ore",position={x+.5,y+.5},amount=100000} end end
  storage.preview_cache_test={phase="base",refreshes=0,surface=surface,resources=resources,changes=0}
  gui.show_interface(p)
  preview.select{player_index=1,surface=surface,entities=resources}
@@ -42,8 +61,22 @@ end
 script.on_nth_tick(1,function()
  if not storage.preview_cache_test then start();return end
  local t=storage.preview_cache_test;local d=storage.players[1];local v=d.preview;local p=game.get_player(1)
- if t.phase=="done" or t.phase=="saved" and created_save then return end
- if #storage.tasks>0 or v and v.refresh_at then return end
+ if t.phase=="done" or (t.phase=="saved" or t.phase=="saved-output") and created_save then return end
+ if t.phase=="reloaded" and storage.tasks[1] and storage.tasks[1]._output_work
+  and storage.tasks[1]._output_work.next_spec>1 and not t.output_saved then
+  t.output_saved=true;t.phase="saved-output";created_save=true
+  game.server_save("preview-output-cache-checkpoint")
+  log("OUTPUT CACHE CHECKPOINT REQUESTED DURING CONSTRUCTION")
+  return
+ end
+ if t.phase=="full" and v and v.render_job and v.render_job.next_spec>1 then
+  assert(snapshot(v.specs)==t.expected,"cached and full planning differ before render save")
+  t.phase="saved";created_save=true
+  game.server_save("preview-output-cache-checkpoint")
+  log("OUTPUT CACHE CHECKPOINT REQUESTED DURING RENDER")
+  return
+ end
+ if #storage.tasks>0 or v and (v.refresh_at or v.render_job or v.output_job) then return end
  if t.phase=="base" then
   assert(v.ready and v.output_basis,"initial mining basis missing")
   preview.set_belt_target(d,{position={x=-90.5,y=18.5},direction=defines.direction.west});t.phase="cached"
@@ -51,13 +84,9 @@ script.on_nth_tick(1,function()
   assert(v.ready and t.refreshes==1,"initial output did not reuse mining geometry")
   t.expected=snapshot(v.specs);preview.request(d);t.phase="full"
  elseif t.phase=="full" then
-  assert(v.ready and snapshot(v.specs)==t.expected,"cached and full planning differ")
-  assert(v.output_basis,"full replan did not retain basis")
-  t.phase="saved";created_save=true
-  game.server_save("preview-output-cache-checkpoint")
-  log("OUTPUT CACHE CHECKPOINT REQUESTED")
- elseif t.phase=="saved" then
-  assert(v.ready and v.output_basis,"mining basis lost during save/reload")
+  error("save/reload fixture did not produce a chunked render")
+ elseif t.phase=="resume-render" then
+  assert(v.ready and v.output_basis and snapshot(v.specs)==t.expected,"resumed rendering changed the mining layout")
   t.before=t.refreshes
   preview.set_belt_target(d,{position={x=-94.5,y=20.5},direction=defines.direction.west});t.phase="reloaded"
  elseif t.phase=="reloaded" then

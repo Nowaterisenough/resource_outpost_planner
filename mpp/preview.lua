@@ -8,12 +8,21 @@ local output_cache = require("mpp.preview_output_cache")
 local forced_build = require("mpp.forced_build")
 
 local preview = {}
-local render
+local render,finish_render
 
 local function destroy(objects,retained)
 	for _, object in pairs(objects or {}) do
 		if object.valid and not (retained and retained[object.id]) then object.destroy() end
 	end
+end
+
+local function cancel_render(draft)
+	if draft then draft.output_job=nil end
+	if not draft or not draft.render_job then return end
+	-- Old handles may have been reused; keep them until the next redraw, but
+	-- immediately remove newly allocated layers from an abandoned revision.
+	destroy(draft.render_job.objects,draft.render_job.retained)
+	draft.render_job=nil
 end
 
 function preview.dispose_task(state)
@@ -46,7 +55,7 @@ function preview.update_gui(data)
 	end
 	ui.preview_apply.enabled=draft~=nil and draft.ready==true and not draft.applying
 	if ui.preview_force and ui.preview_force.valid then
-		ui.preview_force.enabled=draft~=nil and not draft.applying and not draft.refresh_at
+		ui.preview_force.enabled=draft~=nil and not draft.applying and not draft.refresh_at and not draft.render_job and not draft.output_job
 			and (draft.ready or draft.error~=nil) and #(draft.specs or {})>0
 	end
 	ui.preview_cancel.enabled=draft~=nil and not draft.applying
@@ -79,7 +88,7 @@ function preview.cancel(data,force,keep_selection)
 	if not data then return true end
 	if data.preview and data.preview.applying and not force then return false end
 	stop_tasks(data.preview and data.preview.player_index or -1)
-	if data.preview then destroy(data.preview.renderings) end
+	if data.preview then cancel_render(data.preview);destroy(data.preview.renderings) end
 	if not (keep_selection and data.input_mode == "select") then input_mode.idle(data) end
 	data.preview=nil
 	preview.update_gui(data)
@@ -89,6 +98,7 @@ end
 function preview.invalidate(data,err)
 	if not data.preview or data.preview.applying then return end
 	local draft=data.preview
+	cancel_render(draft)
 	stop_tasks(draft.player_index)
 	draft.revision=draft.revision+1
 	draft.refresh_at=nil
@@ -120,6 +130,7 @@ function preview.request(data,output_change)
 		if data.input_mode == "output" then input_mode.idle(data) end
 	end
 	stop_tasks(draft.player_index)
+	cancel_render(draft)
 	draft.revision=draft.revision+1
 	draft.ready=false
 	draft.error=nil
@@ -177,7 +188,7 @@ end
 
 function preview.has_pending()
 	for _,data in pairs(storage.players or {}) do
-		if data.preview and data.preview.refresh_at then return true end
+		if data.preview and (data.preview.refresh_at or data.preview.render_job or data.preview.output_job) then return true end
 	end
 	return false
 end
@@ -185,17 +196,29 @@ end
 function preview.tick()
 	for _,data in pairs(storage.players) do
 		local draft=data.preview
+		if draft and draft.render_job then
+			local job=draft.render_job
+			local objects,retained=preview_renderer.step(draft,job,4096)
+			if objects then
+				destroy(draft.renderings,retained);draft.renderings=objects
+				draft.render_job=nil;draft.ready=job.ready
+				finish_render(data,draft,job.state)
+			end
+		end
+		if draft and draft.output_job then
+			local ok,done=pcall(output_preview.step_refresh,data)
+			if not ok then
+				log("Output preview construction failed: "..tostring(done))
+				draft.output_job=nil;draft.ready=false;draft.error={"mpp.preview_failed"}
+			end
+			if not ok or done then render(data,draft) end
+		end
 		if draft and draft.refresh_at and game.tick>=draft.refresh_at then
 			draft.refresh_at=nil
 			if draft.output_only then
-				local ok,err=pcall(output_preview.refresh,data)
+				local ok,err=pcall(output_preview.start_refresh,data)
 				if not ok then log("Output preview validation failed: "..tostring(err));draft.ready=false;draft.error={"mpp.preview_failed"} end
-				render(data,draft)
-				preview.update_gui(data)
-				if data.input_mode=="output" then
-					local spec=input_mode.output_specification(data,game.get_player(draft.player_index))
-					if spec then belt_planner.update_blueprint(game.get_player(draft.player_index),spec) end
-				end
+				if not draft.output_job then render(data,draft) end
 			else
 				local reused=draft.output_change and output_cache.resume(data)
 				if reused then
@@ -230,10 +253,35 @@ function preview.tick()
 	end
 end
 
-render = function(data,draft)
-	local objects,retained=preview_renderer.render(draft,data.choices)
-	destroy(draft.renderings,retained)
-	draft.renderings=objects
+finish_render = function(data,draft,state)
+	if state and (draft.ready or (#draft.specs>0 and state.belts and state.belt)) then
+		state._render_objects=List()
+		common.display_lane_filling(state)
+		for _,object in pairs(state._render_objects) do draft.renderings[#draft.renderings+1]=object end
+	end
+	preview.update_gui(data)
+	if data.input_mode=="output" then
+		local player=game.get_player(draft.player_index)
+		local spec=state and draft.belt_specification or input_mode.output_specification(data,player)
+		if spec then belt_planner.update_blueprint(player,spec)
+		elseif state then input_mode.idle(data,player) end
+	end
+end
+
+render = function(data,draft,state)
+	cancel_render(draft)
+	if #(draft.specs or {})>2048 then
+		local job=preview_renderer.begin(draft,data.choices)
+		job.ready=draft.ready;job.state=state
+		draft.ready=false;draft.render_job=job
+		preview.update_gui(data)
+		script.on_event(defines.events.on_tick,task_runner_handler)
+	else
+		local objects,retained=preview_renderer.render(draft,data.choices)
+		destroy(draft.renderings,retained)
+		draft.renderings=objects
+		finish_render(data,draft,state)
+	end
 end
 
 local function commit(data)
@@ -312,23 +360,13 @@ function preview.complete(state)
 			end
 		else draft.applying=false end
 	end
-	render(data,draft)
-	if draft.ready or (#draft.specs>0 and state.belts and state.belt) then
-		state._render_objects=List()
-		common.display_lane_filling(state)
-		for _,object in pairs(state._render_objects) do draft.renderings[#draft.renderings+1]=object end
-	end
-	preview.update_gui(data)
-	if data.input_mode == "output" then
-		if draft.belt_specification then belt_planner.update_blueprint(state.player,draft.belt_specification)
-		else input_mode.idle(data, state.player) end
-	end
+	render(data,draft,state)
 end
 
 function preview.apply(data,mode)
 	local draft=data.preview
 	if mode~=nil and mode~=defines.build_mode.forced and mode~=defines.build_mode.superforced then return false end
-	if not draft or draft.applying or draft.refresh_at then return false end
+	if not draft or draft.applying or draft.refresh_at or draft.render_job or draft.output_job then return false end
 	if not draft.ready and not (mode and draft.error and #(draft.specs or {})>0) then return false end
 	local facility_removal=mode==nil and data.choices.remove_entities_choice==true
 	-- Clear also applies to explicit Shift/Force clicks. Keep facility_removal

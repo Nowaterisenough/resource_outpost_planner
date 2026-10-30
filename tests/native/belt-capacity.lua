@@ -347,7 +347,7 @@ end
 local function cap_workflow()
 	local d=storage.players[cap_player.index]
 	if cap_phase==0 then cap_regressions();cap_phase=1;return end
-	if #storage.tasks>0 or d.preview and d.preview.refresh_at then return end
+	if #storage.tasks>0 or d.preview and (d.preview.refresh_at or d.preview.render_job or d.preview.output_job) then return end
 	if cap_phase==1 then
 		assert(d.preview.ready,"initial GUI preview failed")
 		local field=d.gui.belt_load_fields.max

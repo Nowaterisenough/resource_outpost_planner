@@ -13,7 +13,6 @@ local function position(pos) return pos.x or pos[1],pos.y or pos[2] end
 local sprite_paths={}
 local artworks={entity={},tile={}}
 local entity_shapes={}
-local topology_shapes={}
 
 local function grid_at(grid,x,y)
 	local row=grid[y]
@@ -28,9 +27,9 @@ local function grid_set(grid,x,y,value)
 	row[x]=value
 end
 
-local function topology_shape(kind,direction,endpoint)
-	local by_type=topology_shapes[kind]
-	if not by_type then by_type={};topology_shapes[kind]=by_type end
+local function topology_shape(shapes,kind,direction,endpoint)
+	local by_type=shapes[kind]
+	if not by_type then by_type={};shapes[kind]=by_type end
 	local by_direction=by_type[direction]
 	if not by_direction then by_direction={};by_type[direction]=by_direction end
 	local k=endpoint or false
@@ -133,19 +132,19 @@ local function artwork(spec,tile,variant)
 end
 
 local function topology(draft)
-	local nodes,ports={},{}
+	local nodes,ports,shapes={},{},{}
 	local function add(name,pos,direction,kind,mirror)
 		local shape=entity_shape(name)
 		if not shape then return end
 		local x,y=position(pos)
 		direction=direction or N
-		-- Topology is ephemeral: share immutable connection shapes without storing
-		-- those local tables in the persistent sprite records.
-		grid_set(nodes,x,y,topology_shape(shape.type,direction,kind))
+		-- Intern shapes within this job only. Sharing module-local tables with
+		-- persistent jobs would change storage aliasing after a multiplayer join.
+		grid_set(nodes,x,y,topology_shape(shapes,shape.type,direction,kind))
 		if shape.type=="splitter" then
 			local delta=util.direction_coord[direction]
 			for _,sign in ipairs{-1,1} do
-				grid_set(nodes,x+delta.y*sign/2,y-delta.x*sign/2,topology_shape("transport-belt",direction))
+				grid_set(nodes,x+delta.y*sign/2,y-delta.x*sign/2,topology_shape(shapes,"transport-belt",direction))
 			end
 		end
 		for _,port in ipairs(shape.ports[direction] or {}) do
@@ -222,7 +221,7 @@ function renderer.variant(spec,nodes,ports,lookup)
 	return name
 end
 
-function renderer.render(draft,choices)
+function renderer.begin(draft,choices)
 	local player=game.get_player(draft.player_index)
 	local nodes,ports=topology(draft)
 	local objects={}
@@ -237,22 +236,42 @@ function renderer.render(draft,choices)
 	local allowed=constants.building_buildable_tint or {0.4,1,0.4,1}
 	local blocked=constants.building_not_buildable_tint or {1,0.4,0.4,1}
 	local allowed_key,blocked_key=color_key(allowed),color_key(blocked)
-	local selected_obstacles,boxes
-	if obstacles.active(choices) then
-		boxes={}
-		local x1,y1,x2,y2=math.huge,math.huge,-math.huge,-math.huge
-		for i,spec in ipairs(draft.specs) do
+	local boxes=obstacles.active(choices) and {} or nil
+	return {nodes=nodes,ports=ports,objects=objects,reusable=reusable,entries=entries,retained=retained,
+		styles=styles,previous_styles=previous_styles,allowed=allowed,blocked=blocked,
+		allowed_key=allowed_key,blocked_key=blocked_key,choices=choices,boxes=boxes,next_spec=1,
+		box_next=boxes and 1 or nil,bounds={math.huge,math.huge,-math.huge,-math.huge}}
+end
+
+-- The job contains plain tables and LuaRenderObjects only, so interrupted
+-- rendering can continue after saving/loading without a coroutine or closure.
+function renderer.step(draft,job,limit)
+	if job.box_next then
+		local last=math.min(#draft.specs,job.box_next+(limit or 4096)-1)
+		local b=job.bounds
+		for i=job.box_next,last do
+			local spec=draft.specs[i]
 			if spec.name=="entity-ghost" then
 				local x,y=position(spec.position)
-				local pos=spec.position.x and spec.position or {x=x,y=y}
-				local box=obstacles.entity_box(spec.inner_name,pos,spec.direction)
-				boxes[i]=box
-				x1,y1=math.min(x1,box.left_top.x),math.min(y1,box.left_top.y)
-				x2,y2=math.max(x2,box.right_bottom.x),math.max(y2,box.right_bottom.y)
+				local box=obstacles.entity_box(spec.inner_name,{x=x,y=y},spec.direction)
+				job.boxes[i]=box
+				b[1],b[2]=math.min(b[1],box.left_top.x),math.min(b[2],box.left_top.y)
+				b[3],b[4]=math.max(b[3],box.right_bottom.x),math.max(b[4],box.right_bottom.y)
 			end
 		end
-		if x1~=math.huge then selected_obstacles=obstacles.collect(draft.surface,{{x1,y1},{x2,y2}},nil,choices) end
+		job.box_next=last+1
+		if last<#draft.specs then return end
+		if b[1]~=math.huge then job.selected_obstacles=obstacles.collect(draft.surface,{{b[1],b[2]},{b[3],b[4]}},nil,job.choices) end
+		job.box_next=nil
+		if #draft.specs>(limit or 4096) then return end
 	end
+	local player=game.get_player(draft.player_index)
+	local nodes,ports=job.nodes,job.ports
+	local objects,reusable,entries,retained=job.objects,job.reusable,job.entries,job.retained
+	local styles,previous_styles=job.styles,job.previous_styles
+	local allowed,blocked=job.allowed,job.blocked
+	local allowed_key,blocked_key=job.allowed_key,job.blocked_key
+	local selected_obstacles,boxes=job.selected_obstacles,job.boxes
 	local function draw(style,pos,tint)
 		local stored=styles[style.key]
 		if not stored then
@@ -289,7 +308,9 @@ function renderer.render(draft,choices)
 		entries[#entries+1]=entry
 		objects[#objects+1]=entry[1]
 	end
-	for i,spec in ipairs(draft.specs) do
+	local last=math.min(#draft.specs,job.next_spec+(limit or 4096)-1)
+	for i=job.next_spec,last do
+		local spec=draft.specs[i]
 		local x,y=position(spec.position)
 		local pos=spec.position.x and spec.position or {x=x,y=y}
 		local tile=spec.name=="tile-ghost"
@@ -308,6 +329,9 @@ function renderer.render(draft,choices)
 		end
 		for _,style in ipairs(layers) do draw(style,target,tint) end
 	end
+	job.reusable=reusable
+	job.next_spec=last+1
+	if last<#draft.specs then return end
 	local labels={}
 	for _,issue in ipairs(draft.issues or {}) do
 		local x,y=position(issue.position)
@@ -330,6 +354,11 @@ function renderer.render(draft,choices)
 	end
 	draft.sprite_renderings={surface=draft.surface,player_index=draft.player_index,entries=entries,styles=styles}
 	return objects,retained
+end
+
+function renderer.render(draft,choices)
+	local job=renderer.begin(draft,choices)
+	return renderer.step(draft,job,math.huge)
 end
 
 return renderer

@@ -24,7 +24,7 @@ def main():
     baseline = parser.add_mutually_exclusive_group()
     baseline.add_argument("--ref", help="Git revision to compare with the working tree")
     baseline.add_argument("--package", type=Path, help="Previously packaged runtime to compare with the working tree")
-    parser.add_argument("--scenario", choices=("outputs", "large", "move", "apply", "irregular", "contour", "load", "load-repeat", "load-output-only", "dense-repeat", "dense-station", "fill"), default="outputs",
+    parser.add_argument("--scenario", choices=("outputs", "large", "move", "apply", "irregular", "contour", "load", "load-repeat", "load-output-only", "dense-repeat", "dense-station", "station-first", "station-output-only", "fill"), default="outputs",
                         help="Output previews, large/irregular mines, beacon contours, station moves, or application")
     parser.add_argument("--timing-only", action="store_true",
                         help="Skip correctness snapshots and their allocations between measured requests")
@@ -88,7 +88,7 @@ def main():
     log_path = root / "benchmark.log"
     with log_path.open("w") as output:
         result = subprocess.run([str(binary), "--config", str(config), "--mod-directory", str(mods),
-                                 "--benchmark", str(isolated_save), "--benchmark-ticks", "2200", "--benchmark-runs", "1"],
+                                 "--benchmark", str(isolated_save), "--benchmark-ticks", "4000", "--benchmark-runs", "1"],
                                 stdout=output, stderr=subprocess.STDOUT, env=dict(os.environ, SteamAppId="427520"))
     log = log_path.read_text()
     cases = {}

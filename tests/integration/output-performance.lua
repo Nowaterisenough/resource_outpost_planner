@@ -11,7 +11,9 @@ local perf_cache=require('mpp.preview_output_cache')
 local perf_balancer=require('mpp.output_balancer')
 local perf_util=require('mpp.mpp_util')
 local scenario=output_performance_scenario or 'outputs'
-local dense_scenario=scenario=='dense-repeat' or scenario=='dense-station'
+local first_station=scenario=='station-first'
+local applied_station=scenario=='station-output-only'
+local dense_scenario=scenario=='dense-repeat' or scenario=='dense-station' or first_station or applied_station
 local load_scenario=scenario=='load' or scenario=='load-repeat' or scenario=='load-output-only' or dense_scenario
 local capture_snapshots=output_performance_capture~=false
 local perf_active,perf_stats,perf_calls=false,{},{}
@@ -23,7 +25,7 @@ local function timing(label,fn,...)
  local stat=perf_stats[label]
  if not stat then stat={timer=helpers.create_profiler(true),count=0};perf_stats[label]=stat end
  stat.timer.add(timer);stat.count=stat.count+1
- if label=='render' then
+ if label=='render' or label=='render_step' and a then
   local reused=b and table_size(b) or 0
   perf_calls.render_created=(perf_calls.render_created or 0)+#a-reused
   perf_calls.render_reused=(perf_calls.render_reused or 0)+reused
@@ -37,6 +39,7 @@ wrap(perf_obstacles,'collect','obstacle_scan')
 wrap(perf_planner,'plan','routing_total')
 wrap(perf_planner,'place_landfill','landfill')
 wrap(perf_renderer,'render','render')
+if perf_renderer.begin then wrap(perf_renderer,'begin','render_begin');wrap(perf_renderer,'step','render_step') end
 wrap(perf_station,'geometry','station_geometry')
 wrap(perf_planner,'update_blueprint','cursor')
 wrap(perf_preview,'complete','complete')
@@ -144,6 +147,12 @@ if scenario=='dense-station' then
  for i=1,8 do cases[#cases+1]={name='dense-station-'..i,station=true,
   x=-300+2*((i-1)%2),y=-180+2*((i-1)%3),dir=({0,0,4,4,8,8,12,12})[i],mirror=i%2==0} end
 end
+if first_station or applied_station then
+ cases={}
+ for _,name in ipairs{'first','repeat-1','repeat-2'} do
+  cases[#cases+1]={name=name,station=true,x=-300,y=-180,dir=0}
+ end
+end
 local phase,index,player,data,surface,start_tick=0,0
 local total
 local function snapshot(name,specs)
@@ -204,6 +213,10 @@ local function initialize()
   c.miner_quality_choice='normal';c.pole_quality_choice='normal';c.beacon_choice='none'
   c.module_choice='speed-module-3';c.module_quality_choice='normal';c.belt_choice='express-transport-belt'
   c.output_belt_count_choice=24;c.lamp_choice=true
+  if first_station then
+   c.output_balance_choice=false;c.output_station_choice=false;c.output_locomotive_count_choice=2
+   c.output_wagon_count_choice=4;c.output_loading_side_choice='double';c.terrain_mode_choice='fill'
+  end
  end
  perf_gui.show_interface(player)
  local edge=(scenario=='large' or scenario=='move') and 63 or 23
@@ -226,13 +239,13 @@ local function initialize()
   for x=0,edge do for y=0,edge do resources[#resources+1]=surface.create_entity{name='iron-ore',position={x+.5,y+.5},amount=50000} end end
  end
  assert(perf_preview.select{player_index=player.index,surface=surface,entities=resources})
- phase=scenario=='load-output-only' and 6 or 1
+ phase=(scenario=='load-output-only' or applied_station) and 6 or 1
 end
 local function step()
  if phase==0 then initialize();return end
  if phase==4 then return end
  if phase==6 then
-  if data.preview.refresh_at or #storage.tasks>0 then return end
+  if perf_preview.has_pending() or #storage.tasks>0 then return end
   assert(data.preview.ready and perf_preview.apply(data),'initial mine Apply failed')
   phase=7;return
  end
@@ -256,20 +269,21 @@ local function step()
   report('apply-final',true,#actual)
   log('OUTPUT PERF COMPLETE');phase=4;return
  end
- if data.preview.refresh_at or #storage.tasks>0 then return end
+ if perf_preview.has_pending() or #storage.tasks>0 then return end
  if phase==1 then
   index=index+1;if not cases[index] then log('OUTPUT PERF COMPLETE');phase=4;return end
   local c=cases[index];local choices=data.choices
   choices.output_station_choice=c.station==true;choices.output_balance_choice=c.balance==true;choices.output_belt_count_choice=dense_scenario and 24 or 8;choices.output_locomotive_count_choice=2;choices.output_wagon_count_choice=c.wagons or 4;choices.output_loading_side_choice='double';choices.belt_planner_choice=true
-  local tiles={};for x=-40,40 do for y=-15,-5 do tiles[#tiles+1]={name=c.water and (c.tile or 'water') or 'grass-1',position={x,y}} end end;surface.set_tiles(tiles);choices.terrain_mode_choice=c.water and not c.fill and 'avoid' or 'fill';choices.deconstruction_choice=c.blocked==true
+  local tiles={};for x=-40,40 do for y=-15,-5 do tiles[#tiles+1]={name=c.water and (c.tile or 'water') or 'grass-1',position={x,y}} end end;surface.set_tiles(tiles);choices.terrain_mode_choice=c.water and not c.fill and 'avoid' or 'fill';if not first_station then choices.deconstruction_choice=c.blocked==true end
   if c.blocked then for x=-27,-21 do for y=-28,-23 do surface.create_entity{name='steel-chest',position={x+.5,y+.5},force=player.force} end end end
-  if (scenario=='move' or load_scenario) and index>1 then phase=2;return end
+  if first_station or applied_station or (scenario=='move' or load_scenario) and index>1 then phase=2;return end
   data.preview.belt_target=nil;perf_preview.request(data);phase=2;return
  end
  if phase==2 then
   assert(data.preview.ready or data.preview.output_only,'base mining preview failed')
   perf_preview.give_belt_planner(data)
   local c=cases[index];perf_stats={};perf_calls={};perf_active=true;total=helpers.create_profiler(true);start_tick=game.tick
+  if first_station or applied_station then data.preview.belt_target=nil end -- measure real recalculation, not the no-op guard
   timing('click',perf_preview.set_belt_target,data,{position={x=c.x,y=c.y},direction=c.dir,mirror=c.mirror})
   phase=3;return
  end

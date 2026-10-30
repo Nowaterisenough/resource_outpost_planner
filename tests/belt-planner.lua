@@ -381,13 +381,13 @@ spec=fixture("west",3)
 state=assert(planner.create_state(spec,target(spec,151,-177,N),{output_balance_choice=true}))
 state.output_balance_choice=false
 state.belt_input_targets={{x=145,y=-145},{x=144,y=-145},{x=143,y=-145}}
-local can_place,probes=obstacles.can_place,0
-obstacles.can_place=function(...)
-	probes=probes+1
-	return can_place(...)
+local can_place,probes=obstacles.placement_checker,0
+obstacles.placement_checker=function(...)
+ local check=can_place(...)
+ return function(pos) probes=probes+1;return check(pos) end
 end
 ok,err=planner.plan(state)
-obstacles.can_place=can_place
+obstacles.placement_checker=can_place
 assert(ok,"offset station input band cannot be routed")
 verify(state,err)
 assert(probes<2000,"open station ingress falls back to an expansive search")
@@ -967,10 +967,12 @@ for _,rotation in ipairs{"west","north","east","south"} do
 		local spec=fixture(rotation,8)
 		for i,belt in ipairs(spec) do belt.x_start=-8;belt.y=({3,17,24,38,45,52,60,73})[i] end
 		local state=assert(planner.create_state(spec,target(spec,-82,y,dir),{}))
-		local original,probes=obstacles.can_place,0
-		obstacles.can_place=function(...) probes=probes+1;return original(...) end
+		local original,probes=obstacles.placement_checker,0
+		obstacles.placement_checker=function(...)
+		 local check=original(...);return function(pos) probes=probes+1;return check(pos) end
+		end
 		local ok,route=planner.plan(state)
-		obstacles.can_place=original
+		obstacles.placement_checker=original
 		assert(ok,"perpendicular output corridor failed")
 		verify(state,route)
 		assert(probes<=#route+64,"open perpendicular output expands into a broad search")
@@ -993,8 +995,10 @@ do
 	local state=assert(planner.create_state(spec,target(spec,-12,5,W),{avoid_cliffs_choice=true}))
 	state.preview_only=true;state._preview_specs={}
 	local ok,route=planner.plan(state);assert(ok)
-	local original,checks=obstacles.can_place,0
-	obstacles.can_place=function(...) checks=checks+1;return original(...) end
+	local original,checks=obstacles.placement_checker,0
+	obstacles.placement_checker=function(...)
+	 local check=original(...);return function(pos) checks=checks+1;return check(pos) end
+	end
 	local create=builder.create_entity_builder(state,{diagnostic=true,obstacles_checked=true})
 	for _,piece in ipairs(route) do create(table.deepcopy(piece)) end
 	assert(checks==0 and #state._preview_specs==#route,"successful preview repeats route collision checks")
@@ -1025,7 +1029,7 @@ do
 	state.output_only=true
 	builder.create_entity_builder(state,{obstacles_checked=true})(table.deepcopy(route[1]))
 	assert(state._preview_specs[#state._preview_specs].preview_existing,"prechecked route loses shared-belt identity")
-	obstacles.can_place=original
+	obstacles.placement_checker=original
 	cases=cases+6
 end
 
@@ -1122,10 +1126,12 @@ for _,rotation in ipairs{"west","north","east","south"} do
 		state.output_balance_choice=false
 		state.interchangeable_belt_inputs=true;state.belt_input_targets={}
 		for i=1,count do state.belt_input_targets[i]={x=-120,y=outlet_y+count-i} end
-		local original,probes=obstacles.can_place,0
-		obstacles.can_place=function(...) probes=probes+1;return original(...) end
+		local original,probes=obstacles.placement_checker,0
+		obstacles.placement_checker=function(...)
+		 local check=original(...);return function(pos) probes=probes+1;return check(pos) end
+		end
 		local ok,route=planner.plan(state)
-		obstacles.can_place=original
+		obstacles.placement_checker=original
 		assert(ok,"return-facing station cannot receive the mining bundle")
 		verify(state,route)
 		assert(probes<=#route+count*2,"return-facing station expands a broad search")

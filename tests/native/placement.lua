@@ -188,7 +188,7 @@ end
 script.on_nth_tick(1,function()
  if not storage.placement_test then start();return end
  local t=storage.placement_test;local d=storage.players[1];local v=d.preview;local p=game.get_player(1)
- if t.phase=="done" or #storage.tasks>0 or v and v.refresh_at then return end
+ if t.phase=="done" or #storage.tasks>0 or v and (v.refresh_at or v.render_job or v.output_job) then return end
  if t.phase=="shore" then
   assert(v.ready,"lava shore preview rejected: "..helpers.table_to_json(v.error or {}))
   local towers,miners={},{}

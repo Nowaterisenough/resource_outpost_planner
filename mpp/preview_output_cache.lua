@@ -1,10 +1,11 @@
 local util = require("mpp.mpp_util")
 local terrain = require("mpp.terrain")
 local planner = require("mpp.belt_planner")
-local builder = require("mpp.builder")
+local train_station = require("mpp.train_station")
 local common = require("layouts.common")
+local work=require("mpp.preview_construction")
 local cache = {}
-local geometry_revision = 8 -- Big double corridors distribute production across all four belt sides.
+local geometry_revision = 9 -- Big double corridors distribute production across all four belt sides.
 
 local ignored_types={"resource","character","unit","corpse","item-entity","tile-ghost"}
 local hazard_names
@@ -24,11 +25,22 @@ local function options(choices)
 	return result
 end
 
+local output_options={belt_planner_choice=true,output_station_choice=true,output_balance_choice=true,
+	output_locomotive_count_choice=true,output_wagon_count_choice=true,output_loading_side_choice=true,output_belt_count_choice=true}
+local function mining_output_budget(choices)
+	if not choices.belt_merge_choice then return nil end
+	return choices.output_station_choice and train_station.output_count(choices)
+		or choices.output_balance_choice and (choices.output_belt_count_choice or 8) or nil
+end
+
 local function same_options(saved,choices)
+	-- Station length and equivalent balancer/station outputs only change the
+	-- outlet. A different capacity budget can change the mining corridors.
+	if mining_output_budget(saved)~=mining_output_budget(choices) then return false end
 	for k,v in pairs(choices) do
-		if k~="belt_planner_choice" and not equal(saved[k],v) then return false end
+		if not output_options[k] and not equal(saved[k],v) then return false end
 	end
-	for k in pairs(saved) do if choices[k]==nil then return false end end
+	for k in pairs(saved) do if not output_options[k] and choices[k]==nil then return false end end
 	return true
 end
 
@@ -163,27 +175,34 @@ end
 
 function cache.refresh(state)
 	local basis=state._output_basis
-	local connection,err=planner.create_state(basis.spec,state.belt_target,state)
-	local routes,issues={},{}
-	if connection then
-		connection.preview_only=true
-		connection.planned=basis.planned
-		connection.grid={get_tile=function(_,x,y) return basis.occupied[y] and basis.occupied[y][x] end}
-		local ok,result,diagnostic=planner.plan(connection)
-		if ok then routes=result;state.balanced_output_count=connection.balanced_output_count
-		else err=result;routes=diagnostic and diagnostic.routes or {};issues=diagnostic and diagnostic.issues or {} end
-		local create=builder.create_entity_builder(connection,{diagnostic=true,obstacles_checked=ok})
-		connection._preview_specs={}
-		for _,spec in ipairs(routes) do create(spec) end
-		planner.place_landfill(connection,routes)
-		state._preview_specs=connection._preview_specs
+	if not state._output_work then
+		local connection,err=planner.create_state(basis.spec,state.belt_target,state)
+		local routes,issues={},{}
+		if connection then
+			connection.preview_only=true
+			connection.planned=basis.planned
+			connection.grid={get_tile=function(_,x,y) return basis.occupied[y] and basis.occupied[y][x] end}
+			local ok,result,diagnostic=planner.plan(connection)
+			connection.grid=nil -- never persist a temporary function in a queued job
+			if ok then routes=result;state.balanced_output_count=connection.balanced_output_count
+			else err=result;routes=diagnostic and diagnostic.routes or {};issues=diagnostic and diagnostic.issues or {} end
+			connection._preview_specs={}
+			state._output_work=work.begin(connection,routes,ok)
+		end
+		if err and #issues==0 then issues={{position=state.belt_target.position,reason=err}} end
+		state._preview_issues=issues;state.preview_error=err
+		if #routes>work.budget then return true end
 	end
-	if err and #issues==0 then issues={{position=state.belt_target.position,reason=err}} end
+	if state._output_work then
+		if not work.step(state._output_work) then return true end
+		state._preview_specs=state._output_work.state._preview_specs
+		state._output_work=nil
+	end
 	local combined={}
 	for _,spec in ipairs(basis.before) do combined[#combined+1]=spec end
 	for _,spec in ipairs(state._preview_specs) do combined[#combined+1]=spec end
 	for _,spec in ipairs(basis.after) do combined[#combined+1]=spec end
-	state._preview_specs=combined;state._preview_issues=issues;state.preview_error=err
+	state._preview_specs=combined
 	return "finish"
 end
 

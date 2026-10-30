@@ -617,9 +617,11 @@ local function route_bundle(state, reverse, negotiate, outer_corridor, backward_
 		{max(corner1.x,corner2.x)+1,max(corner1.y,corner2.y)+1}}
 	local safe_cache,grid_clear=context.safe or {},context.grid_clear or {}
 	context.safe,context.grid_clear=safe_cache,grid_clear
+	local can_place
 	local function safe(x,y,k)
 		if safe_cache[k]==nil then
-			safe_cache[k]=obstacles.can_place(state,state.belt_choice,world(state,x,y),NORTH)
+			can_place=can_place or obstacles.placement_checker(state,state.belt_choice,NORTH)
+			safe_cache[k]=can_place(world(state,x,y))
 		end
 		return safe_cache[k]
 	end
@@ -900,21 +902,6 @@ end
 function belt_planner.place_landfill(state, specs)
 	if terrain.avoid_tiles(state) then return end
 	state._belt_landfill = state._belt_landfill or {}
-	local boxes={}
-	local x1,y1,x2,y2=math.huge,math.huge,-math.huge,-math.huge
-	for _, spec in ipairs(specs or {}) do
-		local pos=spec.position or world(state,spec.grid_x,spec.grid_y)
-		pos={x=pos.x or pos[1],y=pos.y or pos[2]}
-		local dir=spec.inner_name and spec.direction or util.bp_direction[state.direction_choice][spec.direction or NORTH]
-		local box=obstacles.entity_box(spec.inner_name or spec.name,pos,dir)
-		local left,top=floor(box.left_top.x+0.001),floor(box.left_top.y+0.001)
-		local right,bottom=math.ceil(box.right_bottom.x-0.001)-1,math.ceil(box.right_bottom.y-0.001)-1
-		boxes[#boxes+1]={left,top,right,bottom}
-		x1,y1,x2,y2=min(x1,left),min(y1,top),max(x2,right),max(y2,bottom)
-	end
-	if #boxes==0 then return end
-	-- Ask the engine for hazardous tiles once. Large dry output corridors must
-	-- not materialize tens of thousands of LuaTile objects just to reject grass.
 	local tiles
 	if state.surface.find_tiles_filtered then
 		if not landfill_hazards and prototypes.tile then
@@ -925,14 +912,40 @@ function belt_planner.place_landfill(state, specs)
 			table.sort(landfill_hazards)
 		end
 		if landfill_hazards and #landfill_hazards==0 then return end
+		-- A conservative query needs only centers and one extent per entity type.
+		-- Build exact, snapped footprints only when this corridor contains hazards.
+		local x1,y1,x2,y2=math.huge,math.huge,-math.huge,-math.huge
+		local extents,margin={},0
+		for _,spec in ipairs(specs or {}) do
+			local pos=spec.position or world(state,spec.grid_x,spec.grid_y)
+			local x,y=pos.x or pos[1],pos.y or pos[2]
+			x1,y1,x2,y2=min(x1,x),min(y1,y),max(x2,x),max(y2,y)
+			local name=spec.inner_name or spec.name
+			if not extents[name] then
+				local box=obstacles.entity_box(name,{x=0,y=0},NORTH)
+				extents[name]=true
+				margin=max(margin,abs(box.left_top.x)+1,abs(box.left_top.y)+1,
+					abs(box.right_bottom.x)+1,abs(box.right_bottom.y)+1)
+			end
+		end
+		if x1==math.huge then return end
 		tiles={}
-		for _,tile in pairs(state.surface.find_tiles_filtered{area={{x1,y1},{x2+1,y2+1}},name=landfill_hazards}) do
+		for _,tile in pairs(state.surface.find_tiles_filtered{area={{x1-margin,y1-margin},{x2+margin,y2+margin}},name=landfill_hazards}) do
 			if terrain.blocked_tile(tile) then
 				local pos=tile.position
 				local row=tiles[pos.y] or {};tiles[pos.y]=row;row[pos.x]=tile
 			end
 		end
 		if not next(tiles) then return end
+	end
+	local boxes={}
+	for _, spec in ipairs(specs or {}) do
+		local pos=spec.position or world(state,spec.grid_x,spec.grid_y)
+		pos={x=pos.x or pos[1],y=pos.y or pos[2]}
+		local dir=spec.inner_name and spec.direction or util.bp_direction[state.direction_choice][spec.direction or NORTH]
+		local box=obstacles.entity_box(spec.inner_name or spec.name,pos,dir)
+		boxes[#boxes+1]={floor(box.left_top.x+0.001),floor(box.left_top.y+0.001),
+			math.ceil(box.right_bottom.x-0.001)-1,math.ceil(box.right_bottom.y-0.001)-1}
 	end
 	-- Keep the original specification/cell order and deduplication, including
 	-- splitter footprints and overlapping routes. The query never fills gaps

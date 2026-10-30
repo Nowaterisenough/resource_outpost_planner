@@ -144,4 +144,23 @@ do
 	assert(not obstacles.can_place(state,"test-belt",{x=.5,y=.5},0),"existing belt quality is ignored")
 	cases=cases+4
 end
+do
+ local queries=0
+ local proto=prototypes.entity["test-belt"]
+ local entity={valid=true,name="test-belt",type="transport-belt",position={x=32,y=0},direction=0,quality={name="normal"}}
+ local map={find_entities_filtered=function(query) queries=queries+1;return {entity} end}
+ local state={surface=map,player={force={}},output_only=true,preview_only=true}
+ for i=1,10 do assert(obstacles.shared_entity(state,"test-belt",{x=32,y=0},0)==entity) end
+ assert(queries==1,"same-tick preview repeats spatial engine queries")
+ assert(not obstacles.shared_entity(state,"test-belt",{x=32,y=0},4),"shared preview ignores direction")
+ assert(not obstacles.shared_entity(state,"test-belt",{x=32,y=0},0,"legendary"),"shared preview ignores quality")
+ entity.valid=false
+ assert(not obstacles.shared_entity(state,"test-belt",{x=32,y=0},0),"destroyed cached entity reused")
+ entity.valid=true;game.tick=game.tick+1
+ assert(obstacles.shared_entity(state,"test-belt",{x=32,y=0},0)==entity and queries==2,"next-tick preview reuses stale world query")
+ state.preview_only=false
+ obstacles.shared_entity(state,"test-belt",{x=32,y=0},0);obstacles.shared_entity(state,"test-belt",{x=32,y=0},0)
+ assert(queries==4,"actual construction reuses the read-only preview cache")
+ cases=cases+6
+end
 print("Obstacles OK: "..cases.." collision comparisons, engine entity/terrain filters, local queries and scan bounds")

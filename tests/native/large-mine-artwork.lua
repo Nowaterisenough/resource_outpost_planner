@@ -317,7 +317,7 @@ local function large_step()
  if large_phase=="failure-delay" then error(large_failure) end
  if large_phase=="finish" then log("LARGE MINE SCENE COMPLETE");large_phase="done";return end
  if large_phase=="done" then return end
- if #storage.tasks>0 or large_data.preview and large_data.preview.refresh_at then return end
+ if #storage.tasks>0 or large_data.preview and (large_data.preview.refresh_at or large_data.preview.render_job or large_data.preview.output_job) then return end
  if large_phase=="mine" then
   large_mine_state=large_state
   assert(large_state,"preview validation failed: "..helpers.table_to_json(large_data.preview.error or {}))

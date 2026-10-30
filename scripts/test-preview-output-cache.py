@@ -27,7 +27,7 @@ if args.output:
 results = Path(tempfile.mkdtemp(prefix="preview-output-cache-", dir=args.output)).resolve()
 digest = lambda path: hashlib.sha256(path.read_bytes()).hexdigest()
 
-for phase in ("save", "reload"):
+for phase in ("save", "reload-render", "reload-output"):
     root = results / phase
     (root / "mods").mkdir(parents=True)
     (root / "data/saves").mkdir(parents=True)
@@ -65,8 +65,8 @@ for phase in ("save", "reload"):
                 time.sleep(0.25)
                 log = log_path.read_text()
                 checkpoint = root / "data/saves/preview-output-cache-checkpoint.zip"
-                if (phase == "save" and checkpoint.exists() and "Saving finished" in log
-                        or phase == "reload" and "OUTPUT CACHE COMPLETE" in log):
+                if (phase != "reload-output" and checkpoint.exists() and "Saving finished" in log
+                        or phase == "reload-output" and "OUTPUT CACHE COMPLETE" in log):
                     success = True
                     break
                 if process.poll() is not None:
@@ -88,9 +88,9 @@ for phase in ("save", "reload"):
         (root / "manifest.json").write_text(json.dumps({"source": str(source), "source_sha256": original,
                                                         "archive_sha256": digest(next((root / "package").glob("*.zip"))),
                                                         "passed": True}, indent=2) + "\n")
-        if phase == "save":
+        if phase != "reload-output":
             source = checkpoint
 
-(results / "result.json").write_text(json.dumps({"save_reload": True, "input_invalidation": True,
+(results / "result.json").write_text(json.dumps({"save_reload": True, "pending_render_reload": True, "pending_construction_reload": True, "input_invalidation": True,
                                                  "preview_apply_parity": True, "undo_clean": True}, indent=2) + "\n")
 print(f"Native output-cache checks passed: {results}")

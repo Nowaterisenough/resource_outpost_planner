@@ -6,6 +6,8 @@ local floor, ceil = math.floor, math.ceil
 local ignored_types = {"resource", "character", "unit", "corpse", "item-entity", "tile-ghost"}
 local hazard_tiles
 local geometry_cache={}
+local shared_cache=setmetatable({}, {__mode="k"})
+local owned_ids=setmetatable({}, {__mode="k"})
 
 local function key(x, y) return x..","..y end
 
@@ -137,9 +139,17 @@ function obstacles.get(state)
 		local last = data and data.last_state
 		if last and last.surface == state.surface and util.coords_overlap(c, last.coords) then previous = last end
 	end
+	local seen_lists={}
 	for _, list in pairs{state._collected_ghosts or {}, previous and previous._collected_ghosts or {}} do
-		for _, entity in pairs(list) do
-			if entity.valid and entity.unit_number then ignored[entity.unit_number] = true end
+		if not seen_lists[list] then
+			seen_lists[list]=true
+			for _, entity in pairs(list) do
+				-- Ownership is reread each time. An entity's unit number is immutable;
+				-- retaining the number of a destroyed entity cannot hide a new one.
+				local id=owned_ids[entity]
+				if not id and entity.valid then id=entity.unit_number;owned_ids[entity]=id end
+				if id then ignored[id]=true end
+			end
 		end
 	end
 	local area=search_area or {{x1-margin,y1-margin},{x2+margin,y2+margin}}
@@ -152,10 +162,50 @@ function obstacles.shared_entity(state,name,position,direction,quality)
 	if not state.output_only or not state.surface.find_entities_filtered then return end
 	local proto=prototypes.entity[name]
 	if not proto or (proto.type~="transport-belt" and proto.type~="straight-rail") then return end
-	for _,entity in pairs(state.surface.find_entities_filtered{position=position,radius=.05,force=state.player.force}) do
-		local matches=entity.name==name or entity.type=="entity-ghost" and entity.ghost_name==name
+	local entities
+	if state.preview_only then
+		-- Preview queries never create entities. Cache spatial buckets only for this
+		-- tick; real construction still observes entities created earlier in its loop.
+		local saved=shared_cache[state]
+		if not saved or saved.tick~=game.tick then saved={tick=game.tick,chunks={}};shared_cache[state]=saved end
+		local cx,cy=floor(position.x/32),floor(position.y/32)
+		local k=key(cx,cy)
+		local buckets=saved.chunks[k]
+		if not buckets then
+			buckets={};saved.chunks[k]=buckets
+			for _,entity in pairs(state.surface.find_entities_filtered{
+				area={{cx*32-.05,cy*32-.05},{(cx+1)*32+.05,(cy+1)*32+.05}},
+				type={"transport-belt","straight-rail","entity-ghost"},force=state.player.force}) do
+				local p=entity.position
+				local cell=key(floor(p.x),floor(p.y))
+				local list=buckets[cell] or {};buckets[cell]=list;list[#list+1]=entity
+			end
+		end
+		entities={}
+		for x=floor(position.x-.001),floor(position.x+.001) do
+			for y=floor(position.y-.001),floor(position.y+.001) do
+				for _,entity in ipairs(buckets[key(x,y)] or {}) do entities[#entities+1]=entity end
+			end
+		end
+	else
+		entities=state.surface.find_entities_filtered{position=position,radius=.05,force=state.player.force}
+	end
+	for _,entity in pairs(entities) do
+		local matches=entity.valid and (entity.name==name or entity.type=="entity-ghost" and entity.ghost_name==name)
 		if matches and entity.direction==direction and (not entity.quality or entity.quality.name==(quality or "normal"))
 			and math.abs(entity.position.x-position.x)<.001 and math.abs(entity.position.y-position.y)<.001 then return entity end
+	end
+end
+
+-- A routing attempt is synchronous and cannot change the world. Resolve its
+-- obstacle snapshot once, outside the potentially large path-search loop.
+function obstacles.placement_checker(state,name,direction)
+	if state._force_build_mode and state._belt_routing or not obstacles.active(state) then return function() return true end end
+	local index=obstacles.get(state)
+	if not next(index.tiles) and #index.boxes==0 then return function() return true end end
+	return function(position)
+		return not obstacles.blocked_box(index,obstacles.entity_box(name,position,direction))
+			or obstacles.shared_entity(state,name,position,direction,state.belt_quality_choice)~=nil
 	end
 end
 

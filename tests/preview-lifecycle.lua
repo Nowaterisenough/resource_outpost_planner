@@ -213,4 +213,35 @@ for _,mode in ipairs{defines.build_mode.forced,defines.build_mode.superforced} d
  preview.complete(validation)
  assert(calls.forced==defines.build_mode.superforced, "checked cleanup did not reach native building removal")
 end
+-- Large jobs must keep both Apply modes disabled and clean up only their own
+-- newly allocated handles when retargeted, including output construction jobs.
+local renderer=package.loaded["mpp.preview_renderer"]
+local partial
+renderer.begin=function(d)
+ partial=object()
+ return {objects={d.renderings[1],partial},retained={[d.renderings[1].id]=true},remaining=2}
+end
+renderer.step=function(d,job)
+ job.remaining=job.remaining-1
+ if job.remaining>0 then return end
+ return job.objects,job.retained
+end
+draft,overlays=fixture()
+local large=state{entities=draft.resources,preview_only=true,preview_revision=1}
+for i=1,3000 do large._preview_specs[i]={name="entity-ghost",position={x=i,y=0}} end
+preview.complete(large)
+assert(preview.has_pending() and draft.render_job and not draft.ready and not data.gui.preview_force.enabled)
+assert(not preview.apply(data) and not preview.apply(data,defines.build_mode.superforced),"Apply accepts partial rendering")
+preview.tick();assert(draft.render_job,"render job finished before its last batch")
+preview.tick();assert(draft.ready and not preview.has_pending() and data.gui.preview_apply.enabled)
+assert(overlays[1].valid and not overlays[2].valid and partial.valid,"completed render cleanup changed retained objects")
+large.preview_revision=draft.revision;preview.complete(large)
+local abandoned=partial
+preview.request(data,true)
+assert(not draft.render_job and not abandoned.valid and overlays[1].valid,"retarget leaked or deleted the wrong layers")
+draft.output_job={unfinished=true}
+preview.request(data,true)
+assert(not draft.output_job,"retarget did not cancel construction")
+preview.cancel(data)
+assert(not data.preview and not overlays[1].valid,"cancel leaked retained sprites")
 print("Preview lifecycle OK: validation, build handoff, cleanup click modes, overlay cleanup and failure paths")

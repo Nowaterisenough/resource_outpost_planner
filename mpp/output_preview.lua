@@ -4,6 +4,7 @@ local builder = require("mpp.builder")
 local common = require("layouts.common")
 local capacity = require("mpp.belt_capacity")
 local forced_build = require("mpp.forced_build")
+local work=require("mpp.preview_construction")
 local output = {}
 
 function output.begin(data,player)
@@ -36,26 +37,38 @@ local function prepare(data,preview_only,mode)
 	return state,nil,{routes=routes,issues={}}
 end
 
-function output.refresh(data)
+function output.start_refresh(data)
 	local draft=data.preview
-	if not draft.belt_target then draft.ready=false;draft.error=nil;draft.warning=nil;draft.specs={};draft.issues={};return false end
+	draft.output_job=nil
+	if not draft.belt_target then draft.ready=false;draft.error=nil;draft.warning=nil;draft.specs={};draft.issues={};return end
 	local state,err,diagnostic=prepare(data,true)
 	draft.error=err
 	draft.warning=state and state.preview_warning
 	draft.issues=diagnostic and diagnostic.issues or {{position=draft.belt_target.position,reason=err}}
-	draft.specs={}
+	draft.specs={};draft.ready=false;draft.entity_count=0;draft.tile_count=0
 	if state and diagnostic then
-		local create=builder.create_entity_builder(state,{diagnostic=true,obstacles_checked=err==nil})
-		for _,spec in ipairs(diagnostic.routes or {}) do create(spec) end
-		planner.place_landfill(state,diagnostic.routes)
-		draft.specs=state._preview_specs
+		draft.output_job=work.begin(state,diagnostic.routes,err==nil)
 	end
-	draft.ready=state~=nil and err==nil and #draft.specs>0
-	draft.entity_count,draft.tile_count=0,0
+end
+
+function output.step_refresh(data,limit)
+	local draft=data.preview
+	local job=draft.output_job
+	if not job then return true end
+	if not work.step(job,limit) then return false end
+	draft.specs=job.state._preview_specs
+	draft.output_job=nil
+	draft.ready=not draft.error and #draft.specs>0
 	for _,spec in ipairs(draft.specs) do
 		if spec.name=="tile-ghost" then draft.tile_count=draft.tile_count+1 else draft.entity_count=draft.entity_count+1 end
 	end
-	return draft.ready
+	return true
+end
+
+function output.refresh(data)
+	output.start_refresh(data)
+	while not output.step_refresh(data,math.huge) do end
+	return data.preview.ready
 end
 
 function output.apply(data,mode,facility_removal)

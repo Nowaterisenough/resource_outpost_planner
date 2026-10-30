@@ -185,7 +185,7 @@ end
 script.on_nth_tick(1,function()
  if not matrix then initialize();return end
  local t=matrix;local data=storage.players[1];local case=t.case
- if t.phase=="done" or #storage.tasks>0 or data.preview and (data.preview.refresh_at or data.preview.applying) then return end
+ if t.phase=="done" or #storage.tasks>0 or data.preview and (data.preview.refresh_at or data.preview.render_job or data.preview.output_job or data.preview.applying) then return end
  if t.phase=="next" then
   t.index=t.index+1;t.case=matrix_cases[t.index];case=t.case
   if not case then

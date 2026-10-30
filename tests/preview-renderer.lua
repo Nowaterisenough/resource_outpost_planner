@@ -314,4 +314,21 @@ local diagnostic=reloaded.render(draft,{avoid_cliffs_choice=true})
 assert(placement_queries==0 and diagnostic[1].color==prototypes.utility_constants.building_not_buildable_tint,
 	"known blocked diagnostics needlessly probe placement or become green")
 cases=cases+3
+-- Build collision bounds and artwork in separate batches, reloading the Lua
+-- module midway just as Factorio does while the job tables survive in storage.
+draft.specs={}
+for i=1,11 do draft.specs[i]={name="entity-ghost",inner_name="belt",direction=N,position={x=i+.5,y=.5}} end
+local expected=reloaded.render(draft,{avoid_cliffs_choice=true})
+local job=reloaded.begin(draft,{avoid_cliffs_choice=true})
+assert(not reloaded.step(draft,job,3) and job.box_next==4,"collision preparation ignored its batch limit")
+package.loaded["mpp.preview_renderer"]=nil
+reloaded=require("mpp.preview_renderer")
+local finished,retained,steps
+steps=1
+repeat finished,retained=reloaded.step(draft,job,3);steps=steps+1 until finished
+assert(steps==8 and #finished==#expected,"incremental rendering skipped or duplicated entities")
+for i,obj in ipairs(finished) do
+ assert(obj==expected[i] and retained[obj.id],"save/load continuation changed ordered sprite reuse")
+end
+cases=cases+3
 print("Preview renderer OK: "..cases.." artwork, topology, reuse, invalidation and isolation cases")

@@ -7,23 +7,26 @@ local coord_revert_world = mpp_util.revert_world
 local builder = {}
 
 local quality_enabled = script.feature_flags.quality
-local directional = {}
+local preview_shapes = {}
 
 function builder.record_preview(state, spec)
 	if spec.name == "entity-ghost" then
-		local proto = prototypes.entity[spec.inner_name]
-		if directional[proto.name]==nil then
+		local shape=preview_shapes[spec.inner_name]
+		if not shape then
+			local proto=prototypes.entity[spec.inner_name]
 			local ok,value=pcall(function() return proto.supports_direction end)
-			if ok then directional[proto.name]=value==true
-			else directional[proto.name]=proto.type~="electric-pole" and proto.type~="lamp"
+			local directional=ok and value==true
+			if not ok then directional=proto.type~="electric-pole" and proto.type~="lamp"
 				and proto.type~="beacon" and proto.type~="pipe" and proto.type~="heat-pipe"
 				and proto.type~="container" and proto.type~="logistic-container" and proto.type~="furnace" end
+			shape={directional=directional,off_grid=proto.has_flag("placeable-off-grid"),width=proto.tile_width,height=proto.tile_height}
+			preview_shapes[spec.inner_name]=shape
 		end
-		if not directional[proto.name] and not spec.station_stock then spec.direction=direction.north end
+		if not shape.directional and not spec.station_stock then spec.direction=direction.north end
 		local pos = spec.position
 		local x,y = pos.x or pos[1],pos.y or pos[2]
-		if not proto.has_flag("placeable-off-grid") then
-			local w,h = proto.tile_width,proto.tile_height
+		if not shape.off_grid then
+			local w,h = shape.width,shape.height
 			if spec.direction == direction.east or spec.direction == direction.west then w,h = h,w end
 			local ox,oy = (w % 2)/2,(h % 2)/2
 			x,y = math.floor(x+0.5-ox)+ox,math.floor(y+0.5-oy)+oy
@@ -69,6 +72,16 @@ function builder.create_entity_builder(state, opts)
 	-- Only callers immediately materializing a successful preview route can
 	-- reuse its obstacle checks. Apply and later ticks always validate again.
 	local checked_tick=opts.obstacles_checked and state.preview_only and game.tick
+	local placement_checkers={}
+	local function can_place(name,position,direction)
+		if not state.preview_only then return obstacles.can_place(state,name,position,direction) end
+		local key=name..":"..direction
+		local entry=placement_checkers[key]
+		if not entry or entry.tick~=game.tick then
+			entry={tick=game.tick,check=obstacles.placement_checker(state,name,direction)};placement_checkers[key]=entry
+		end
+		return entry.check(position)
+	end
 	local c = state.coords
 	local grid = state.grid
 	local DIR = state.direction_choice
@@ -96,7 +109,7 @@ function builder.create_entity_builder(state, opts)
 		ghost.direction=direction_conv[ghost.direction or defines.direction.north]
 		local shared=obstacles.shared_entity(state,ghost.inner_name,{x=position[1],y=position[2]},ghost.direction,ghost.quality)
 		ghost.preview_existing=shared~=nil or nil
-		if not shared and not (state.preview_only and checked_tick and checked_tick==game.tick) and not obstacles.can_place(state,ghost.inner_name,
+		if not shared and not (state.preview_only and checked_tick and checked_tick==game.tick) and not can_place(ghost.inner_name,
 			{x=position[1],y=position[2]},ghost.direction) then
 			state._obstacle_skipped = (state._obstacle_skipped or 0) + 1
 			if not (opts.diagnostic and state.preview_only) then return end
