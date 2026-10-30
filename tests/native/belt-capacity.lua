@@ -26,6 +26,13 @@ end
 cap_matrix[#cap_matrix+1]={direction="east",beacon=false,fluid=false,upper=1.1,lower=0}
 cap_matrix[#cap_matrix+1]={direction="south",beacon=true,fluid=true,upper=1.1,lower=0.35}
 cap_matrix[#cap_matrix+1]={direction="west",beacon=false,fluid=false,upper=1.1,lower=0,budget=32,no_merge=true}
+-- Default/off layouts must use facing pairs too, across all orientations and
+-- optional fluid/beacon infrastructure, not just the high-load split fallback.
+for _,direction in ipairs{"west","north","east","south"} do
+ for _,beacon in ipairs{false,true} do for _,fluid in ipairs{false,true} do
+  cap_matrix[#cap_matrix+1]={direction=direction,beacon=beacon,fluid=fluid,upper=1.1,auto_belts=false}
+ end end
+end
 if cap_case_limit then for i=#cap_matrix,cap_case_limit+1,-1 do cap_matrix[i]=nil end end
 if cap_visual then cap_matrix={cap_matrix[1]} end
 local cap_player,cap_surface,cap_resources,cap_pending
@@ -93,7 +100,7 @@ local function cap_start(v)
 	choices.pole_choice="medium-electric-pole";choices.pole_quality_choice="normal";choices.lamp_choice=true
 	choices.pipe_choice="pipe";choices.force_pipe_placement_choice=v.fluid
 	choices.belt_load_min_choice=v.lower or 0.8;choices.belt_load_max_choice=v.upper
-	choices.belt_merge_choice=true;choices.belt_planner_choice=false;choices.output_balance_choice=v.budget~=nil;choices.output_station_choice=false
+	choices.belt_merge_choice=v.auto_belts~=false;choices.belt_planner_choice=false;choices.output_balance_choice=v.budget~=nil;choices.output_station_choice=false
 	choices.output_belt_count_choice=v.budget or 8
 	local state,err=algorithm.on_player_selected_area{player_index=cap_player.index,surface=cap_surface,entities=cap_resources,preview_only=true}
 	assert(state,helpers.table_to_json(err or {}))
@@ -120,7 +127,7 @@ local function cap_start(v)
   if not v.no_merge then assert(state.preview_warning,"fixed count lost its bottleneck warning") end
  elseif state._capacity_tight_big then
   assert(state._capacity_gap<=2 and not state._capacity_separate_power,"big compact drill spacing exceeds two tiles")
-  if cap_capacity.overloaded(state) then
+  if choices.belt_merge_choice and cap_capacity.overloaded(state) then
    assert(state.preview_warning and state.preview_warning[1]=="mpp.belt_capacity_dense","spacing cap hides belt overload")
   end
  else assert(not cap_capacity.overloaded(state),"split belt exceeds load limit") end
@@ -130,7 +137,29 @@ local function cap_start(v)
   assert(belt.is_output or state._capacity_tight_big and belt.capacity_target,
    "unused output budget overrides the zero merge threshold")
  end end
-	assert(cap_surface.count_entities_filtered{type="entity-ghost"}==0,"preview placed ghosts")
+	if state._capacity_tight_big then
+  assert(state._capacity_paired,"big compact reverted to single-facing rows")
+  local directions,dual={},0
+  for _,m in ipairs(state.best_attempt.miners) do
+   local direction=m.line%2==1 and defines.direction.south or defines.direction.north
+   assert(m.direction==direction,"adjacent big-drill rows do not face their shared corridor")
+   directions[m.direction]=true
+  end
+  assert(table_size(directions)==2,"big compact has only one mining direction")
+  for i,lane in ipairs(state.best_attempt.lane_layout) do if i>1 then
+   local gap=lane.y-state.best_attempt.lane_layout[i-1].y-state.miner.size
+   assert(i%2==0 and gap>=1 and gap<=(choices.belt_merge_choice and 2 or 1)
+    or i%2==1 and gap==0,"facing pairs do not pack back-to-back")
+  end end
+  for _,b in ipairs(state.belts) do
+   for side,lane in ipairs{b.lane1,b.lane2} do for _,m in ipairs(lane) do
+    assert(m.direction==(side==1 and defines.direction.south or defines.direction.north),"outlet sides mix facing rows")
+   end end
+   if #b.lane1>0 and #b.lane2>0 then dual=dual+1 end
+  end
+  assert(dual>0,"facing rows still use separate single-sided outlets")
+ end
+ assert(cap_surface.count_entities_filtered{type="entity-ghost"}==0,"preview placed ghosts")
 	local entities,drills,belts={},{},{}
 	local function key(p) return math.floor(p.x)..","..math.floor(p.y) end
 	for _,spec in ipairs(state._preview_specs) do if spec.name=="entity-ghost" then

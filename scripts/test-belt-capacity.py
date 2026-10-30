@@ -43,7 +43,7 @@ names = ["base", "elevated-rails", "quality", "recycler", "space-age", "resource
 print(root, flush=True)
 with (root / "benchmark.log").open("w") as output:
     result = subprocess.run([str(args.factorio), "--config", str(root / "config.ini"), "--mod-directory",
-                             str(root / "mods"), "--benchmark", str(save), "--benchmark-ticks", "6000",
+                             str(root / "mods"), "--benchmark", str(save), "--benchmark-ticks", "10000",
                              "--benchmark-runs", "1"], stdout=output, stderr=subprocess.STDOUT,
                             env=dict(os.environ, SteamAppId="427520"))
 log = (root / "benchmark.log").read_text()

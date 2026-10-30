@@ -5,6 +5,7 @@ local beacons=require("mpp.beacons")
 local rows=require("mpp.beacon_rows")
 local obstacles=require("mpp.obstacles")
 local util=require("mpp.mpp_util")
+local paired=require("mpp.compact_big_rows")
 local layout=table.deepcopy(simple)
 local floor,min,max=math.floor,math.min,math.max
 local N,S,W=defines.direction.north,defines.direction.south,defines.direction.west
@@ -16,6 +17,7 @@ local function column_offset(state,column)
 end
 
 local function row_gap(state,line)
+	if state._capacity_tight_big and line%2==0 then return 0 end
 	return state._capacity_row_gaps and (state._capacity_row_gaps[line] or 1) or state._capacity_gap
 end
 
@@ -23,6 +25,7 @@ function layout:initialize_capacity_layout(state)
 	local reuse=state.grid and state.resource_tiles
 	state._capacity_rows=true
 	state._capacity_tight_big=state.miner.size==5 and state._mining_layout_choice=="compact"
+	state._capacity_paired=nil
 	-- A disabled load controller must never retain a previous split corridor.
 	-- Keep this local to compact big drills; other layouts retain their spacing.
 	if state._capacity_tight_big then
@@ -77,7 +80,7 @@ function layout:_placement_attempt(state,attempt)
 	-- Poles and lamps share the belt corridor; only a failed crossing uses a separate row.
 	local y=sy
 	while y<=C.th+M.size-1 do
-		local stagger=not state._beacon_rows and not state._capacity_fluid and M.size>=5
+		local stagger=not state._capacity_tight_big and not state._beacon_rows and not state._capacity_fluid and M.size>=5
 		local row_x=sx+(stagger and line%2==0 and floor(M.size/2) or 0)
 		lanes[line]={y=y,row_index=line,start_x=row_x}
 		local column=1
@@ -88,7 +91,7 @@ function layout:_placement_attempt(state,attempt)
 			if state._capacity_beacon_slots and line%2==1 and column%3==2 then
 				beacon_slots[#beacon_slots+1]={x=x,y=y}
 			elseif tile and not tile.forbidden and tile.neighbors_outer>0 then
-				local miner={x=x,y=y,origin_x=x+M.x,origin_y=y+M.y,tile=tile,line=line,column=column,direction=S}
+				local miner={x=x,y=y,origin_x=x+M.x,origin_y=y+M.y,tile=tile,line=line,column=column,direction=state._capacity_tight_big and line%2==0 and N or S}
 				if heuristic(tile) then
 					miners[#miners+1]=miner
 					common.add_heuristic_values(H,M,tile)
@@ -128,13 +131,8 @@ function layout:prepare_miner_layout(state)
 		if single_error then issue(state,state.best_attempt.sx,state.best_attempt.sy,single_error) end
 	end
 	local production=common.mining_production_calculator(state)
-	local groups
-	if state._capacity_tight_big then
-		groups=capacity.compact_row_groups(state.miner_lanes,state.miner_lane_count,limit,production,
-			state._capacity_row_gaps,state._capacity_edge and 2 or 4)
-	else
-		groups=capacity.row_groups(state.miner_lanes,state.miner_lane_count,limit,production,budget and budget*2)
-	end
+	if state._capacity_tight_big then return paired.prepare(state,production,limit,issue) end
+	local groups=capacity.row_groups(state.miner_lanes,state.miner_lane_count,limit,production,budget and budget*2)
 	-- Pair contiguous receiving groups before reserving bus space. Both loads
 	-- participate in the lower-bound decision; either group may be the short tail.
 	local pairs_by_row,outputs={},0
@@ -237,7 +235,8 @@ function layout:prepare_pipe_layout(state)
 	end
 	local specs={}
 	for i=1,state.miner_lane_count do
-		local y=attempt.lane_layout[i].y+M.pipe_left[S]
+		local direction=state._capacity_tight_big and i%2==0 and N or S
+		local y=attempt.lane_layout[i].y+M.pipe_left[direction]
 		-- Build each gap once. A missing first/inner drill must not put a
 		-- horizontal underground endpoint on the vertical header or on the
 		-- neighbouring gap's endpoint.
@@ -251,7 +250,8 @@ function layout:prepare_pipe_layout(state)
 		specs[#specs+1]={structure="cap_vertical",x=attempt.sx-1,y=y,skip_up=i==1,skip_down=i==state.miner_lane_count}
 		if i>1 then
 			local previous=attempt.lane_layout[i-1].y
-			local py=previous+M.pipe_left[S]
+			local previous_direction=state._capacity_tight_big and (i-1)%2==0 and N or S
+			local py=previous+M.pipe_left[previous_direction]
 			specs[#specs+1]={structure="joiner_vertical",x=attempt.sx-1,y=py+1,h=y-py-1,belt_y=previous+M.size}
 		end
 	end
@@ -294,6 +294,7 @@ function layout:_prepare_separate_poles(state)
 end
 
 function layout:prepare_pole_layout(state)
+	if state._capacity_paired then return paired.poles(state) end
 	if state._capacity_separate_power then return self:_prepare_separate_poles(state) end
 	state.builder_power_poles,state.builder_lamps={},{}
 	if state.pole_choice=="none" or state.pole_choice=="zero_gap" then return "prepare_belt_layout" end
@@ -517,6 +518,11 @@ function layout:_prepare_compact_belts(state)
 end
 
 function layout:prepare_belt_layout(state)
+	if state._capacity_paired then
+		paired.belts(state,issue)
+		state._capacity_original_coverage=nil
+		return "prepare_lamp_layout"
+	end
 	if state._capacity_compact then
 		if not self:_prepare_compact_belts(state) then
 			-- Short-reach undergrounds or reserved pipes/poles can prevent this

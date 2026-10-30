@@ -358,9 +358,20 @@ local function large_step()
     for row,count in pairs(groups_by_row) do
      assert(outputs_by_row[row]==(count>=2 and 2 or 1),"double corridor was collapsed to one outlet")
      if count>=2 then dual_rows=dual_rows+1 end
-     if large_state._capacity_compact and count>=2 then
+     if large_state._capacity_paired then
+      assert(count<=2,"facing pair exceeds two physical outputs")
+     elseif large_state._capacity_compact and count>=2 then
       assert(count==math.min(4,#large_state.miner_lanes[row]),"double corridor leaves a receiving side unused")
      end
+    end
+    if large_state._capacity_paired then
+     local directions={}
+     for _,m in ipairs(large_state.best_attempt.miners) do
+      assert(m.direction==(m.line%2==1 and defines.direction.south or defines.direction.north),"big compact row faces away from the shared belt")
+      directions[m.direction]=(directions[m.direction] or 0)+1
+     end
+     assert(table_size(directions)==2,"large compact mine only uses one facing direction")
+     large_report.capacity.mining_directions=directions
     end
     large_report.capacity.dual_output_rows=dual_rows
     large_report.capacity.split_buses=split_buses

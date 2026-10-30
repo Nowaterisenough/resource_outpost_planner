@@ -1,0 +1,6 @@
+[
+ {"id":"01-facing-single-iron","ore":"iron-ore","shape":"lobed","direction":"west","quality":"normal","module":"none","bonus":0,"belt":"express-transport-belt","outputs":24,"lamps":true,"auto_belts":false},
+ {"id":"02-facing-dual-copper","ore":"copper-ore","shape":"crescent","direction":"south","quality":"normal","module":"speed-module-3","bonus":100,"belt":"turbo-transport-belt","outputs":8,"lower":0,"lamps":true,"measure_lanes":true},
+ {"id":"03-facing-beacon-tungsten","ore":"tungsten-ore","shape":"islands","direction":"east","quality":"normal","module":"speed-module-3","bonus":4,"belt":"express-transport-belt","outputs":24,"beacons":true,"lamps":true},
+ {"id":"04-facing-piped-uranium","ore":"uranium-ore","shape":"branched","direction":"north","quality":"normal","module":"speed-module-3","bonus":4,"belt":"express-transport-belt","outputs":24,"fluid":true,"lamps":true}
+]
