@@ -436,28 +436,43 @@ local function path(start, finish, finish_direction, allowed, bounds, penalty, b
 end
 
 local function straight_segments(points, allowed)
-	local route, seen = {}, {}
-	local function append(x,y)
-		local k=key(x,y)
-		if seen[k] or not allowed(x,y) then return false end
-		seen[k]=true
-		route[#route+1]={x=x,y=y}
-		return true
-	end
-	if not append(points[1].x,points[1].y) then return end
-	for i=2,#points do
-		local previous,finish=points[i-1],points[i]
-		local dx,dy=finish.x-previous.x,finish.y-previous.y
-		if dx~=0 and dy~=0 then return end
-		local distance=abs(dx)+abs(dy)
-		if distance>0 then
-			local sx,sy=dx/distance,dy/distance
-			for step=1,distance do
-				if not append(previous.x+sx*step,previous.y+sy*step) then return end
-			end
-		end
-	end
-	return route
+ -- These paths contain only a few axis-aligned segments. Detect self-crossings
+ -- on segments (excluding the shared turning cell), not with a hash per tile.
+ local first=points[1]
+ local segments={{first.x,first.y,first.x,first.y}}
+ for i=2,#points do
+  local previous,finish=points[i-1],points[i]
+  local dx,dy=finish.x-previous.x,finish.y-previous.y
+  if dx~=0 and dy~=0 then return end
+  local distance=abs(dx)+abs(dy)
+  if distance>0 then
+   local x,y=previous.x+dx/distance,previous.y+dy/distance
+   local x1,y1,x2,y2=min(x,finish.x),min(y,finish.y),max(x,finish.x),max(y,finish.y)
+   for _,other in ipairs(segments) do
+    if x1<=other[3] and x2>=other[1] and y1<=other[4] and y2>=other[2] then return end
+   end
+   segments[#segments+1]={x1,y1,x2,y2}
+  end
+ end
+ local route={}
+ local function append(x,y)
+  if not allowed(x,y) then return false end
+  route[#route+1]={x=x,y=y}
+  return true
+ end
+ if not append(first.x,first.y) then return end
+ for i=2,#points do
+  local previous,finish=points[i-1],points[i]
+  local dx,dy=finish.x-previous.x,finish.y-previous.y
+  local distance=abs(dx)+abs(dy)
+  if distance>0 then
+   local sx,sy=dx/distance,dy/distance
+   for step=1,distance do
+    if not append(previous.x+sx*step,previous.y+sy*step) then return end
+   end
+  end
+ end
+ return route
 end
 
 -- Monotone moves retain minimum belt length; vertical-first search postpones outward expansion.
@@ -518,15 +533,19 @@ local function route_bundle(state, reverse, negotiate, outer_corridor, backward_
 		reserved[k]=lane
 		return true
 	end
-	local function occupy(box)
+	local function occupy_cell(gx,gy)
+		occupied[key(gx,gy)]=true
+		-- Include the full station, even when ports sit inside its bounds.
+		x1,y1=min(x1,gx),min(y1,gy)
+		x2,y2=max(x2,gx),max(y2,gy)
+	end
+	local function occupy(box,offsets,ox,oy)
 		for x=floor(box.left_top.x+0.001),math.ceil(box.right_bottom.x-0.001)-1 do
 			for y=floor(box.left_top.y+0.001),math.ceil(box.right_bottom.y-0.001)-1 do
 				local gx,gy=grid_position(state,{x=x+0.5,y=y+0.5})
 				gx,gy=floor(gx+0.5),floor(gy+0.5)
-				occupied[key(gx,gy)]=true
-				-- Allow ingress to go around the full station, even when its ports sit inside its bounds.
-				x1,y1=min(x1,gx),min(y1,gy)
-				x2,y2=max(x2,gx),max(y2,gy)
+				occupy_cell(gx,gy)
+				if offsets then offsets[#offsets+1]={gx-ox,gy-oy} end
 			end
 		end
 	end
@@ -534,10 +553,30 @@ local function route_bundle(state, reverse, negotiate, outer_corridor, backward_
 		for k=1,context.occupied_count do occupied[k]=true end
 		x1,y1,x2,y2=context.bounds[1],context.bounds[2],context.bounds[3],context.bounds[4]
 	else
+		-- Integer translations have identical footprints in the routing grid.
+		-- Transform each prototype/direction/alignment once, then translate its
+		-- occupied cells. Fractional alignment stays part of the key for rails
+		-- and off-grid prototypes; actual ghost bounding boxes remain live below.
+		local footprints={}
 		for _, entity in ipairs(state.planned or {}) do
 			if prototypes.entity[entity.name] then
-				local pos=world(state,entity.grid_x,entity.grid_y)
-				occupy(obstacles.entity_box(entity.name,pos,util.bp_direction[state.direction_choice][entity.direction or NORTH]))
+				local gx,gy=entity.grid_x,entity.grid_y
+				local direction=entity.direction or NORTH
+				local shapes=footprints[entity.name]
+				if not shapes then shapes={};footprints[entity.name]=shapes end
+				local rotations=shapes[direction]
+				if not rotations then rotations={};shapes[direction]=rotations end
+				local fx,fy=gx%1,gy%1
+				local alignments=rotations[fx]
+				if not alignments then alignments={};rotations[fx]=alignments end
+				local offsets=alignments[fy]
+				if offsets then
+					for _,offset in ipairs(offsets) do occupy_cell(floor(gx+offset[1]+.5),floor(gy+offset[2]+.5)) end
+				else
+					offsets={};alignments[fy]=offsets
+					local pos=world(state,gx,gy)
+					occupy(obstacles.entity_box(entity.name,pos,util.bp_direction[state.direction_choice][direction]),offsets,gx,gy)
+				end
 			end
 		end
 		for _, ghost in pairs(state._collected_ghosts or {}) do

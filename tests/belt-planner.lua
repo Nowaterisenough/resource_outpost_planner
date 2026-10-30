@@ -170,6 +170,86 @@ local function upvalue(fn,name)
 end
 local bundle=upvalue(upvalue(planner.plan,"plan_routes"),"route_bundle")
 
+-- Occupancy reuse must match independently transformed footprints for each
+-- rotation, tile alignment and asymmetric/off-grid shape.
+do
+ local convert=upvalue(bundle,"grid_position")
+ prototypes.entity["offset-machine"]={tile_width=2,tile_height=3,
+  collision_box={left_top={x=-.7,y=-1.1},right_bottom={x=.9,y=1.4}},has_flag=function() return false end}
+ prototypes.entity["free-machine"]={tile_width=2,tile_height=3,
+  collision_box={left_top={x=-.7,y=-1.1},right_bottom={x=.9,y=1.4}},has_flag=function() return true end}
+ for _,rotation in ipairs{"west","north","east","south"} do
+  local spec=fixture(rotation,1)
+  local state=assert(planner.create_state(spec,target(spec,-12,5,W),{}))
+  state.planned={}
+  for _,name in ipairs{"transport-belt","offset-machine","free-machine"} do
+   for _,direction in ipairs{N,E,S,W} do for _,fraction in ipairs{0,.5,.25} do
+    for i=-2,2 do
+     state.planned[#state.planned+1]={name=name,direction=direction,grid_x=i*7+fraction,grid_y=direction*4+fraction}
+    end
+   end end
+  end
+  local cells={}
+  for _,piece in ipairs(state.planned) do
+   local c=state.coords
+   local p=util.revert_world(c.gx,c.gy,rotation,piece.grid_x,piece.grid_y,c.tw,c.th)
+   local box=obstacles.entity_box(piece.name,{x=p[1],y=p[2]},util.bp_direction[rotation][piece.direction])
+   for x=math.floor(box.left_top.x+.001),math.ceil(box.right_bottom.x-.001)-1 do
+    for y=math.floor(box.left_top.y+.001),math.ceil(box.right_bottom.y-.001)-1 do
+     local gx,gy=convert(state,{x=x+.5,y=y+.5});gx,gy=math.floor(gx+.5),math.floor(gy+.5)
+     cells[gx..","..gy]={gx,gy}
+    end
+   end
+  end
+  local context={}
+  bundle(state,false,false,false,nil,context)
+  assert(context.occupied_count==table_size(cells),"cached footprint changed occupied cell count")
+  for _,cell in pairs(cells) do assert(context.key(cell[1],cell[2])<=context.occupied_count,"cached footprint moved an occupied cell") end
+ end
+ cases=cases+4
+end
+
+-- Compare segment intersection rejection with a cell-by-cell oracle, including
+-- backtracking, repeated waypoints, crossings and obstacles on later segments.
+do
+ local segments=upvalue(bundle,"straight_segments")
+ local seed=7261
+ local function random(n) seed=(seed*48271)%2147483647;return seed%n end
+ local function reference(points,allowed)
+  local result,seen={},{}
+  local function append(x,y)
+   local k=x..","..y
+   if seen[k] or not allowed(x,y) then return false end
+   seen[k]=true;result[#result+1]={x=x,y=y};return true
+  end
+  if not append(points[1].x,points[1].y) then return end
+  for i=2,#points do
+   local a,b=points[i-1],points[i]
+   local dx,dy=b.x-a.x,b.y-a.y
+   if dx~=0 and dy~=0 then return end
+   local length=math.abs(dx)+math.abs(dy)
+   for j=1,length do if not append(a.x+dx/length*j,a.y+dy/length*j) then return end end
+  end
+  return result
+ end
+ for n=1,600 do
+  local points={{x=random(11)-5,y=random(11)-5}}
+  for j=1,random(6)+1 do
+   local last=points[#points];local delta=random(15)-7
+   points[#points+1]={x=last.x+(j%2==0 and delta or 0),y=last.y+(j%2==1 and delta or 0)}
+  end
+  local bx,by=random(15)-7,random(15)-7
+  local function allowed(x,y) return x~=bx or y~=by end
+  local expected,actual=reference(points,allowed),segments(points,allowed)
+  assert((expected==nil)==(actual==nil),"segment rejection differs from raster path")
+  if expected then
+   assert(#expected==#actual,"segment length changed")
+   for i,p in ipairs(expected) do assert(p.x==actual[i].x and p.y==actual[i].y,"segment order changed") end
+  end
+ end
+ cases=cases+600
+end
+
 for _,rotation in ipairs{"west","north","east","south"} do
 	local spec=fixture(rotation,1)
 	local state=assert(planner.create_state(spec,target(spec,1,3,E),{}))
