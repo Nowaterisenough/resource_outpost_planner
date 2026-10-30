@@ -25,7 +25,7 @@ Requires **Factorio 2.1**. Space Age is optional; the big drill and additional r
 
 Put `resource-outpost-planner_1.9.7.zip` in the Factorio mods directory, or install this repository in a folder named `resource-outpost-planner`. Enable the mod and restart Factorio.
 
-This independent release uses the internal ID `resource-outpost-planner`. Disable the original Mining Patch Planner (or the earlier fork distributed under its ID) before enabling this mod. Existing built entities remain in the save, but original planner data and pending plans are not imported; configure this planner after switching.
+This independent release uses the internal ID `resource-outpost-planner`. The original Mining Patch Planner is no longer blocked by the dependency list. Existing built entities remain in the save, but original planner data and pending plans are not imported; configure this planner separately. Both planners default to **Ctrl+M**; assign separate shortcuts in Controls when using both.
 
 ## Workflow
 
