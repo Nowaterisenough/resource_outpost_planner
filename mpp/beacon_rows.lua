@@ -200,24 +200,30 @@ function rows.prune_poles(state)
 		return a<b
 	end)
 	local budget = max(65536,#nodes*64)
+	-- Reuse dense scratch arrays across deletion probes. Consumer coverage only
+	-- decreases, so a sole supplier can be permanently excluded from later probes.
+	local wanted,seen,queue,probe={},{},{},0
 	local function removable(i)
 		local node=nodes[i]
-		for _,c in ipairs(node.consumers) do if counts[c]<=1 then return false end end
-		local wanted,remaining,first={},0
+		if node.required then return false end
+		for _,c in ipairs(node.consumers) do if counts[c]<=1 then node.required=true;return false end end
+		probe=probe+1
+		local remaining,first=0
 		for _,j in ipairs(node.neighbors) do if nodes[j].active then
-			wanted[j]=true;remaining=remaining+1;first=first or j
+			wanted[j]=probe;remaining=remaining+1;first=first or j
 		end end
 		if remaining<=1 then return true end
-		local queue,seen,head={first},{[first]=true,[i]=true},1
+		local head,tail=1,1
+		queue[1]=first;seen[first],seen[i]=probe,probe
 		wanted[first]=nil;remaining=remaining-1
-		while head<=#queue do
+		while head<=tail do
 			if budget<=0 then return false end
 			budget=budget-1
 			local current=nodes[queue[head]];head=head+1
 			for _,j in ipairs(current.neighbors) do
-				if nodes[j].active and not seen[j] then
-					seen[j]=true;queue[#queue+1]=j
-					if wanted[j] then
+				if nodes[j].active and seen[j]~=probe then
+					seen[j]=probe;tail=tail+1;queue[tail]=j
+					if wanted[j]==probe then
 						wanted[j]=nil;remaining=remaining-1
 						if remaining==0 then return true end
 					end

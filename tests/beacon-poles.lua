@@ -80,4 +80,19 @@ for _,rotation in ipairs{"north","east","south","west"} do
 	assert(#state.builder_power_poles==2,"longer quality wire reach was ignored")
 	verify(state);cases=cases+1
 end
+-- Repeated articulation probes and single-supplier locks on a larger mesh.
+for _,rotation in ipairs{"north","east","south","west"} do
+ local poles,drills,beacons={},{},{}
+ for x=0,10 do for y=0,8 do
+  poles[#poles+1]={x*4,y*4}
+  if (x*13+y*7)%11==0 then drills[#drills+1]={x*4,y*4} end
+  if (x*7+y*13)%19==0 then beacons[#beacons+1]={x*4,y*4} end
+ end end
+ local state=fixture(rotation,poles,drills,beacons,3.5,5.7)
+ rows.prune_poles(state);verify(state)
+ local count=#state.builder_power_poles
+ rows.prune_poles(state);verify(state)
+ assert(#state.builder_power_poles==count,"pruning leaves removable poles after scratch reuse")
+ cases=cases+1
+end
 print("Beacon poles: "..cases.." coverage/connectivity cases passed")
