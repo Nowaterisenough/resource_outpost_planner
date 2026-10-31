@@ -1992,7 +1992,9 @@ function layout:placement_landfill(state)
 		local x, y = conv(tx-gx, ty-gy, c.w, c.h)
 		local tile = grid:get_tile(ceil(x), ceil(y))
 
-		if tile and tile.built_thing and not (state._belt_landfill and state._belt_landfill[fill.position.x..","..fill.position.y]) then
+		local fill_key=fill.position.x..","..fill.position.y
+		if (tile and tile.built_thing or state._underground_fill and state._underground_fill[fill_key])
+			and not (state._belt_landfill and state._belt_landfill[fill_key]) then
 			local cover_tile = terrain.cover_tile(fill, state)
 			if not cover_tile then goto skip_fill end
 

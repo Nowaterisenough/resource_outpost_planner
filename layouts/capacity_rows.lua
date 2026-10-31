@@ -42,7 +42,7 @@ function layout:initialize_capacity_layout(state)
 	state.preview_warning=nil
 	for _,field in ipairs{"saved_attempts","best_attempt","_preview_issues",
 		"_beacons_prepared","_beacon_counts","_beacon_merges","_beacon_planning","power_grid","_capacity_checked",
-		"builder_belt_connections","balanced_output_count","fill_tiles","fill_tile_progress"} do state[field]=nil end
+		"builder_belt_connections","balanced_output_count","fill_tiles","fill_tile_progress","_underground_fill"} do state[field]=nil end
 	state.builder_beacons={}
 	self:initialize(state)
 	state._beacon_rows=beacons.enabled(state) and true or nil
@@ -548,6 +548,24 @@ function layout:prepare_belt_layout(state)
 	end
 	state._capacity_original_coverage=nil
 	return "prepare_lamp_layout"
+end
+
+function layout:expensive_deconstruct(state)
+ if not obstacles.active(state) or obstacles.prepare(state) then return "prepare_connections" end
+ if state._capacity_tight_big then
+  local margin=state._shore_margin or 2
+  if margin<4 and next(obstacles.get(state).tiles) then
+   -- Several receiving rows can need the same shoreline. Retry with room
+   -- for parallel detours rather than rejecting the entire selected patch.
+   state._shore_margin=margin+1
+   state._capacity_row_gaps={};state._capacity_gap=1;state._capacity_pass=0
+   state.grid=nil;state.resource_tiles=nil
+   return "initialize_capacity_layout"
+  end
+ end
+ state.preview_error={"mpp.msg_obstacle_route_failed"}
+ if not state.preview_only then state.player.print(state.preview_error) end
+ return false
 end
 
 function layout:prepare_connections(state)

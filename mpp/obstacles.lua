@@ -23,7 +23,7 @@ function obstacles.active(state)
 end
 
 function obstacles.collect(surface, area, ignored, choices)
-	local index = {tiles={}, cells={}, boxes={}, boxes_by_cell={}}
+	local index = {tiles={}, underground_tiles={}, cells={}, boxes={}, boxes_by_cell={}}
 	local function cell(x, y) index.cells[key(x,y)] = {x=x, y=y} end
 	if not hazard_tiles and prototypes.tile then
 		local names={}
@@ -34,6 +34,10 @@ function obstacles.collect(surface, area, ignored, choices)
 	end
 	-- Filter in the engine instead of materializing every grass tile in Lua.
 	for _, tile in pairs(surface.find_tiles_filtered{area=area,name=hazard_tiles}) do
+		local layers=tile.prototype.collision_mask.layers
+		if layers.lava_tile or layers.empty_space or layers.out_of_map then
+			index.underground_tiles[key(tile.position.x,tile.position.y)]=true
+		end
 		if (not choices and terrain.blocked_tile(tile)) or (choices and terrain.blocks_tile(tile, choices)) then
 			local pos = tile.position
 			index.tiles[key(pos.x,pos.y)] = true
@@ -260,13 +264,17 @@ end
 function obstacles.mark_grid(state)
 	local c, grid, size = state.coords, state.grid, state.miner.size
 	local convert = util.coord_convert[state.direction_choice]
-	for _, pos in pairs(obstacles.get(state).cells) do
+	local index=obstacles.get(state)
+	for _, pos in pairs(index.cells) do
 		-- Invert revert_world at the tile center, including its half-tile offset.
 		local x,y = convert(pos.x+0.5-c.gx,pos.y+0.5-c.gy,c.w,c.h)
 		x,y = floor(x+0.5),floor(y+0.5)
 		local tile = grid:get_tile(x,y)
 		if tile then tile.avoid = true end
-		grid:forbid(x-size+1,y-size+1,size)
+		-- Dense big drills need dry shoreline space for their receiving belts
+		-- and detours; a clear footprint alone can strand the drop on lava.
+		local margin=state._capacity_tight_big and index.tiles[key(pos.x,pos.y)] and (state._shore_margin or 2) or 0
+		grid:forbid(x-size+1-margin,y-size+1-margin,size+margin*2)
 	end
 end
 
@@ -296,84 +304,341 @@ end
 local directions = {defines.direction.north,defines.direction.east,defines.direction.south,defines.direction.west}
 
 function obstacles.route_belts(state, specs)
-	local by_position, occupied, removed, added = {}, {}, {}, {}
-	for _, spec in ipairs(specs or {}) do
-		local k = key(spec.grid_x,spec.grid_y)
-		occupied[k] = spec
-		if prototypes.entity[spec.name].type == "transport-belt" then by_position[k] = spec end
-	end
-	local function path(start, finish, model)
-		local queue, head, visited = {start}, 1, {[key(start.grid_x,start.grid_y)]=true}
-		local min_x,max_x = math.min(start.grid_x,finish.grid_x)-12,math.max(start.grid_x,finish.grid_x)+12
-		local min_y,max_y = math.min(start.grid_y,finish.grid_y)-12,math.max(start.grid_y,finish.grid_y)+12
-		while head <= #queue and head <= 4096 do
-			local node = queue[head]; head = head + 1
-			if node.grid_x == finish.grid_x and node.grid_y == finish.grid_y then
-				local result = {}
-				while node do table.insert(result,1,node); node=node.previous end
-				return result
-			end
-			for _, dir in ipairs(directions) do
-				local delta = util.direction_coord[dir]
-				local x,y = node.grid_x+delta.x,node.grid_y+delta.y
-				local k = key(x,y)
-				local endpoint = x == finish.grid_x and y == finish.grid_y
-				if not visited[k] and x>=min_x and x<=max_x and y>=min_y and y<=max_y then
-					visited[k] = true
-					local probe = {name=model.name,grid_x=x,grid_y=y,direction=dir}
-					local tile = state.grid and state.grid:get_tile(floor(x),floor(y))
-					if (endpoint or not occupied[k] and not (tile and tile.built_thing)) and safe(state,probe) then
-						probe.previous=node; queue[#queue+1]=probe
-					end
-				end
-			end
-		end
-	end
-	for _, spec in ipairs(specs or {}) do
-		if by_position[key(spec.grid_x,spec.grid_y)] == spec and not removed[spec] and not safe(state,spec) then
-			local delta = util.direction_coord[spec.direction or defines.direction.north]
-			local first,last = spec,spec
-			while true do
-				local prev=by_position[key(first.grid_x-delta.x,first.grid_y-delta.y)]
-				if not prev or safe(state,prev) then break end
-				if prev.direction ~= spec.direction then return failure(state,spec,"mpp.preview_issue_belt") end
-				first=prev
-			end
-			while true do
-				local next=by_position[key(last.grid_x+delta.x,last.grid_y+delta.y)]
-				if not next or safe(state,next) then break end
-				if next.direction ~= spec.direction then return failure(state,spec,"mpp.preview_issue_belt") end
-				last=next
-			end
-			local start=by_position[key(first.grid_x-delta.x,first.grid_y-delta.y)]
-			local finish=by_position[key(last.grid_x+delta.x,last.grid_y+delta.y)]
-			if not start or not finish or start.direction ~= spec.direction then return failure(state,spec,"mpp.preview_issue_belt") end
-			local route=path(start,finish,spec)
-			if not route then return failure(state,spec,"mpp.preview_issue_belt") end
-			local x,y=first.grid_x,first.grid_y
-			repeat
-				removed[by_position[key(x,y)]]=true
-				if x==last.grid_x and y==last.grid_y then break end
-				x,y=x+delta.x,y+delta.y
-			until false
-			for index=1,#route-1 do
-				local node,next=route[index],route[index+1]
-				local dir
-				for _, candidate in ipairs(directions) do
-					local step=util.direction_coord[candidate]
-					if next.grid_x-node.grid_x==step.x and next.grid_y-node.grid_y==step.y then dir=candidate break end
-				end
-				if index==1 then start.direction=dir else
-					local replacement={name=spec.name,quality=spec.quality,thing="belt",grid_x=node.grid_x,grid_y=node.grid_y,direction=dir}
-					added[#added+1]=replacement; occupied[key(node.grid_x,node.grid_y)]=replacement
-				end
-			end
-		end
-	end
-	local result={}
-	for _, spec in ipairs(specs or {}) do if not removed[spec] then result[#result+1]=spec end end
-	for _, spec in ipairs(added) do result[#result+1]=spec end
-	return true,result
+ state._underground_fill=nil
+ local index=obstacles.get(state)
+ if not next(index.tiles) and #index.boxes==0 and not next(index.underground_tiles or {}) then return true,specs end
+ local by_position, occupied, removed, added = {}, {}, {}, {}
+ local work={}
+ local function register(spec)
+  local k=key(spec.grid_x,spec.grid_y)
+  occupied[k]=spec;by_position[k]=spec;work[#work+1]=spec
+ end
+ for _,spec in ipairs(specs or {}) do
+  local kind=prototypes.entity[spec.name].type
+  occupied[key(spec.grid_x,spec.grid_y)]=spec
+  if kind=="transport-belt" or kind=="underground-belt" then by_position[key(spec.grid_x,spec.grid_y)]=spec end
+  work[#work+1]=spec
+ end
+ local underground_tiles=index.underground_tiles or {}
+ local function underground_blocked(x,y)
+  -- Space Age also checks tiles below the tunnel, independently of whether
+  -- filling is allowed. These masks are not exposed by runtime prototypes.
+  local pos=world(state,{grid_x=x,grid_y=y})
+  local k=key(floor(pos.x),floor(pos.y))
+  return underground_tiles[k] and k
+ end
+ local function partner(spec)
+  local delta=util.direction_coord[spec.direction]
+  local sign=spec.type=="input" and 1 or -1
+  for distance=1,state.belt.underground_reach or 0 do
+   local candidate=by_position[key(spec.grid_x+delta.x*sign*distance,spec.grid_y+delta.y*sign*distance)]
+   if candidate and candidate.name==spec.name and candidate.direction==spec.direction and candidate.type~=spec.type then return candidate end
+  end
+ end
+ local function crosses_lava(spec)
+  local other=partner(spec)
+  if not other then return false end
+  local d=util.direction_coord[spec.direction];local sign=spec.type=="input" and 1 or -1
+  local distance=math.abs(other.grid_x-spec.grid_x)+math.abs(other.grid_y-spec.grid_y)
+  for offset=1,distance-1 do
+   local k=underground_blocked(spec.grid_x+d.x*sign*offset,spec.grid_y+d.y*sign*offset)
+   if k and index.tiles[k] then return true end
+  end
+  return false
+ end
+ local function clear(spec)
+  removed[spec]=true
+  local k=key(spec.grid_x,spec.grid_y)
+  if occupied[k]==spec then occupied[k]=nil end
+  if by_position[k]==spec then by_position[k]=occupied[k] end
+ end
+ local function blocked(spec)
+  local tile=state.grid and state.grid:get_tile(floor(spec.grid_x),floor(spec.grid_y))
+  return spec._route_crossing or tile and tile.built_thing and tile.built_thing~="belt" or not safe(state,spec)
+ end
+ -- A shoreline can cut through a previously chosen tunnel endpoint. Expand
+ -- the whole pair before repairing its surface run, including reserved poles.
+ local function expand(spec)
+  if prototypes.entity[spec.name].type~="underground-belt" then return true end
+  local delta=util.direction_coord[spec.direction]
+  local sign=spec.type=="input" and 1 or -1
+  local other=partner(spec)
+  if not other then return false end
+  local distance=math.abs(other.grid_x-spec.grid_x)+math.abs(other.grid_y-spec.grid_y)
+  clear(spec);clear(other)
+  for offset=0,distance do
+   local replacement={name=state.belt_choice,quality=spec.quality,thing="belt",
+    grid_x=spec.grid_x+delta.x*sign*offset,grid_y=spec.grid_y+delta.y*sign*offset,direction=spec.direction}
+   local k=key(replacement.grid_x,replacement.grid_y)
+   if occupied[k] then
+    -- Keep the crossing's surface belt. This virtual cell belongs only to
+    -- the expanded tunnel chain and must be routed around (or underneath).
+    replacement._route_crossing=true;by_position[k]=replacement;work[#work+1]=replacement
+   else register(replacement) end
+   added[#added+1]=replacement
+  end
+  return true
+ end
+ for _,spec in ipairs(specs or {}) do
+  if not removed[spec] and prototypes.entity[spec.name].type=="underground-belt" and (not safe(state,spec) or crosses_lava(spec)) then
+   if not expand(spec) then return failure(state,spec,"mpp.preview_issue_belt") end
+  end
+ end
+ local receiving={}
+ for _,miner in ipairs(state.best_attempt and state.best_attempt.miners or {}) do
+  local offset=state.miner.output_rotated[miner.direction]
+  if offset then receiving[key(miner.x+offset.x,miner.y+offset.y)]=true end
+ end
+ local incoming={}
+ local function refresh_incoming()
+ incoming={}
+ for _,spec in pairs(by_position) do
+  if prototypes.entity[spec.name].type=="transport-belt" or spec.type=="output" then
+   local d=util.direction_coord[spec.direction or defines.direction.north]
+   local k=key(spec.grid_x+d.x,spec.grid_y+d.y);local target=by_position[k]
+   if target and target.direction~=(spec.direction+defines.direction.south)%16 then
+    incoming[k]=incoming[k] or {};incoming[k][#incoming[k]+1]=spec
+    if target.direction~=spec.direction then receiving[k]=true end
+   end
+  end
+ end
+ end
+ local function path(start,finish,model,margin)
+  local reach=state.belt and state.belt.underground_reach or 0
+  local underground=state.belt and state.belt.related_underground_belt
+  local function node_key(x,y,dir,tunnel) return key(x,y)..":"..dir..(tunnel and "u" or "s") end
+  local queue,head,visited={{grid_x=start.grid_x,grid_y=start.grid_y,direction=start.direction,tunnel=start.type=="output"}},1,{}
+  visited[node_key(start.grid_x,start.grid_y,start.direction)]=true
+  local min_x,max_x=math.min(start.grid_x,finish.grid_x)-margin,math.max(start.grid_x,finish.grid_x)+margin
+  local min_y,max_y=math.min(start.grid_y,finish.grid_y)-margin,math.max(start.grid_y,finish.grid_y)+margin
+  local passable_cache,tunnel_cache={},{}
+  local function passable(x,y,dir)
+   local k=key(x,y);local free=passable_cache[k]
+   if free==nil then
+    free=(x==finish.grid_x and y==finish.grid_y or not occupied[k]) and not blocked{name=model.name,grid_x=x,grid_y=y,direction=dir}
+    passable_cache[k]=not not free
+   end
+   return free
+  end
+  local function tunnel_clear(x,y,dir)
+   local k=node_key(x,y,dir);local free=tunnel_cache[k]
+   if free==nil then
+    free=not receiving[key(x,y)]
+    local d=util.direction_coord[dir]
+    if free then
+     local behind,ahead
+     for offset=1,reach do
+      local back=occupied[key(x-d.x*offset,y-d.y*offset)]
+      local front=occupied[key(x+d.x*offset,y+d.y*offset)]
+      if not behind and back and back.name==underground and back.direction%8==dir%8 then behind=back end
+      if not ahead and front and front.name==underground and front.direction%8==dir%8 then ahead=front end
+     end
+     if behind and ahead and partner(behind)==ahead then free=false end
+    end
+    if free then free=safe(state,{name=underground,grid_x=x,grid_y=y,direction=dir}) end
+    tunnel_cache[k]=not not free
+   end
+   return free
+  end
+  local function enqueue(node,x,y,dir,tunnel)
+   local endpoint=x==finish.grid_x and y==finish.grid_y
+   local k=node_key(x,y,dir,tunnel)
+   if not visited[k] and x>=min_x and x<=max_x and y>=min_y and y<=max_y
+    and not (endpoint and (tunnel and (dir~=finish.direction or finish.type) or finish.type and dir~=finish.direction or dir==(finish.direction+defines.direction.south)%16))
+    and passable(x,y,dir) then
+    local previous=node
+    while previous do
+     if previous.grid_x==x and previous.grid_y==y then return end
+     if tunnel and previous.tunnel and previous.previous and previous.direction%8==dir%8 then
+      local a,b=previous,previous.previous
+      if dir%8==0 and x==a.grid_x and math.min(y,node.grid_y)<math.max(a.grid_y,b.grid_y)
+       and math.max(y,node.grid_y)>math.min(a.grid_y,b.grid_y) then return end
+      if dir%8==4 and y==a.grid_y and math.min(x,node.grid_x)<math.max(a.grid_x,b.grid_x)
+       and math.max(x,node.grid_x)>math.min(a.grid_x,b.grid_x) then return end
+     end
+     previous=previous.previous
+    end
+    visited[k]=true
+    queue[#queue+1]={grid_x=x,grid_y=y,direction=dir,tunnel=tunnel,previous=node}
+   end
+  end
+  while head<=#queue and head<=65536 do
+   local node=queue[head];head=head+1
+   if node.grid_x==finish.grid_x and node.grid_y==finish.grid_y then
+    local result={}
+    while node do table.insert(result,1,node);node=node.previous end
+    return result
+   end
+   for _,dir in ipairs(directions) do
+    local accepts=true
+    if not node.previous then for _,source in ipairs(incoming[key(node.grid_x,node.grid_y)] or {}) do
+     if not removed[source] and dir==(source.direction+defines.direction.south)%16 then accepts=false;break end
+    end end
+    if accepts and dir~=(node.direction+defines.direction.south)%16 and (not node.tunnel or dir==node.direction) then
+     local delta=util.direction_coord[dir]
+     local x,y=node.grid_x+delta.x,node.grid_y+delta.y
+     enqueue(node,x,y,dir)
+     -- A tunnel must enter and leave straight, with both endpoints on dry
+     -- unoccupied tiles. Never hide a mining drop or steal an existing pair.
+     if underground and not node.tunnel and dir==node.direction and not passable(x,y,dir)
+      and tunnel_clear(node.grid_x,node.grid_y,dir) then
+      for distance=2,reach do
+       if underground_blocked(node.grid_x+delta.x*(distance-1),node.grid_y+delta.y*(distance-1)) then break end
+       local tx,ty=node.grid_x+delta.x*distance,node.grid_y+delta.y*distance
+       local existing=occupied[key(tx,ty)]
+       if existing and existing.name==underground and existing.direction%8==dir%8 then break end
+       if tunnel_clear(tx,ty,dir) then enqueue(node,tx,ty,dir,true) end
+      end
+     end
+    end
+   end
+  end
+ end
+ local i=1
+ while work[i] do
+  local spec=work[i];i=i+1
+  if not removed[spec] and prototypes.entity[spec.name].type=="transport-belt" and blocked(spec) then
+   local delta=util.direction_coord[spec.direction or defines.direction.north]
+   local first,last=spec,spec
+   local function neighbor(node,sign)
+    local x,y=node.grid_x+delta.x*sign,node.grid_y+delta.y*sign
+    local found=by_position[key(x,y)]
+    if found and prototypes.entity[found.name].type=="underground-belt" then
+     if not expand(found) then return end
+     found=by_position[key(x,y)]
+    end
+    return found
+   end
+   while true do
+    local prev=neighbor(first,-1)
+    if not prev or not blocked(prev) then break end
+    if prev.direction~=spec.direction then return failure(state,spec,"mpp.preview_issue_belt") end
+    first=prev
+   end
+   while true do
+    local next=neighbor(last,1)
+    if not next or not blocked(next) then break end
+    if next.direction~=spec.direction then return failure(state,spec,"mpp.preview_issue_belt") end
+    last=next
+   end
+   local start,finish=neighbor(first,-1),neighbor(last,1)
+   if not start or not finish or start.direction~=spec.direction then return failure(state,spec,"mpp.preview_issue_belt") end
+   refresh_incoming()
+   local route=path(start,finish,spec,16)
+   -- The first dry tile can be trapped between lava and a parallel belt.
+   -- Move the turn back over unused surface tiles, keeping every drill drop.
+   for _=1,12 do
+    if route then break end
+    local changed=false
+    if not start.type and not receiving[key(start.grid_x,start.grid_y)] then
+     local prev=neighbor(start,-1)
+     if prev and prev.direction==spec.direction and not blocked(prev) then
+      occupied[key(start.grid_x,start.grid_y)]=nil;first=start;start=prev;changed=true
+     end
+    end
+    if not finish.type and not receiving[key(finish.grid_x,finish.grid_y)] then
+     local next=neighbor(finish,1)
+     if next and next.direction==spec.direction and not blocked(next) then
+      occupied[key(finish.grid_x,finish.grid_y)]=nil;last=finish;finish=next;changed=true
+     end
+    end
+    if not changed then break end
+    route=path(start,finish,spec,16)
+   end
+   route=route or path(start,finish,spec,64)
+   if not route then return failure(state,spec,"mpp.preview_issue_belt") end
+   local x,y=first.grid_x,first.grid_y
+   repeat
+    clear(by_position[key(x,y)])
+    if x==last.grid_x and y==last.grid_y then break end
+    x,y=x+delta.x,y+delta.y
+   until false
+   for index=1,#route-(route[#route].tunnel and 0 or 1) do
+    local node,next=route[index],route[index+1]
+    local kind=node.tunnel and "output" or next and next.tunnel and "input" or nil
+    local replacement={name=kind and state.belt.related_underground_belt or spec.name,
+     quality=spec.quality,thing="belt",grid_x=node.grid_x,grid_y=node.grid_y,direction=next and next.direction or finish.direction,type=kind}
+    if index==1 then clear(start) elseif index==#route then clear(finish) end
+    added[#added+1]=replacement;register(replacement)
+   end
+  end
+ end
+ local result={}
+ for _,spec in ipairs(specs or {}) do if not removed[spec] then result[#result+1]=spec end end
+ for _,spec in ipairs(added) do if not removed[spec] then result[#result+1]=spec end end
+ -- Lava beneath retained tunnels needs foundation even where there is no
+ -- surface entity. Placement collects these cells along with its footprints.
+ for _,spec in ipairs(result) do if spec.type=="input" then
+  local other=partner(spec)
+  if other then
+   local d=util.direction_coord[spec.direction]
+   local distance=math.abs(other.grid_x-spec.grid_x)+math.abs(other.grid_y-spec.grid_y)
+   for offset=1,distance-1 do
+    local k=underground_blocked(spec.grid_x+d.x*offset,spec.grid_y+d.y*offset)
+    if k and not index.tiles[k] then
+     state._underground_fill=state._underground_fill or {};state._underground_fill[k]=true
+    end
+   end
+  end
+ end end
+ return true,result
+end
+
+-- Removing poles on internal lava can split an otherwise covered mine into
+-- islands. Join those components using dry, free pole sites after belt repair.
+function obstacles.reconnect_poles(state)
+ local poles=state.builder_power_poles or {}
+ if not state._capacity_tight_big or #poles<2 then return true end
+ local index=obstacles.get(state)
+ if not next(index.tiles) and #index.boxes==0 then return true end
+ local reach=state.pole.wire;local reach2=reach*reach
+ local function nearby(a,b) return (a.grid_x-b.grid_x)^2+(a.grid_y-b.grid_y)^2<=reach2 end
+ local offsets={}
+ for dx=-floor(reach),floor(reach) do for dy=-floor(reach),floor(reach) do
+  if dx*dx+dy*dy>0 and dx*dx+dy*dy<=reach2 then offsets[#offsets+1]={dx,dy} end
+ end end
+ table.sort(offsets,function(a,b) return a[1]^2+a[2]^2>b[1]^2+b[2]^2 end)
+ local free={}
+ local function site(x,y)
+  local k=key(x,y);local value=free[k]
+  if value==nil then
+   local tile=state.grid:get_tile(x,y)
+   value=tile and not tile.built_thing and safe(state,{name=state.pole_choice,grid_x=x,grid_y=y})
+   free[k]=not not value
+  end
+  return value
+ end
+ while true do
+  local connected,queue={[1]=true},{poles[1]};local head=1
+  while queue[head] do
+   local node=queue[head];head=head+1
+   for i,pole in ipairs(poles) do if not connected[i] and nearby(node,pole) then connected[i]=true;queue[#queue+1]=pole end end
+  end
+  if #queue==#poles then return true end
+  local targets={}
+  for i,pole in ipairs(poles) do if not connected[i] then targets[#targets+1]=pole end end
+  local visited={}
+  for _,pole in ipairs(queue) do visited[key(pole.grid_x,pole.grid_y)]=true end
+  head=1;local found
+  while queue[head] and head<=16384 and not found do
+   local node=queue[head];head=head+1
+   if node.previous then for _,target in ipairs(targets) do if nearby(node,target) then found=node;break end end end
+   if not found then for _,offset in ipairs(offsets) do
+    local x,y=node.grid_x+offset[1],node.grid_y+offset[2]
+    local k=key(x,y)
+    if not visited[k] then
+     visited[k]=true
+     if site(x,y) then queue[#queue+1]={grid_x=x,grid_y=y,previous=node} end
+    end
+   end end
+  end
+  if not found then return failure(state,targets[1],"mpp.preview_issue_power") end
+  while found.previous do
+   local pole={name=state.pole_choice,quality=state.pole_quality_choice,thing="pole",grid_x=found.grid_x,grid_y=found.grid_y}
+   poles[#poles+1]=pole;state.grid:build_thing_simple(pole.grid_x,pole.grid_y,"pole");free[key(pole.grid_x,pole.grid_y)]=false
+   found=found.previous
+  end
+ end
 end
 
 function obstacles.prepare(state)
@@ -381,12 +646,16 @@ function obstacles.prepare(state)
 		if not safe(state,spec) then return failure(state,spec,"mpp.preview_issue_pipe") end
 	end
 	for _, spec in ipairs(state.builder_belts or {}) do
-		if prototypes.entity[spec.name].type ~= "transport-belt" and not safe(state,spec) then
+		if prototypes.entity[spec.name].type ~= "transport-belt" and prototypes.entity[spec.name].type ~= "underground-belt" and not safe(state,spec) then
 			return failure(state,spec,"mpp.preview_issue_entity")
 		end
 	end
 	local ok,belts=obstacles.route_belts(state,state.builder_belts)
 	if not ok then return false end
+	if state.grid then for _,spec in ipairs(state.builder_belts or {}) do
+		local tile=state.grid:get_tile(spec.grid_x,spec.grid_y)
+		if tile and tile.built_thing=="belt" then tile.built_thing=nil end
+	end end
 	state.builder_belts=belts
 	if state.grid then
 		for _, spec in ipairs(belts) do state.grid:build_thing_simple(spec.grid_x,spec.grid_y,"belt") end
@@ -431,7 +700,7 @@ function obstacles.prepare(state)
 			end
 		end
 	end
-	return true
+	return obstacles.reconnect_poles(state)
 end
 
 return obstacles

@@ -201,4 +201,77 @@ do
   end end
  end
 end
+-- A dry pair of endpoints must not tunnel under internal lava. Repair the
+-- complete pair, preserve the mining receiver, and leave a connected route.
+do
+ local original_get,original_can_place=obstacles.get,obstacles.can_place
+ prototypes.entity["test-underground"]={type="underground-belt"}
+ local function k(x,y) return x..","..y end
+ local hazard={}
+ for x=6,7 do for y=-2,2 do hazard[k(x,y)]=true end end
+ local index={tiles={},underground_tiles={},boxes={}}
+ for x=6,7 do for y=-2,2 do index.tiles[k(x-1,y-1)]=true;index.underground_tiles[k(x-1,y-1)]=true end end
+ obstacles.get=function() return index end
+ obstacles.can_place=function(_,_,position) return not hazard[k(math.floor(position.x+.5),math.floor(position.y+.5))] end
+ local cells={}
+ local state={coords={gx=0,gy=0,tw=20,th=20},direction_choice="west",belt_choice="test-belt",
+  belt={underground_reach=9,related_underground_belt="test-underground"},
+  miner={output_rotated={[8]={x=0,y=1}}},best_attempt={miners={{x=11,y=-1,direction=8}}},
+  grid={get_tile=function(_,x,y) return cells[k(x,y)] end}}
+ local specs={}
+ for _,x in ipairs{0,1,2,3,4,10,11,12} do
+  local underground=x==4 or x==10
+  specs[#specs+1]={name=underground and "test-underground" or "test-belt",grid_x=x,grid_y=0,
+   direction=12,type=underground and (x==10 and "input" or "output") or nil}
+  cells[k(x,0)]={built_thing="belt"}
+ end
+ local crossing={name="test-belt",grid_x=5,grid_y=0,direction=8}
+ specs[#specs+1]=crossing;cells[k(5,0)]={built_thing="belt"}
+ local ok,routed=obstacles.route_belts(state,specs)
+ assert(ok,"dry tunnel endpoints over lava rejected instead of repaired")
+ local positions={}
+ for _,spec in ipairs(routed) do
+  local key=k(spec.grid_x,spec.grid_y)
+  assert(not positions[key],"detour visits its own surface tile twice")
+  assert(not hazard[key],"repaired endpoint/surface belt sits on lava")
+  positions[key]=spec
+ end
+ assert(positions[k(5,0)]==crossing,"repair destroyed a surface crossing inside the original tunnel")
+ assert(positions[k(11,0)].name=="test-belt","repair hid a drill receiver underground")
+ local delta={[0]={0,-1},[4]={1,0},[8]={0,1},[12]={-1,0}}
+ local node,seen=positions[k(12,0)],{}
+ while node and not (node.grid_x==0 and node.grid_y==0) do
+  assert(not seen[node],"internal detour loops forever");seen[node]=true
+  local d=delta[node.direction]
+  if node.type=="input" then
+   local output
+   for distance=1,9 do
+    local x,y=node.grid_x+d[1]*distance,node.grid_y+d[2]*distance
+    assert(not hazard[k(x,y)],"underground detour still crosses lava")
+    local candidate=positions[k(x,y)]
+    if candidate and candidate.type=="output" and candidate.direction==node.direction then output=candidate;break end
+   end
+   assert(output,"detour tunnel has no matching output");node=output
+  else node=positions[k(node.grid_x+d[1],node.grid_y+d[2])] end
+ end
+ assert(node,"repaired internal belt does not reach the mine edge")
+ -- Filling must cover hidden tunnel cells, including cells without surface
+ -- entities, so retained endpoints can pair once the foundations are built.
+ index.tiles={};obstacles.can_place=function() return true end
+ local fill_specs={}
+ for _,x in ipairs{0,1,2,3,4,10,11,12} do
+  local u=x==4 or x==10
+  fill_specs[#fill_specs+1]={name=u and "test-underground" or "test-belt",grid_x=x,grid_y=0,direction=12,type=u and (x==10 and "input" or "output") or nil}
+ end
+ local fill_ok,fill=obstacles.route_belts(state,fill_specs)
+ assert(fill_ok)
+ assert(#fill==#fill_specs,"fill unnecessarily replaced a compact tunnel")
+ assert(state._underground_fill and state._underground_fill[k(5,-1)] and state._underground_fill[k(6,-1)],"hidden lava lacks required foundation")
+ assert(not state._underground_fill[k(7,-1)],"hidden foundation extends onto dry ground")
+ index.underground_tiles={}
+ local dry_ok,dry=obstacles.route_belts(state,fill_specs)
+ assert(dry_ok and dry==fill_specs and not state._underground_fill,"clear terrain rebuilds an unchanged plan or retains stale underground fill")
+ obstacles.get,obstacles.can_place=original_get,original_can_place
+ cases=cases+3
+end
 print("Obstacles OK: "..cases.." collision comparisons, engine entity/terrain filters, local queries and scan bounds")
