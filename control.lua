@@ -57,7 +57,7 @@ function task_runner_handler(event)
 	end
 end
 
-local function set_belt_target(player, surface, position, direction, mirror)
+local function set_belt_target(player, surface, position, direction, mirror, build_mode)
 	local data=storage.players[player.index]
 	if not data or (data.preview and data.preview.applying) then return end
 	if data.choices.output_station_choice and data.output_station_count_invalid then return end
@@ -73,9 +73,23 @@ local function set_belt_target(player, surface, position, direction, mirror)
 	if not spec then player.print({"mpp.msg_belt_planner_err_no_previous_state"}); return end
 	if surface~=spec.surface then return end
 	local choices=table.deepcopy(data.choices)
+	local mode
+	if build_mode==defines.build_mode.forced or build_mode==defines.build_mode.superforced then
+		mode=choices.remove_entities_choice and defines.build_mode.superforced or build_mode
+	end
+	choices._force_build_mode=mode
 	choices._collected_ghosts=data.last_state and data.last_state._collected_ghosts
+	if data.last_state then
+		data.last_state._deconstruction_orders=data.last_state._deconstruction_orders or {}
+		choices._deconstruction_orders=data.last_state._deconstruction_orders
+	end
 	local state,err=belt_planner.create_state(spec,target,choices)
 	if not state then player.print(err); return end
+	state._native_build_mode=mode
+	if mode and data.last_state then
+		data.last_state._render_objects=data.last_state._render_objects or {}
+		state._render_objects=data.last_state._render_objects
+	end
 	table.insert(storage.immediate_tasks,state)
 	script.on_event(defines.events.on_tick,task_runner_handler)
 end
@@ -86,7 +100,7 @@ script.on_event(defines.events.on_pre_build, function(event)
 	local target = belt_planner.take_cursor_target(player, event)
 	if not target then return end
 	script.on_event(defines.events.on_tick, task_runner_handler)
-	set_belt_target(player, player.surface, target.position, target.direction,target.mirror)
+	set_belt_target(player, player.surface, target.position, target.direction,target.mirror,event.build_mode)
 end)
 
 local function select_preview(event,append)

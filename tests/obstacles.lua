@@ -178,4 +178,27 @@ do
  assert(queries==1,"negative chunk repeats an unchanged query")
  cases=cases+3
 end
+-- Force placement can defer entity conflicts to the engine, but never makes
+-- forbidden terrain passable (even if a matching ghost already sits there).
+do
+ local proto=prototypes.entity["test-belt"]
+ local ghost={valid=true,name="entity-ghost",type="entity-ghost",ghost_name="test-belt",
+  position={x=.5,y=.5},direction=0,quality={name="normal"},ghost_prototype=proto,bounding_box=box(.1,.1,.9,.9)}
+ local facility=entity(box(2.1,.1,2.9,.9),"container",901)
+ for _,mode in ipairs{"forced","superforced"} do
+  for _,hazard in ipairs{water,lava,void} do for _,fill in ipairs{false,true} do
+   local map={find_tiles_filtered=function() return {hazard} end,
+    find_entities_filtered=function() return {ghost,facility} end}
+   local state={surface=map,coords={x1=0,y1=0,x2=10,y2=10},player={index=1,force={}},
+    _force_build_mode=mode,_belt_routing=true,output_only=true,remove_entities_choice=false,
+    fill_water_choice=false,fill_lava_choice=fill,fill_other_choice=true}
+   local expected=hazard==lava and fill
+   assert(obstacles.can_place(state,"test-belt",{x=.5,y=.5},0)==expected,"force ignores terrain or reuses a ghost over lava")
+   local check=obstacles.placement_checker(state,"test-belt",0)
+   assert(check{x=.5,y=.5}==expected,"cached forced checker ignores terrain")
+   assert(check{x=2.5,y=.5},"force no longer delegates facility conflicts to native placement")
+   cases=cases+3
+  end end
+ end
+end
 print("Obstacles OK: "..cases.." collision comparisons, engine entity/terrain filters, local queries and scan bounds")

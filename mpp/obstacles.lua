@@ -40,6 +40,9 @@ function obstacles.collect(surface, area, ignored, choices)
 			cell(pos.x,pos.y)
 		end
 	end
+	-- Explicit output forcing delegates entity conflicts to native blueprints,
+	-- but it must still route around terrain whose filling is disabled.
+	if choices and choices._force_build_mode and choices._belt_routing then return index end
 	-- Ore patches can contain thousands of resources that never obstruct placement.
 	for _, entity in pairs(surface.find_entities_filtered{area=area,type=ignored_types,invert=true}) do
 		if entity.valid and not (entity.unit_number and ignored and ignored[entity.unit_number]) then
@@ -237,24 +240,21 @@ end
 -- A routing attempt is synchronous and cannot change the world. Resolve its
 -- obstacle snapshot once, outside the potentially large path-search loop.
 function obstacles.placement_checker(state,name,direction)
-	if state._force_build_mode and state._belt_routing or not obstacles.active(state) then return function() return true end end
+	if not obstacles.active(state) then return function() return true end end
 	local index=obstacles.get(state)
 	if not next(index.tiles) and #index.boxes==0 then return function() return true end end
 	return function(position)
 		return not obstacles.blocked_bounds(index,obstacles.entity_bounds(name,position.x,position.y,direction))
-			or obstacles.shared_entity(state,name,position,direction,state.belt_quality_choice)~=nil
+			or not (state._force_build_mode and state._belt_routing) and obstacles.shared_entity(state,name,position,direction,state.belt_quality_choice)~=nil
 	end
 end
 
 function obstacles.can_place(state, name, position, direction)
-	-- Only an explicitly forced output replan may ignore external obstructions.
-	-- The router still checks planned entities and lane connectivity itself.
-	if state._force_build_mode and state._belt_routing then return true end
 	if not obstacles.active(state) then return true end
 	-- Most route probes are empty ground. Only query the engine for a reusable
 	-- entity when the broad phase actually found an obstruction at this position.
 	if not obstacles.blocked_bounds(obstacles.get(state),obstacles.entity_bounds(name,position.x,position.y,direction)) then return true end
-	return obstacles.shared_entity(state,name,position,direction,state.belt_quality_choice)~=nil
+	return not (state._force_build_mode and state._belt_routing) and obstacles.shared_entity(state,name,position,direction,state.belt_quality_choice)~=nil
 end
 
 function obstacles.mark_grid(state)

@@ -64,6 +64,9 @@ end
 function terrain.blocks_entity(entity, choices)
 	local kind = entity.type == "entity-ghost" and entity.ghost_prototype.type or entity.type
 	if kind == "cliff" then return terrain.avoid_cliffs(choices) end
+	-- Native Force apply clears natural obstacles. Its validation replan must
+	-- allow the same trees/rocks inside the mine, including pipe corridors.
+	if choices._force_build_mode and (kind == "tree" or kind == "simple-entity") then return false end
 	return terrain.retain_entities(choices, entity)
 end
 

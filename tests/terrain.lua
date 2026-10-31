@@ -140,6 +140,22 @@ for mask=0,127 do
 	configuration.migrate_terrain_choices(c)
 	for k,v in pairs(snapshot) do check(c[k]==v,"migration resets independent setting "..k) end
 end
+-- Explicit force overrides natural retention only for this plan. Facilities,
+-- cliffs and terrain still follow their independent validation settings.
+for _,mode in ipairs{1,2} do
+ local choices={_force_build_mode=mode,remove_entities_choice=false,remove_trees_choice=false,remove_rocks_choice=false,
+  cliff_mode_choice="avoid",fill_lava_choice=false}
+ for _,kind in ipairs{"tree","simple-entity"} do
+  check(not terrain.blocks_entity({type=kind},choices),"forced mine still avoids natural obstructions")
+  check(not terrain.blocks_entity({type="entity-ghost",ghost_prototype={type=kind}},choices),"forced mine retains natural ghosts")
+ end
+ check(terrain.blocks_entity({type="assembling-machine"},choices),"natural override clears retained facilities")
+ check(terrain.blocks_entity({type="cliff"},choices),"natural override clears retained cliffs")
+ check(terrain.blocks_tile(hazards[2],choices),"natural override fills forbidden lava")
+ check(not choices.remove_trees_choice and not choices.remove_rocks_choice,"force mutates saved cleanup choices")
+ choices._force_build_mode=nil
+ check(terrain.blocks_entity({type="simple-entity"},choices),"ordinary plan inherits forced rock clearing")
+end
 local legacy={cliff_mode_choice="remove",terrain_mode_choice="fill",remove_entities_choice=false}
 configuration.migrate_terrain_choices(legacy)
 check(legacy.fill_water_choice and legacy.fill_lava_choice and legacy.fill_oil_ocean_choice and legacy.fill_other_choice,

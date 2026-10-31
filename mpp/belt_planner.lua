@@ -7,6 +7,7 @@ local terrain = require("mpp.terrain")
 local output_balancer = require("mpp.output_balancer")
 local train_station = require("mpp.train_station")
 local belt_load = require("mpp.belt_load")
+local forced_build = require("mpp.forced_build")
 local belt_planner = {}
 local blueprint_name = "mpp-blueprint-belt-planner"
 local station_cursor_version = 4
@@ -930,11 +931,15 @@ function belt_planner.plan(state)
 end
 
 function belt_planner.layout(state)
+	-- Direct output clicks after Apply have no draft. Preserve their native
+	-- Shift/Ctrl+Shift mode and validate the full route before marking obstacles.
+	if state._native_build_mode then state.preview_only=true;state._preview_specs={} end
 	local ok, specs=belt_planner.plan(state)
 	if not ok then state.player.print(specs); return false end
 	local create=builder.create_entity_builder(state,{do_deconstruction=true})
 	for _, spec in ipairs(specs) do create(spec) end
 	belt_planner.place_landfill(state,specs)
+	if state._native_build_mode then return forced_build.apply(state,state._native_build_mode) end
 	return true
 end
 

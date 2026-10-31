@@ -24,7 +24,8 @@ local function robot_cleanup(p,t)
  t.cleanup_storage=surface.create_entity{name="storage-chest",position={-75.5,85.5},force=p.force}
  t.cleanup_entities={}
  local specs={}
- for i,name in ipairs{"electric-mining-drill","steel-chest","beacon","transport-belt","tree-01","big-rock"} do
+ for i,name in ipairs{"electric-mining-drill","steel-chest","beacon","transport-belt","tree-01","big-rock",
+  "big-volcanic-rock","big-volcanic-rock-hot","huge-volcanic-rock","huge-volcanic-rock-hot"} do
   local position={x=-85.5+i*5,y=100.5}
   local e=surface.create_entity{name=name,position=position,force=i>4 and "neutral" or p.force}
   assert(e,"robot cleanup fixture could not create "..name)
