@@ -77,12 +77,16 @@ local function verify(n,m,belt_name,preference)
 		if kind(entity)=="splitter" or entity.type=="input" then return entity.direction==dir end
 		return entity.direction~=(dir+S)%16
 	end
+	local claimed_tunnels={}
 	local function step(entity)
 		local delta=util.direction_coord[entity.direction]
 		if entity.type=="input" then
 			for distance=1,prototypes.entity[entity.name].max_underground_distance do
 				local target=cells[key(entity.x+delta.x*distance,entity.y+delta.y*distance)]
-				if target and target.type=="output" and target.direction==entity.direction then return target end
+				if target and target.type=="output" and target.direction==entity.direction then
+     assert(not claimed_tunnels[target] or claimed_tunnels[target]==entity,"two inputs steal one underground output")
+     claimed_tunnels[target]=entity;return target
+    end
 			end
 			error("underground input is unpaired in "..n.." -> "..m.." at "..key(entity.x,entity.y))
 		end
@@ -200,4 +204,5 @@ assert(two_to_eight.source_label=="2_8_balancer" and two_to_eight.reference_coun
 assert(balancer.geometry(1,1,"transport-belt").reference_count==11)
 assert(balancer.geometry(2,2,"transport-belt").reference_count==16)
 for _,n in ipairs{33,39,64,65,128} do for _,m in ipairs{8,24,32} do verify(n,m) end end
+for inputs=9,20 do verify(inputs,4) end
 print("Output balancer OK: "..cases.." physical flow shares, tunnel pairing, rotations-ready geometry and configurable outputs")

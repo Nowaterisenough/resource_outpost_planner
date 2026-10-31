@@ -43,10 +43,28 @@ local function choose_matrix(inputs,outputs,reach)
 		if entry.reach<=reach then return entry end
 	end
 end
+local single_tier_cache={}
+local function single_tier_tunnels(entry)
+ if single_tier_cache[entry]~=nil then return single_tier_cache[entry] end
+ local cells,claimed={},{}
+ for _,e in ipairs(entry.entities) do if e[1]=="underground" then cells[key(e[2],e[3])]=e end end
+ for _,e in pairs(cells) do if e[5]=="input" then
+  local d=util.direction_coord[e[4]];local output
+  for distance=1,entry.reach do
+   local other=cells[key(e[2]+d.x*distance,e[3]+d.y*distance)]
+   if other and other[5]=="output" and other[4]==e[4] then output=other;break end
+  end
+  if not output or claimed[output] then single_tier_cache[entry]=false;return false end
+  claimed[output]=true
+ end end
+ for _,e in pairs(cells) do if e[5]=="output" and not claimed[e] then single_tier_cache[entry]=false;return false end end
+ single_tier_cache[entry]=true;return true
+end
+
 local function choose_reference(inputs,outputs,reach,matrix)
 	local best,best_score
 	for _,entry in ipairs(reference_layouts) do
-		if not entry.disabled and entry.n>=inputs and entry.m==outputs and entry.reach<=reach then
+		if not entry.disabled and entry.n>=inputs and entry.m==outputs and entry.reach<=reach and single_tier_tunnels(entry) then
 			local min_x,max_x,min_y,max_y=math.huge,-math.huge,math.huge,-math.huge
 			for _,e in ipairs(entry.entities) do min_x=math.min(min_x,e[2]);max_x=math.max(max_x,e[2]);min_y=math.min(min_y,e[3]);max_y=math.max(max_y,e[3]) end
 			local area=(max_x-min_x+1)*(max_y-min_y+1)
