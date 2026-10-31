@@ -189,3 +189,18 @@ python3 scripts/test-placement.py --factorio /path/to/factorio --data /path/to/d
 ```
 
 本轮只增加测试及结果记录；完整离线回归、Lua 5.2 语法和 Python 语法检查通过。各原生测试均在隔离副本中运行并核验源存档哈希。
+
+
+## 连续铺设保留已有矿区（2026-10-31）
+
+在 1.10.12 中复现：第一片矿区应用后，再框选第二片，`preview.select` 调用了撤销上次布局的清理函数，第一片的实体虚影和基座虚影被取消。另有两处关联问题：重叠选区会隐式忽略上次布局的虚影；新矿区强制应用会把上次的虚影及拆除标记并入自己的撤销记录。
+
+修复后，重新框选只替换活动预览，保留已应用布局。新矿区按已有设施处理前一片的虚影；仅给同一矿区追加输出时显式复用该矿区的归属。应用新矿区只让旧提示图形到期，撤销仅影响最新矿区及其追加输出。取消新预览保留上一片的撤销入口。
+
+新增 `--suite consecutive-placement`，在隔离 Factorio 2.1.24 / Space Age 中测试普通应用、Shift、Ctrl＋Shift、勾选清障、车站 Shift 五种方式。第一片各含304个实体／虚影，包括基座虚影及一条已复活的传送带，并保留火山岩拆除标记。每组依次检查第二片预览、取消、重选第一片、预览撤销、第二片应用及第二片撤销；普通和 Shift 组还验证第二片单独追加输出。五组均通过，第一片所有引用及拆除标记全程保留，第二片的新虚影由其撤销操作清除。
+
+修复前失败记录：`dist/consecutive-before-20261031/placement-km1z5173/`，实际在第二次框选后报告第一片实体失效。最终结果：`dist/consecutive-final-20261031/placement-ulhzao29/placement/data/script-output/consecutive-placement.json`。原生160组地形／遮挡矩阵、16组原生单带 Shift 放置，以及机器人清障、电网、车站、单独接带和撤销套件通过；记录分别位于 `dist/consecutive-matrix-20261031/placement-9b21whbg/` 和 `dist/consecutive-placement-regression-20261031/placement-2fjsvpma/`。离线回归通过，各原生运行均校验源存档哈希。
+
+```sh
+python3 scripts/test-placement.py --factorio /path/to/factorio --data /path/to/data   --save /path/to/fixture.zip --suite consecutive-placement --output /path/to/results --timeout 180
+```

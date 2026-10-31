@@ -964,6 +964,7 @@ do
 	local old_marker,pending_marker=marker(),marker()
 	data.preview={player_index=1,surface=spec.surface,revision=4,resources={first},renderings={old_marker}}
 	data.last_state={_collected_ghosts={}}
+	local applied=data.last_state
 	local previous=data.preview
 	local other_task={preview_only=true,player={index=2}}
 	storage.tasks={{preview_only=true,player=spec.player,_render_objects={pending_marker}},other_task}
@@ -973,7 +974,7 @@ do
 	assert(not preview.select(event,false) and cleanups==0,"selection interrupts Apply")
 	previous.applying=false
 	assert(input_mode.select(data,spec.player))
-	assert(preview.select(event,false) and cleanups==1 and not data.last_state,"reselection keeps the previous unfinished plan")
+	assert(preview.select(event,false) and cleanups==0 and data.last_state==applied,"reselection undoes the previous applied plan")
 	assert(#data.preview.resources==1 and data.preview.resources[1]==second,"normal selection retains old resources")
 	assert(not old_marker.valid and not pending_marker.valid,"reselection leaks old preview or pending task renderings")
 	assert(#storage.tasks==1 and storage.tasks[1]==other_task,"reselection cancels another player's task")

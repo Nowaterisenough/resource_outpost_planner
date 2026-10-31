@@ -177,8 +177,8 @@ function preview.select(event,append)
 	add(event.entities)
 	if #selected==0 then return false end
 	preview.cancel(data,false,true)
-	-- Remove our last unfinished plan before it can obstruct the new preview.
-	algorithm.cleanup_last_state(data)
+	-- Applied ghosts belong to the world. Reselecting only replaces the draft;
+	-- keep the last applied plan available for output editing and explicit Undo.
 	algorithm.clear_selection(data)
 	algorithm.select_resource_layout(data,selected)
 	data.preview={player_index=event.player_index,surface=event.surface,resources=selected,revision=0,renderings={}}
@@ -337,13 +337,10 @@ function preview.complete(state)
 		end
 		if draft.ready then
 			if state._native_build_mode then
-				local previous=data.last_state
-				for _,field in ipairs{"_collected_ghosts","_deconstruction_orders"} do
-					state[field]={}
-					for _,value in pairs(previous and previous[field] or {}) do state[field][#state[field]+1]=value end
-				end
+				-- This is a new mine. Output-only edits retain ownership separately.
 				local ok,result=pcall(forced_build.apply,state,state._native_build_mode)
 				if ok and result then
+					algorithm.on_gui_close(data)
 					state.preview_only=false;state._forced_applied=true;state._from_preview=true
 					storage.tasks[#storage.tasks+1]=state
 					return

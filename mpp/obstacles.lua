@@ -147,11 +147,8 @@ function obstacles.get(state)
 	end
 	local ignored = {}
 	local previous = state._previous_state
-	if not previous and state.player then
-		local data = storage.players[state.player.index]
-		local last = data and data.last_state
-		if last and last.surface == state.surface and util.coords_overlap(c, last.coords) then previous = last end
-	end
+	-- Only output extensions explicitly own the previous mine. A new selection
+	-- must see earlier ghosts as existing equipment, including overlapping areas.
 	local seen_lists={}
 	for _, list in pairs{state._collected_ghosts or {}, previous and previous._collected_ghosts or {}} do
 		if not seen_lists[list] then

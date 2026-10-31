@@ -178,6 +178,21 @@ do
  assert(queries==1,"negative chunk repeats an unchanged query")
  cases=cases+3
 end
+-- Overlapping selections are independent. Only an explicit output source may
+-- ignore its own mine ghosts; last_state alone must not hide existing work.
+do
+ local ghost=entity(box(.1,.1,.9,.9),"entity-ghost",902)
+ ghost.ghost_prototype={type="mining-drill",collision_mask={layers={object=true}}}
+ local map={find_tiles_filtered=function() return {} end,find_entities_filtered=function() return {ghost} end}
+ local coords={x1=0,y1=0,x2=10,y2=10,ix1=0,iy1=0,ix2=10,iy2=10}
+ local previous={surface=map,coords=coords,_collected_ghosts={ghost}}
+ storage.players[1]={last_state=previous}
+ local state={surface=map,coords=coords,player={index=1},remove_entities_choice=false}
+ assert(#obstacles.get(state).boxes==1,"new overlapping mine ignores previous applied ghosts")
+ local output={surface=map,coords=coords,player={index=1},remove_entities_choice=false,_previous_state=previous}
+ assert(#obstacles.get(output).boxes==0,"explicit output routing no longer ignores its own mine")
+ storage.players[1]=nil;cases=cases+2
+end
 -- Force placement can defer entity conflicts to the engine, but never makes
 -- forbidden terrain passable (even if a matching ghost already sits there).
 do

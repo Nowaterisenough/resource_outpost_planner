@@ -45,6 +45,7 @@ local function state(event)
 		belts={},belt={},_collected_ghosts={}}
 end
 algorithm={
+	on_gui_close=function() end,
 	clear_selection=function() calls.clear_selection=calls.clear_selection+1 end,
 	on_player_selected_area=function(event)
 		if event.preview_only then calls.recheck=calls.recheck+1
@@ -212,6 +213,20 @@ for _,mode in ipairs{defines.build_mode.forced,defines.build_mode.superforced} d
  assert(not validation._facility_removal, "explicit force lost its routing override")
  preview.complete(validation)
  assert(calls.forced==defines.build_mode.superforced, "checked cleanup did not reach native building removal")
+end
+-- Independent forced plans own only their new ghosts/orders. Otherwise Undo
+-- on the second mine also removes the first, even when their areas differ.
+for _,mode in ipairs{defines.build_mode.forced,defines.build_mode.superforced} do
+ draft,overlays,prior=fixture()
+ local old_ghost,old_order={},{}
+ prior._collected_ghosts={old_ghost};prior._deconstruction_orders={old_order}
+ assert(preview.apply(data,mode));validation=storage.tasks[1]
+ preview.complete(validation)
+ local built=storage.tasks[2]
+ assert(built and #built._collected_ghosts==0 and #(built._deconstruction_orders or {})==0,
+  "new forced mine inherited the previous plan's Undo ownership")
+ assert(prior._collected_ghosts[1]==old_ghost and prior._deconstruction_orders[1]==old_order,
+  "second force apply mutated first plan ownership")
 end
 -- Large jobs must keep both Apply modes disabled and clean up only their own
 -- newly allocated handles when retargeted, including output construction jobs.

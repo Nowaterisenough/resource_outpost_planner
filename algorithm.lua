@@ -396,28 +396,11 @@ function algorithm.on_player_selected_area(event)
 	local validation_result, error = validation_layout:validate(state)
 	if not validation_result then return nil, error end
 
-	local last_state = player_data.last_state --[[@as MinimumPreservedState]]
-	if last_state ~= nil then
-		local renderables = last_state._render_objects
-
-		local same = mpp_util.coords_overlap(coords, last_state.coords) and last_state.surface == event.surface
-
-		if state.preview_only then
-			if same then state._previous_state = last_state end
-		elseif same then
-			for _, renderObject in ipairs(renderables) do
-				renderObject.destroy()
-			end
-			state._previous_state = last_state
-		else
-			local ttl = mpp_util.get_display_duration(event.player_index)
-			for _, renderObject in ipairs(renderables) do
-				if renderObject.valid then
-					renderObject.time_to_live = ttl
-				end
-			end
-		end
-		if not state.preview_only then player_data.last_state = nil end
+	if not state.preview_only and player_data.last_state then
+		-- Each applied selection is independent, even when its bounds overlap.
+		-- Retire only the old overlays; ghosts and demolition orders need Undo.
+		algorithm.on_gui_close(player_data)
+		player_data.last_state = nil
 	end
 
 	layout:initialize(state)
