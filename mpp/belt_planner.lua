@@ -507,7 +507,7 @@ local function edge_path(start, finish, allowed, key, budget)
 	end
 end
 
-local function route_bundle(state, reverse, negotiate, outer_corridor, backward_budget, context, edge_priority)
+local function route_bundle(state, reverse, negotiate, outer_corridor, backward_budget, context, edge_priority, lane_band)
 	local spec, dir = state.belt_specification, state.belt_direction
 	local corners=negotiate or backward_budget or edge_priority
 	context=context or {}
@@ -655,6 +655,28 @@ local function route_bundle(state, reverse, negotiate, outer_corridor, backward_
 	local corner1,corner2=world(state,bounds.x1,bounds.y1),world(state,bounds.x2,bounds.y2)
 	state._belt_search_area={{min(corner1.x,corner2.x)-1,min(corner1.y,corner2.y)-1},
 		{max(corner1.x,corner2.x)+1,max(corner1.y,corner2.y)+1}}
+	local departures,arrivals
+	if lane_band then
+		-- A straight band through a narrow shore needs nested bends at both
+		-- ends. Independent shortest paths can consume the other lanes' space.
+		local function ranks(points)
+			local positive=0
+			for i,p in ipairs(points) do if lane_band+i-1>p.y then positive=positive+1 end end
+			local result,negative={},0
+			for i,p in ipairs(points) do
+				if lane_band+i-1>p.y then result[i]=positive;positive=positive-1
+				elseif lane_band+i-1<p.y then negative=negative+1;result[i]=negative
+				else result[i]=0 end
+			end
+			return result
+		end
+		departures,arrivals=ranks(sources),ranks(outputs)
+		for i=2,spec.count do
+			if outputs[i].x~=outputs[1].x or outputs[i].y<=outputs[i-1].y then
+				return false,{"mpp.msg_obstacle_route_failed"}
+			end
+		end
+	end
 	local safe_cache,grid_clear=context.safe or {},context.grid_clear or {}
 	context.safe,context.grid_clear=safe_cache,grid_clear
 	local can_place
@@ -714,7 +736,17 @@ local function route_bundle(state, reverse, negotiate, outer_corridor, backward_
 			if not corners then occupied[key(finish.x,finish.y)]=true end
 			routing=true
 			local route
-			if not corners and dir==WEST and exit_x<source_left
+			if lane_band then
+				local row=lane_band+i-1
+				local departure=source_left-departures[i]-1
+				local arrival=finish.x+arrivals[i]+1
+				if departure>=arrival then
+					route=straight_segments({{x=start.x-1,y=start.y},{x=departure,y=start.y},
+						{x=departure,y=row},{x=arrival,y=row},{x=arrival,y=finish.y},approach},allowed)
+				end
+				if not route then return false,{"mpp.msg_obstacle_route_failed"} end
+			end
+			if not route and not corners and dir==WEST and exit_x<source_left
 				and (middle_turn_ranks or output_y2<spec[1].y or output_y1>spec[spec.count].y) then
 				local rank=middle_turn_ranks and middle_turn_ranks[i] or (output_y2<spec[1].y and i or spec.count-i+1)
 				local column=source_left-rank-1
@@ -725,7 +757,7 @@ local function route_bundle(state, reverse, negotiate, outer_corridor, backward_
 			end
 			-- Outputs behind the mine need nested U-shaped corridors rather than one lane enclosing the others.
 			local top=output_y1
-			if not corners and dir==WEST and exit_x>=source_left and (output_y2<spec[1].y or top>spec[spec.count].y) then
+			if not route and not corners and dir==WEST and exit_x>=source_left and (output_y2<spec[1].y or top>spec[spec.count].y) then
 				local above=output_y2<spec[1].y
 				local rank=above and i or spec.count-i+1
 				local column=source_left-rank-1
@@ -737,7 +769,7 @@ local function route_bundle(state, reverse, negotiate, outer_corridor, backward_
 					{x=column,y=row},{x=far_column,y=row},{x=far_column,y=approach.y},approach},allowed)
 			end
 			-- Opposite-facing exits use nested, parallel corridors when the output band is outside the rows.
-			if not corners and dir==EAST and (output_y2<spec[1].y or output_y1>spec[spec.count].y) then
+			if not route and not corners and dir==EAST and (output_y2<spec[1].y or output_y1>spec[spec.count].y) then
 				-- Inputs may face back toward a station in front of the mine. Turn
 				-- beyond that input band instead of searching for each U-shaped lane.
 				local column=min(source_left,approach.x+1)-(exit_y<spec[1].y and i or spec.count-i+1)
@@ -749,7 +781,7 @@ local function route_bundle(state, reverse, negotiate, outer_corridor, backward_
 			-- Perpendicular ports in front of the mine use a direct bend or nested U turns.
 			-- The output band can cut through the source rows; validate each corridor before
 			-- falling back to search, including earlier lanes and the balancer footprint.
-			if not corners and approach.x<source_left and output_y1==output_y2 and (dir==NORTH or dir==SOUTH) then
+			if not route and not corners and approach.x<source_left and output_y1==output_y2 and (dir==NORTH or dir==SOUTH) then
 				if (start.y-approach.y)*delta.y<=0 then
 					route=straight_segments({{x=start.x-1,y=start.y},{x=approach.x,y=start.y},approach},allowed)
 				else
@@ -763,7 +795,7 @@ local function route_bundle(state, reverse, negotiate, outer_corridor, backward_
 				end
 			end
 			-- A perpendicular outlet needs nested bends; the nearest lane must leave room for the outer lanes.
-			if not corners and exit_x>=source_left and
+			if not route and not corners and exit_x>=source_left and
 				((dir==SOUTH and exit_y-spec.count>spec[spec.count].y)
 				or (dir==NORTH and exit_y+spec.count<spec[1].y)) then
 				local rank=dir==SOUTH and spec.count-i+1 or i
@@ -856,6 +888,14 @@ local function plan_routes(state)
 		local reversed, routes, other = route_bundle(state, true, nil, nil, nil, context)
 		if reversed then return true, routes end
 		if #other.routes>#diagnostic.routes then diagnostic=other end
+	end
+	if state.belt_direction==WEST and state.belt_input_targets then
+		local anchor=state.belt_input_targets[1].y
+		for offset=0,32 do
+			local band=anchor+(offset%2==1 and -math.ceil(offset/2) or offset/2)
+			local bundled,routes=route_bundle(state,false,false,false,nil,context,false,band)
+			if bundled then return true,routes end
+		end
 	end
 	if state.belt_direction==NORTH or state.belt_direction==SOUTH then
 		local wrapped, routes = route_bundle(state, false, false, true, nil, context)

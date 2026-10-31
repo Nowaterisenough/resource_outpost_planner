@@ -1237,4 +1237,26 @@ for _,rotation in ipairs{"west","north","east","south"} do
 	cases=cases+2
 end
 
+-- Five lanes fit through the common dry band of a winding lava shore.
+-- Greedy shortest paths block one another; the bundle must retain every input
+-- and respect the native one-tile corridor footprint in all world rotations.
+for _,rotation in ipairs{"west","north","east","south"} do
+ local spec=fixture(rotation,5)
+ for i=1,5 do spec[i].x_start=-5;spec[i].y=5+(i-1)*11 end
+ local state=assert(planner.create_state(spec,target(spec,-96,28,W),{output_balance_choice=true}))
+ state.output_balance_choice=false;state.belt_input_targets={}
+ for i=1,5 do state.belt_input_targets[i]={x=-85,y=23+i} end
+ local function blocked(x,y)
+  if x < -58 or x > -12 then return false end
+  local center=math.floor(20+14*math.sin((-x-12)*math.pi/46))
+  local world_y=48-y
+  return world_y<center-9 or world_y>center+9
+ end
+ state.grid={get_tile=function(_,x,y) if blocked(x,y) then return {built_thing="obstacle"} end end}
+ local ok,route=planner.plan(state)
+ assert(ok,"winding shore rejects a dry corridor wide enough for five lanes")
+ verify(state,route)
+ for _,piece in ipairs(route) do assert(not blocked(piece.grid_x,piece.grid_y),"bundled detour crosses lava") end
+ cases=cases+1
+end
 print("Belt planner OK: "..cases.." route and preview cases")
