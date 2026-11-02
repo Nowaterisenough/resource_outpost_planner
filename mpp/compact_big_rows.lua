@@ -6,34 +6,24 @@ local N,S,W=defines.direction.north,defines.direction.south,defines.direction.we
 local min,max,floor=math.min,math.max,math.floor
 local paired={}
 
--- Both rows use the same longitudinal cut: each outlet has one receiving side
--- from each facing row. A double corridor has four sides, not two single-sided
--- buses fed by identically oriented drills.
+-- Neighbouring drill columns feed alternating complete belts. Each column
+-- combines its facing drills beside their drops; the other belt tunnels under
+-- that local junction. This keeps all four sides in use throughout the row.
 function paired.groups(upper,lower,production,limit,retained)
  local columns,keys,rates,totals={},{},{},{0,0}
  for side,lane in ipairs{upper or {},lower or {}} do
   for _,m in ipairs(lane) do
    local rate=production(m);rates[m]=rate;totals[side]=totals[side]+rate
-   local c=columns[m.x]
-   if not c then c={0,0};columns[m.x]=c;keys[#keys+1]=m.x end
-   c[side]=c[side]+rate
+   if not columns[m.x] then columns[m.x]=true;keys[#keys+1]=m.x end
   end
  end
  table.sort(keys)
  local split=#keys>1 and (retained==2 or max(totals[1],totals[2])>limit+1e-8)
- local pivot=math.huge
- if split then
-  local left1,left2,best=0,0,math.huge
-  for i=1,#keys-1 do
-   local x=keys[i];left1,left2=left1+columns[x][1],left2+columns[x][2]
-   local peak=max(left1,left2,totals[1]-left1,totals[2]-left2)
-   if peak<best then best,pivot=peak,x end
-  end
- end
+ for i,x in ipairs(keys) do columns[x]=split and (i-1)%2+1 or 1 end
  local result={{lane1={},lane2={},rates={0,0}}}
  if split then result[2]={lane1={},lane2={},rates={0,0}} end
  for side,lane in ipairs{upper or {},lower or {}} do for _,m in ipairs(lane) do
-  local g=result[m.x<=pivot and 1 or 2]
+  local g=result[columns[m.x]]
   local target=side==1 and g.lane1 or g.lane2
   target[#target+1]=m;g.rates[side]=g.rates[side]+rates[m]
  end end
@@ -55,17 +45,29 @@ function paired.prepare(state,production,limit,issue)
  end
  local groups,resize={},false
  local gaps=table.deepcopy(state._capacity_row_gaps or {})
+ local single_rows=state._capacity_single_rows or {}
+ state._capacity_single_rows=single_rows
  for i=1,state.miner_lane_count,2 do
-  local g=paired.groups(state.miner_lanes[i],state.miner_lanes[i+1],production,limit,gaps[i])
+  -- A wider pass can leave an edge corridor with just one occupied column.
+  -- Reclaim its unused tile and keep that row narrow for this planning run;
+  -- otherwise the next placement can alternate between one and two columns.
+  local g=paired.groups(state.miner_lanes[i],state.miner_lanes[i+1],production,
+   single_rows[i] and math.huge or limit,gaps[i])
   groups[i]=g
   local gap=#g
-  if gap>(gaps[i] or 1) then gaps[i]=gap;resize=true end
+  if gap<(gaps[i] or 1) then single_rows[i]=true end
+  if gap~=(gaps[i] or 1) then gaps[i]=gap;resize=true end
  end
  if resize and state._capacity_pass<8 then
   state._capacity_row_gaps=gaps;state._capacity_gap=2
   return "initialize_capacity_layout"
  end
- if resize then issue(state,attempt.sx,attempt.sy,{"mpp.belt_capacity_space"}) end
+ if resize then
+  -- Never route a different number of collectors than the physical corridor.
+  state.belts={};state.belt_count=0
+  issue(state,attempt.sx,attempt.sy,{"mpp.belt_capacity_space"})
+  return "prepare_pipe_layout"
+ end
  state.belts={}
  for i=1,state.miner_lane_count,2 do
   local y=attempt.lane_layout[i].y+M.size
@@ -80,7 +82,7 @@ function paired.prepare(state,production,limit,issue)
     state.belts[#state.belts+1]={index=#state.belts+1,capacity_row=i,capacity_pair=true,
      has_drills=true,is_output=true,lane1=g.lane1,lane2=g.lane2,
      x1=x1,x2=x2,x_entry=x1-M.middle,x_end=x2+M.middle,x_start=attempt.sx-5,
-     source_y=y,y=y+j-1,turn_x=x1-1,throughput1=a,throughput2=b,merged_throughput1=a,merged_throughput2=b}
+     source_y=y,y=y+j-1,turn_x=x1-1,capacity_weave=#groups[i]==2,throughput1=a,throughput2=b,merged_throughput1=a,merged_throughput2=b}
    end
   end
  end
@@ -125,14 +127,20 @@ function paired.poles(state)
  if state.pole_choice=="none" or state.pole_choice=="zero_gap" then return "prepare_belt_layout" end
  local G,M,attempt=state.grid,state.miner,state.best_attempt
  local selected=obstacles.active(state) and obstacles.get(setmetatable({_belt_routing=true},{__index=state}))
- local protected={}
+ local protected,collector_rows={},{}
  local function reserve(x,y) protected[y]=protected[y] or {};protected[y][x]=true end
  for _,b in ipairs(state.belts) do
   reserve(b.x_start,b.y);reserve(b.x_start+1,b.y)
   for _,lane in ipairs{b.lane1,b.lane2} do for _,m in ipairs(lane) do
    local x,y=drop(state,m);reserve(x,y);reserve(x,b.y)
-   -- Keep a side-loading junction straight with an east-side input.
-   if y~=b.y then reserve(x+1,b.y) end
+   if b.capacity_weave then
+    collector_rows[b.capacity_row]=collector_rows[b.capacity_row] or {}
+    collector_rows[b.capacity_row][m.x]=b.y
+    -- Both drops stay horizontal; side-load one tile downstream. The straight
+    -- input at the drop prevents the junction becoming a lane-preserving bend.
+    reserve(x-1,b.y)
+    if y~=b.y then reserve(x-1,y) end
+   elseif y~=b.y then reserve(x+1,b.y) end
   end end
  end
  local function place(x,y,thing,name,list)
@@ -155,7 +163,10 @@ function paired.poles(state)
  for i=1,lane_count,2 do
   local y=attempt.lane_layout[i].y+M.size
   for column=1,columns do
-   place(attempt.sx+(column-1)*state.miner_stride,y,"pole",state.pole_choice,state.builder_power_poles)
+   local x=attempt.sx+(column-1)*state.miner_stride
+   local collector=collector_rows[i] and collector_rows[i][x]
+   local py=collector and 2*y+1-collector or y
+   place(x,py,"pole",state.pole_choice,state.builder_power_poles)
   end
   place(join_x,y,"pole",state.pole_choice,state.builder_power_poles)
   if previous then for py=previous+step,y-1,step do
@@ -179,7 +190,13 @@ function paired.belts(state,issue)
   for _,lane in ipairs{b.lane1,b.lane2} do for _,m in ipairs(lane) do
    local x,y=drop(state,m)
    mark(protected,x,b.y,true)
-   if y~=b.y then mark(feeders,x,y,b.y>y and S or N) end
+   if b.capacity_weave then mark(protected,x-1,b.y,true) end
+   if y~=b.y then
+    if b.capacity_weave then
+     mark(feeders,x,y,W)
+     mark(feeders,x-1,y,b.y>y and S or N)
+    else mark(feeders,x,y,b.y>y and S or N) end
+   end
   end end
  end
  local failed=false

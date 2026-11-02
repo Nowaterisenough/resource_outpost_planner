@@ -151,11 +151,20 @@ local function cap_start(v)
    assert(i%2==0 and gap>=1 and gap<=(choices.belt_merge_choice and 2 or 1)
     or i%2==1 and gap==0,"facing pairs do not pack back-to-back")
   end end
+  local outputs_by_row={}
   for _,b in ipairs(state.belts) do
+   assert(b.is_output,"compact collector was merged before its mine exit")
+   outputs_by_row[b.capacity_row]=(outputs_by_row[b.capacity_row] or 0)+1
    for side,lane in ipairs{b.lane1,b.lane2} do for _,m in ipairs(lane) do
     assert(m.direction==(side==1 and defines.direction.south or defines.direction.north),"outlet sides mix facing rows")
    end end
    if #b.lane1>0 and #b.lane2>0 then dual=dual+1 end
+  end
+  for row,count in pairs(outputs_by_row) do
+   local lanes=state.best_attempt.lane_layout
+   local width=lanes[row+1] and lanes[row+1].y-lanes[row].y-state.miner.size
+    or state._capacity_row_gaps[row] or 1
+   assert(count==width,"physical double corridor did not produce two independent mine exits")
   end
   assert(dual>0,"facing rows still use separate single-sided outlets")
  end

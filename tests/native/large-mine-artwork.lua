@@ -66,7 +66,7 @@ local function large_begin()
   if not large_dense_matrix and not large_capacity_matrix then game.auto_save("large-mine-layouts") end
   large_phase="finish";large_wait=game.tick+90;return
  end
- game.speed=c.station and 16 or (c.measure_lanes or c.measure_acid) and 8 or 1
+ game.speed=c.station and 16 or (c.measure_lanes or c.measure_corridors or c.measure_acid) and 8 or 1
  large_loading=nil
  large_acid=nil
  large_player=game.get_player(1);conf.initialize_global(large_player.index)
@@ -162,7 +162,7 @@ local function large_materialize()
     local inventory=e.get_module_inventory()
     assert(inventory.insert{name=c.module,quality=c.module_quality or "normal",count=#inventory}==#inventory,"native drill module insertion failed")
    end
-   if c.fluid and not c.measure_acid then e.insert_fluid{name="sulfuric-acid",amount=100} end
+   if c.fluid and not c.measure_acid and not c.measure_corridors then e.insert_fluid{name="sulfuric-acid",amount=100} end
   elseif e.type=="beacon" then
    local inventory=e.get_module_inventory()
    assert(inventory.insert{name="speed-module-3",quality=c.beacon_module_quality or "normal",count=#inventory}==#inventory,"native beacon module insertion failed")
@@ -349,7 +349,7 @@ local function large_audit()
  end
  local c=large_cases[large_index]
  -- Native drills only resolve drop_target after they can start mining.
- if c.measure_acid and not large_acid then
+ if (c.measure_acid or c.fluid and c.measure_corridors) and not large_acid then
   large_start_acid(belts);large_wait=game.tick+240;return
  end
  counts.side_loading_junctions=0
@@ -421,23 +421,23 @@ local function large_audit()
  assert(counts.unpaired_underground==0 and counts.missing_drop_target==0 and counts.unreachable==0,"native belt connection failed")
  assert(counts.ore_uncovered==0,"native mining area missed ore")
  if large_cases[large_index].fluid then assert(counts.fluid_segments==1 and not segments[0],"disconnected uranium pipes") end
- if c.measure_lanes then
+ if c.measure_lanes or c.measure_corridors then
   large_flow={};large_flow_start=game.tick
   local coords=large_mine_state.coords
   for _,belt in ipairs(large_mine_state.belts) do if belt.is_output then
    local p=mpp_util.revert_world(coords.gx,coords.gy,large_mine_state.direction_choice,belt.x_start,belt.y,coords.tw,coords.th)
    local e=assert(belts[large_key{x=p[1],y=p[2]}],"missing internal output flow probe")
    assert(e.type=="transport-belt","flow probe must be a surface belt")
-   large_flow[#large_flow+1]={entity=e,row=belt.capacity_row,dual=belt.throughput2>0,counts={0,0}}
+   large_flow[#large_flow+1]={entity=e,row=belt.capacity_row,dual=belt.throughput1>0 and belt.throughput2>0,counts={0,0}}
   end end
  end
  -- Keep power running, but remove the distant fixture supply wire from photographs.
- if not c.measure_lanes and not c.measure_acid and not c.station then large_supply_pole.get_wire_connector(defines.wire_connector_id.pole_copper,true).disconnect_all() end
+ if not c.measure_lanes and not c.measure_corridors and not c.measure_acid and not c.station then large_supply_pole.get_wire_connector(defines.wire_connector_id.pole_copper,true).disconnect_all() end
  if c.station then large_phase="station-flow";large_wait=game.tick+1;return end
  local pos={x=(left+right)/2,y=(top+bottom)/2}
  local zoom=math.min(2400/((right-left+14)*32),1800/((bottom-top+14)*32),.38)
  large_capture("overview",pos,{2400,1800},zoom)
- large_phase=c.measure_acid and "acid" or c.measure_lanes and "flow" or "mine-shot";large_wait=game.tick+1
+ large_phase=c.measure_acid and "acid" or (c.measure_lanes or c.measure_corridors) and "flow" or "mine-shot";large_wait=game.tick+1
 end
 local function large_measure_flow()
  local c=large_cases[large_index]
@@ -452,13 +452,17 @@ local function large_measure_flow()
  for _,probe in ipairs(large_flow) do
   local rates={probe.counts[1]/20,probe.counts[2]/20}
   measured.outputs[#measured.outputs+1]={row=probe.row,dual=probe.dual,items_per_second=rates}
+  assert(rates[1]+rates[2]>0,"mine exit does not carry ore: "..helpers.table_to_json(measured.outputs[#measured.outputs]))
   if probe.dual then
    measured.dual_outputs=measured.dual_outputs+1
-   assert(rates[1]>.95*side_capacity and rates[2]>.95*side_capacity,
+   local minimum=c.measure_corridors and 0 or .95*side_capacity
+   assert(rates[1]>minimum and rates[2]>minimum,
     "planned dual-side output underfeeds: "..helpers.table_to_json(measured.outputs[#measured.outputs]))
   end
  end
- assert(measured.dual_outputs>=20,"saturation fixture did not exercise enough actual planned double-sided outputs")
+ if not c.measure_corridors then
+  assert(measured.dual_outputs>=20,"saturation fixture did not exercise enough actual planned double-sided outputs")
+ end
  large_report.flow=measured
  helpers.write_file("large-mine-result.json",helpers.table_to_json(large_results),false)
  log("LARGE MINE FLOW "..helpers.table_to_json(measured))
@@ -563,6 +567,10 @@ local function large_step()
      assert(outputs_by_row[row]==(count>=2 and 2 or 1),"double corridor was collapsed to one outlet")
      if count>=2 then dual_rows=dual_rows+1 end
      if large_state._capacity_paired then
+      local lanes=large_state.best_attempt.lane_layout
+      local width=lanes[row+1] and lanes[row+1].y-lanes[row].y-large_state.miner.size
+       or large_state._capacity_row_gaps[row] or 1
+      assert(count==width,"physical corridor width differs from the number of mine exits")
       assert(count<=2,"facing pair exceeds two physical outputs")
      elseif large_state._capacity_compact and count>=2 then
       assert(count==math.min(4,#large_state.miner_lanes[row]),"double corridor leaves a receiving side unused")

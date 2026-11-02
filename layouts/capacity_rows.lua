@@ -33,6 +33,7 @@ function layout:initialize_capacity_layout(state)
 		if not state.belt_merge_choice then
 			state._capacity_gap=1
 			state._capacity_row_gaps={}
+			state._capacity_single_rows=nil
 		end
 	end
 	state._capacity_gap=state._capacity_gap or 1
@@ -558,7 +559,7 @@ function layout:expensive_deconstruct(state)
    -- Several receiving rows can need the same shoreline. Retry with room
    -- for parallel detours rather than rejecting the entire selected patch.
    state._shore_margin=margin+1
-   state._capacity_row_gaps={};state._capacity_gap=1;state._capacity_pass=0
+   state._capacity_row_gaps={};state._capacity_single_rows=nil;state._capacity_gap=1;state._capacity_pass=0
    state.grid=nil;state.resource_tiles=nil
    return "initialize_capacity_layout"
   end
