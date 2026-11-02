@@ -1,0 +1,32 @@
+[
+  {
+    "id": "01-blue-mine-to-station-compact",
+    "ore": "iron-ore",
+    "shape": "lobed",
+    "direction": "south",
+    "quality": "normal",
+    "module": "speed-module-3",
+    "bonus": 20,
+    "belt": "express-transport-belt",
+    "outputs": 24,
+    "lower": 0,
+    "lamps": true,
+    "station": true,
+    "output_distance": 221
+  },
+  {
+    "id": "02-green-mine-to-station-compact",
+    "ore": "copper-ore",
+    "shape": "crescent",
+    "direction": "east",
+    "quality": "normal",
+    "module": "speed-module-3",
+    "bonus": 20,
+    "belt": "turbo-transport-belt",
+    "outputs": 24,
+    "lower": 0,
+    "lamps": true,
+    "station": true,
+    "output_distance": 221
+  }
+]

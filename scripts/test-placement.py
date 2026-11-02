@@ -20,14 +20,14 @@ parser.add_argument("--factorio", type=Path, required=True)
 parser.add_argument("--data", type=Path, required=True)
 parser.add_argument("--save", type=Path, required=True)
 parser.add_argument("--output", type=Path)
-parser.add_argument("--suite", choices=["placement", "ore-filter", "dual-belts", "scenario-matrix", "terrain-warnings", "consecutive-placement", "lava-routes", "lava-mine", "lava-terrain"], default="placement", help="Headless native checks")
+parser.add_argument("--suite", choices=["placement", "station-through", "ore-filter", "dual-belts", "scenario-matrix", "terrain-warnings", "consecutive-placement", "lava-routes", "lava-mine", "lava-terrain"], default="placement", help="Headless native checks")
 parser.add_argument("--visual", action="store_true", help="Render native underground belts beside preview artwork in an isolated game")
-parser.add_argument("--scene", choices=["shoreline", "gui", "capacity", "large-mine", "dual-belts", "lava-routes", "lava-mine", "lava-terrain"], help="Capture a native placement or configuration GUI scenario")
+parser.add_argument("--scene", choices=["shoreline", "gui", "capacity", "station-through", "large-mine", "dual-belts", "lava-routes", "lava-mine", "lava-terrain"], help="Capture a native placement or configuration GUI scenario")
 parser.add_argument("--capacity-matrix", action="store_true", help="Audit dense beacon and fluid capacity layouts in all four rotations")
 parser.add_argument("--no-auto-belts", action="store_true", help="Test large-mine layouts with automatic belt merging/splitting disabled")
 parser.add_argument("--dense-matrix", action="store_true", help="Audit both dense layouts in all four rotations")
 parser.add_argument("--headless-scene", action="store_true", help="Run scene audits without screenshots")
-parser.add_argument("--case", type=int, help="Run one large-mine or lava-routing scenario (1-based)")
+parser.add_argument("--case", type=int, help="Run one large-mine, lava-routing or headless station-through scenario (1-based)")
 parser.add_argument("--from-case", type=int, help="Resume the headless lava matrix from this 1-based case")
 parser.add_argument("--through-case", type=int, help="Stop the headless lava matrix after this 1-based case")
 parser.add_argument("--large-cases", type=Path, help="JSON array of large-mine settings for repeatable visual coverage")
@@ -60,8 +60,8 @@ if args.from_case is not None or args.through_case is not None:
         parser.error("invalid lava case range")
 if args.case is not None and args.case < 1:
     parser.error("--case must be positive")
-if args.case and args.scene not in ("large-mine", "lava-routes", "lava-mine", "lava-terrain") and args.suite not in ("lava-routes", "lava-mine", "lava-terrain"):
-    parser.error("--case requires large-mine or lava-routes")
+if args.case and args.scene not in ("large-mine", "lava-routes", "lava-mine", "lava-terrain") and args.suite not in ("station-through", "lava-routes", "lava-mine", "lava-terrain"):
+    parser.error("--case requires large-mine, station-through or lava-routes")
 if args.case is not None and args.scene == "large-mine" and not 1 <= args.case <= len(large_case_names):
     parser.error("--case is outside the scenario list")
 large_override = "\nlocal large_case_overrides=helpers.json_to_table(" + json.dumps(json.dumps(large_cases)) + ")\n" if large_cases else ""
@@ -86,8 +86,8 @@ for phase in ("placement",):
         archive.extractall(root / "mods")
     mod = next(p for p in (root / "mods").iterdir() if p.is_dir())
     control = mod / "control.lua"
-    fixture = {"shoreline": "shoreline-artwork.lua", "gui": "gui.lua", "capacity": "belt-capacity.lua", "large-mine": "large-mine-artwork.lua", "dual-belts": "dual-belts.lua", "lava-routes": "lava-routes.lua", "lava-mine": "lava-routes.lua", "lava-terrain": "lava-routes.lua"}[args.scene] if args.scene else "underground-artwork.lua" if args.visual else "lava-routes.lua" if args.suite in ("lava-mine", "lava-terrain") else args.suite + ".lua"
-    control.write_text(control.read_text() + large_override + (f"\nlocal large_case_filter={args.case or 'nil'};local large_headless={str(args.headless_scene).lower()};local large_dense_matrix={str(args.dense_matrix).lower()};local large_capacity_matrix={str(args.capacity_matrix).lower()};local large_auto_belts={str(not args.no_auto_belts).lower()}\n" if args.scene == "large-mine" else "") + (f"\nlocal cap_visual=true;local cap_power_visual={str(args.power_coverage).lower()}\n" if args.scene == "capacity" else "\n") + ("\nlocal dual_visual=true\n" if args.scene == "dual-belts" else "") + (f"\nlocal lava_case_filter={args.case or 'nil'};local lava_case_start={args.from_case or 'nil'};local lava_case_end={args.through_case or 'nil'};local lava_visual={str(args.scene in ('lava-routes', 'lava-mine', 'lava-terrain')).lower()};local lava_internal={str(args.scene in ('lava-mine', 'lava-terrain') or args.suite in ('lava-mine', 'lava-terrain')).lower()};local lava_diverse={str(args.scene == 'lava-terrain' or args.suite == 'lava-terrain').lower()}\n" if fixture == "lava-routes.lua" else "") + (repo / "tests/native" / fixture).read_text())
+    fixture = {"station-through": "station-through.lua", "shoreline": "shoreline-artwork.lua", "gui": "gui.lua", "capacity": "belt-capacity.lua", "large-mine": "large-mine-artwork.lua", "dual-belts": "dual-belts.lua", "lava-routes": "lava-routes.lua", "lava-mine": "lava-routes.lua", "lava-terrain": "lava-routes.lua"}[args.scene] if args.scene else "underground-artwork.lua" if args.visual else "lava-routes.lua" if args.suite in ("lava-mine", "lava-terrain") else args.suite + ".lua"
+    control.write_text(control.read_text() + large_override + (f"\nlocal through_case_filter={args.case or 'nil'}\n" if args.suite == "station-through" else "") + ("\nlocal through_visual=true\n" if args.scene == "station-through" else "") + (f"\nlocal large_case_filter={args.case or 'nil'};local large_headless={str(args.headless_scene).lower()};local large_dense_matrix={str(args.dense_matrix).lower()};local large_capacity_matrix={str(args.capacity_matrix).lower()};local large_auto_belts={str(not args.no_auto_belts).lower()}\n" if args.scene == "large-mine" else "") + (f"\nlocal cap_visual=true;local cap_power_visual={str(args.power_coverage).lower()}\n" if args.scene == "capacity" else "\n") + ("\nlocal dual_visual=true\n" if args.scene == "dual-belts" else "") + (f"\nlocal lava_case_filter={args.case or 'nil'};local lava_case_start={args.from_case or 'nil'};local lava_case_end={args.through_case or 'nil'};local lava_visual={str(args.scene in ('lava-routes', 'lava-mine', 'lava-terrain')).lower()};local lava_internal={str(args.scene in ('lava-mine', 'lava-terrain') or args.suite in ('lava-mine', 'lava-terrain')).lower()};local lava_diverse={str(args.scene == 'lava-terrain' or args.suite == 'lava-terrain').lower()}\n" if fixture == "lava-routes.lua" else "") + (repo / "tests/native" / fixture).read_text())
     names = ["base", "quality", "elevated-rails", "recycler", "space-age", "resource-outpost-planner"]
     (root / "mods/mod-list.json").write_text(json.dumps({"mods": [{"name": name, "enabled": True} for name in names]}))
     (root / "config.ini").write_text(f"[path]\nread-data={args.data.resolve()}\nwrite-data={root / 'data'}\n[other]\ncheck-updates=false\n[general]\nlocale={args.locale}\n[graphics]\nfull-screen=false\n[interface]\nui-scale-mode=manual-pixels\ncustom-ui-scale={args.ui_scale}\n")
@@ -113,6 +113,8 @@ for phase in ("placement",):
                 time.sleep(0.25)
                 log = log_path.read_text()
                 screenshot = root / "data/script-output/underground-artwork.png"
+                if args.scene == "station-through":
+                    screenshot = root / "data/script-output/turbo-transport-belt-station.png"
                 if args.scene in ("lava-routes", "lava-mine", "lava-terrain"):
                     screenshot = root / "data/script-output/lava-routing-complete.png"
                 if args.scene == "shoreline":
@@ -127,6 +129,7 @@ for phase in ("placement",):
                     screenshot = root / "data/script-output" / (large_case_names[(args.case or len(large_case_names))-1] + "-detail.png")
                 if (args.scene == "large-mine" and (args.headless_scene or screenshot.exists()) and "LARGE MINE SCENE COMPLETE" in log
                         or args.scene in ("lava-routes", "lava-mine", "lava-terrain") and screenshot.exists() and "PLACEMENT COMPLETE" in log
+                        or args.scene == "station-through" and screenshot.exists() and "PLACEMENT COMPLETE" in log
                         or args.scene == "dual-belts" and screenshot.exists() and "PLACEMENT COMPLETE: dual belt native throughput" in log
                         or args.scene == "capacity" and screenshot.exists() and "CAPACITY SCENE COMPLETE" in log
                         or args.scene == "gui" and screenshot.exists() and "GUI SCENE COMPLETE" in log

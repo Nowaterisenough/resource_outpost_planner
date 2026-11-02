@@ -1,5 +1,6 @@
 local util = require("mpp.mpp_util")
 local obstacles = require("mpp.obstacles")
+local wide = require("mpp.balancer_wide")
 local balancer = {}
 local N,E,S,W = defines.direction.north,defines.direction.east,defines.direction.south,defines.direction.west
 local cache = {}
@@ -79,17 +80,45 @@ end
 local function geometry(inputs, outputs, belt_name, preference)
 	local splitter, underground, reach = equipment(belt_name)
 	if not splitter or not reach or reach<2 then return nil,{"mpp.output_balance_equipment"} end
-	local matrix=preference=="matrix" or inputs<=8 and outputs<=8
-	local cache_key = inputs..":"..outputs..":"..belt_name..":"..tostring(matrix)
+	local matrix=preference=="matrix" or preference=="station" or inputs<=8 and outputs<=8
+	local cache_key = inputs..":"..outputs..":"..belt_name..":"..tostring(matrix)..(preference=="station" and ":station" or "")
 	if cache[cache_key] then return cache[cache_key] end
 	-- Preserve independent mining feeds. When they exceed the reference book's
 	-- input width, fold them outside the mine before the normal output balancer.
 	-- The final output count is unchanged; each fold preserves both belt sides.
-	if inputs>balancer.max_count then
-		local channels=math.max(balancer.max_count,math.ceil(inputs/2))
+	local fold_width=outputs==24 and 24 or math.max(balancer.max_count,outputs)
+	if inputs>fold_width then
+		local channels=math.max(fold_width,math.ceil(inputs/2))
 		local core,err=geometry(channels,outputs,belt_name,preference)
 		if not core then return nil,err end
 		local specs,keepout,ports={},{},{}
+		-- Compact feedback cores keep their return loops to the right. Fold
+		-- incoming pairs on the left, so no input must fan across those loops.
+		if core.compact_input_folds or preference=="station" then
+			for _,piece in ipairs(core.specs) do specs[#specs+1]=piece end
+			for _,point in ipairs(core.keepout) do keepout[#keepout+1]=point end
+			local pairs=inputs-channels
+			local front=core.inputs[1].y-pairs-3
+			local function add(name,x,y,dir) specs[#specs+1]={name=name,x=x,y=y,direction=dir or S} end
+			for i,port in ipairs(core.inputs) do
+				local paired=i<=pairs
+				local x=port.x-(paired and pairs-i+1 or 0)
+				if paired then
+					add(splitter,x+.5,front)
+					ports[#ports+1]={x=x,y=front-1};ports[#ports+1]={x=x+1,y=front-1}
+					keepout[#keepout+1]={x=x+1,y=front+1}
+				else add(belt_name,x,front);ports[#ports+1]={x=x,y=front-1} end
+				local turn=front+2+(paired and pairs-i or 0)
+				for y=front+1,turn-1 do add(belt_name,x,y) end
+				for column=x,port.x-1 do add(belt_name,column,turn,E) end
+				for y=turn,port.y do add(belt_name,port.x,y) end
+			end
+			local result={specs=specs,keepout=keepout,inputs=ports,output_y=core.output_y,
+				width=core.width+pairs,extent=math.max(core.extent+pairs+4,math.abs(ports[1].x)),
+				source_label=core.source_label.." + input folds",reference_count=core.reference_count,compact_input_folds=true}
+			cache[cache_key]=result
+			return result
+		end
 		for _,piece in ipairs(core.specs) do specs[#specs+1]=piece end
 		for _,point in ipairs(core.keepout) do keepout[#keepout+1]=point end
 		local front,offset=math.huge,0
@@ -135,8 +164,23 @@ local function geometry(inputs, outputs, belt_name, preference)
 	if exact then entry=choose_matrix(inputs,outputs,reach)
 	else entry=choose_reference(inputs,outputs,reach,matrix) end
 	if exact and not entry then return nil,{"mpp.output_balance_reference_equipment",inputs,outputs} end
+	-- Keep return paths beside the square core instead of crossing the whole
+	-- input bundle. Lower-tier belts use the compatible compositional core.
+	if outputs==24 and (inputs>6 or not matrix and not entry) then
+		if reach>=9 then
+			local core,err=geometry(32,32,belt_name,"matrix")
+			if not core then return nil,err end
+			entry=wide.feedback(24,core,belt_name,splitter,underground)
+		else
+			local core,err=geometry(8,8,belt_name,"matrix")
+			if not core then return nil,err end
+			local mixer,mix_err=geometry(3,3,belt_name,"matrix")
+			if not mixer then return nil,mix_err end
+			entry=wide.reference(24,core,belt_name,splitter,underground,mixer)
+		end
+	end
 	-- Extend the small matrix with equal two-way branches instead of oversized feedback loops.
-	if matrix and inputs<=8 and outputs>8 and outputs%2==0 and (not entry or entry.n~=inputs) then
+	if matrix and inputs<=8 and outputs>8 and outputs%2==0 and (not entry or entry.n~=inputs) and not (outputs==24 and inputs>6) then
 		local core,err=geometry(inputs,outputs/2,belt_name,"matrix")
 		if not core then return nil,err end
 		local specs,keepout={},{}
@@ -161,10 +205,20 @@ local function geometry(inputs, outputs, belt_name, preference)
 		cache[cache_key]=result
 		return result
 	end
+
 	local adapting=entry==nil
 	local width=1
 	while width<math.max(inputs,outputs) do width=width*2 end
-	if adapting then entry=choose_reference(width,width,reach,matrix) end
+	if adapting then
+		entry=choose_reference(width,width,reach,matrix)
+		if not entry and width>32 and width<=128 then
+			-- Six feeds per wagon can exceed the old 32-output book. Build a
+			-- square core without reducing the number of carrying channels.
+			local half,err=geometry(width/2,width/2,belt_name,"matrix")
+			if not half then return nil,err end
+			entry=wide.reference(width,half,belt_name,splitter,underground)
+		end
+	end
 	if not entry then return nil,{"mpp.output_balance_reference_equipment",inputs,outputs} end
 	local specs,occupied,keepout={},{},{}
 	local names={belt=belt_name,splitter=splitter,underground=underground}
@@ -312,7 +366,7 @@ local function geometry(inputs, outputs, belt_name, preference)
 	end end
 	local extent=math.max(math.abs(min_x),math.abs(max_x),math.abs(min_y-output_y),math.abs(max_y-output_y))
 	local result={specs=specs,inputs=input_ports,output_y=output_y,width=width,keepout=keepout,source_label=entry.label,
-		source=entry.source,lane=entry.lane,reference_count=#entry.entities,extent=extent}
+		source=entry.source,lane=entry.lane,reference_count=#entry.entities,extent=extent,compact_input_folds=entry.compact_input_folds}
 	cache[cache_key]=result
 	return result
 end

@@ -1,0 +1,20 @@
+[
+  {
+    "id": "01-small-iron-to-station",
+    "ore": "iron-ore",
+    "shape": "lobed",
+    "scale": 0.24,
+    "direction": "south",
+    "quality": "normal",
+    "module": "speed-module-3",
+    "bonus": 1,
+    "belt": "express-transport-belt",
+    "outputs": 24,
+    "lower": 0,
+    "lamps": true,
+    "station": true,
+    "measure_station_balance": true,
+    "output_distance": 59,
+    "overview_max_zoom": 1.2
+  }
+]

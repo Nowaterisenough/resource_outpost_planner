@@ -1,4 +1,5 @@
 defines={direction={north=0,east=4,south=8,west=12}}
+for i=1,15 do if i%4~=0 then defines.direction["intermediate_"..i]=i end end
 script={active_mods={},feature_flags={},register_metatable=function() end}
 prototypes={entity={},quality={},item={}}
 function table_size(t) local n=0;for _ in pairs(t) do n=n+1 end;return n end
@@ -50,8 +51,8 @@ for heads=1,8 do for wagons=1,16 do for _,side in ipairs{"single","double"} do
 	assert(not counts.locomotive and not counts["cargo-wagon"],"station creates rolling-stock ghosts")
 	assert(layout.locomotives==heads and layout.wagons==wagons,"station lost the requested train dimensions")
 	assert(counts["straight-rail"]==math.ceil((7*(heads+wagons)+2)/2)+3,"rail length no longer fits the chosen train")
-	assert(layout.outputs==wagons*sides and counts["steel-chest"]==wagons*sides*6)
-	assert(counts["bulk-inserter"]==wagons*sides*12 and #layout.loading_inputs==wagons*sides)
+	assert(layout.outputs==wagons*(side=="double" and 6 or 1) and counts["steel-chest"]==wagons*sides*6)
+	assert(counts["bulk-inserter"]==wagons*sides*12 and #layout.loading_inputs==layout.outputs)
 	for _,piece in ipairs(layout.specs) do
 		if piece.name=="bulk-inserter" then
 			local delta=util.direction_coord[piece.direction]
@@ -61,7 +62,7 @@ for heads=1,8 do for wagons=1,16 do for _,side in ipairs{"single","double"} do
 			pickup,drop=drop,pickup
 			assert(pickup,"missing inserter source")
 			if math.abs(piece.y)==3.5 then
-				assert(prototypes.entity[pickup.name].type=="splitter" and drop and drop.name=="steel-chest","buffer filling points away from chest")
+				assert(prototypes.entity[pickup.name].type==(side=="double" and "underground-belt" or "splitter") and drop and drop.name=="steel-chest","buffer filling points away from chest")
 			else assert(pickup.name=="steel-chest","wagon loading does not pick up from buffer") end
 			local supplied=false
 			for _,pole in ipairs(poles) do
@@ -93,12 +94,14 @@ for heads=1,8 do for wagons=1,16 do for _,side in ipairs{"single","double"} do
 	end end
 	cases=cases+1
 end end end
+assert(station.output_count({belt_choice="express-transport-belt"})==24 and station.output_count({belt_choice="turbo-transport-belt"})==24)
+assert(station.output_count({belt_choice="fast-transport-belt"})==8)
 assert(station.output_count({})==8 and station.output_count({output_loading_side_choice="single"})==4)
 assert(not station.valid_choices({output_locomotive_count_choice=0}) and not station.valid_choices({output_wagon_count_choice=17}))
 local compact=assert(station.geometry(4,{},"express-transport-belt"))
-assert(compact.reference=="4_8_balancer" and #compact.specs<=610,"default station acquired a large balancer or long loader loops")
-local three_to_eight=assert(station.geometry(3,{},"express-transport-belt"))
-assert(three_to_eight.reference=="3_8_balancer","3-to-8 station does not match the matrix blueprint")
+assert(compact.outputs==24 and compact.reference=="4_4 global + 4 x 6-output modules","blue station does not balance to six feeds per wagon")
+local three_to_twenty_four=assert(station.geometry(3,{},"express-transport-belt"))
+assert(three_to_twenty_four.shared,"three source belts must supply all four modules")
 local filtered=assert(station.geometry(4,{output_wagon_count_choice=3,output_loading_side_choice="single"},"express-transport-belt"))
 local filters=0
 for _,direction in ipairs{0,4,8,12} do for _,mirror in ipairs{false,true} do
@@ -116,7 +119,7 @@ for _,piece in ipairs(compact.specs) do
 		min_belt_x=math.min(min_belt_x,piece.x)
 	end
 end
-assert(min_belt_x>3,"belt module wraps around the protruding locomotive section")
+assert(min_belt_x>-4,"small global core exceeds the locomotive section")
 for _,direction in ipairs{0,4,8,12} do for _,mirror in ipairs{false,true} do
 	local entities=station.cursor_entities(compact,direction,mirror)
 	for i,piece in ipairs(compact.specs) do
@@ -128,12 +131,71 @@ for _,direction in ipairs{0,4,8,12} do for _,mirror in ipairs{false,true} do
 		end
 	end
 end end
+for _,tier in ipairs{{"transport-belt","underground-belt","splitter",5,8},{"fast-transport-belt","fast-underground-belt","fast-splitter",7,8},{"turbo-transport-belt","turbo-underground-belt","turbo-splitter",11,24}} do
+ local b=prototype(tier[1],"transport-belt",1,1)
+ b.related_underground_belt=prototype(tier[2],"underground-belt",1,1)
+ b.related_underground_belt.max_underground_distance=tier[4]
+ prototype(tier[3],"splitter",2,1)
+ local other=assert(station.geometry(4,{},tier[1]))
+ assert(other.outputs==tier[5] and #other.loading_inputs==tier[5],"belt tier selected the wrong loading structure")
+ local single=assert(station.geometry(4,{output_loading_side_choice="single"},tier[1]))
+ assert(single.outputs==4 and not single.through_loading,"single-sided station changed its feed layout")
+end
 local crossings=0
 for _,piece in ipairs(compact.specs) do
 	if piece.type=="input" and piece.y>-7.5 then
-		assert(piece.y==-3.5 and piece.direction==8,"loading trunks cross each other underground")
+		assert(piece.y==-4.5 and piece.direction==8,"loading trunks do not enter from the same side")
 		crossings=crossings+1
 	end
 end
-assert(crossings==4,"default double-sided station needs more than four rail crossings")
+assert(crossings==24,"default blue station does not have 24 independent rail crossings")
+-- Module size, saturation, and source assignment are separate contracts.
+local bank=require("mpp.station_balancers")
+for _,w in ipairs{1,2,4,8,16} do for _,n in ipairs{1,2,3,4,5,6,7,8,9,10,12,16,24,30,34,48,64,96,128} do
+ local layout=assert(station.geometry(n,{output_wagon_count_choice=w},"express-transport-belt"))
+ local cells={}
+ for _,p in ipairs(layout.specs) do if not p.station_rail then
+  local offsets=prototypes.entity[p.name].type=="splitter" and ((p.direction==0 or p.direction==8) and {{-.5,0},{.5,0}} or {{0,-.5},{0,.5}}) or {{0,0}}
+  for _,o in ipairs(offsets) do
+   local k=key(p.x+o[1],p.y+o[2])
+   assert(not cells[k],n.."/"..w.." module collision at "..k)
+   cells[k]=p
+  end
+ end end
+ assert(#layout.inputs==n and #layout.groups==w and layout.outputs==6*w)
+end end
+for _,n in ipairs{24,30,34} do
+ local layout=assert(station.geometry(n,{},"express-transport-belt"))
+ local x1,x2,y1,y2=math.huge,-math.huge,math.huge,-math.huge
+ for _,p in ipairs(layout.specs) do
+  x1=math.min(x1,math.floor(p.x));x2=math.max(x2,math.ceil(p.x))
+  y1=math.min(y1,math.floor(p.y));y2=math.max(y2,math.ceil(p.y))
+ end
+ assert(x2-x1+1<=52 and y2-y1+1<=68 and #layout.specs<=1750,"wagon modules grew into a central balancing yard")
+end
+-- Source estimates must never change the topology: every input participates
+-- in the global balance, even when a mine row becomes depleted later.
+local weights={}
+for i=1,24 do weights[i]=i<=12 and .05 or .95 end
+local weighted=assert(station.geometry(24,{},"express-transport-belt",weights))
+local uniform=assert(station.geometry(24,{},"express-transport-belt"))
+assert(#weighted.specs==#uniform.specs)
+for i,p in ipairs(weighted.specs) do
+ local q=uniform.specs[i]
+ assert(p.name==q.name and p.x==q.x and p.y==q.y and p.direction==q.direction,"forecast changes physical global balance")
+end
+for _,g in ipairs(weighted.groups) do assert(math.abs(g.load-3)<1e-8,"wagon groups receive unequal loads") end
+assert(bank.channels(7,4)==2 and bank.channels(24,4)==8,"global distribution throttles the incoming bundle")
+local obstacle_module=require("mpp.obstacles")
+local can_place=obstacle_module.can_place
+obstacle_module.can_place=function() return true end
+local spec={count=7}
+local state={belt_specification=spec,belt_choice="express-transport-belt",direction_choice="west",
+ coords={gx=0,gy=0,tw=100,th=100},belt_target={position={x=201,y=201},direction=8},belt_direction=8}
+assert(station.plan(state,function(connection)
+ assert(connection.interchangeable_belt_inputs,"global balancing should allow compact input routing")
+ assert(#connection.belt_input_targets==7)
+ return true,{}
+end))
+obstacle_module.can_place=can_place
 print("Train station OK: "..cases.." train/side layouts, "..arms.." loading arms, pole coverage, underground pairs and transforms")

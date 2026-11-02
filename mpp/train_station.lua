@@ -1,6 +1,7 @@
 local util = require("mpp.mpp_util")
 local obstacles = require("mpp.obstacles")
 local balancer = require("mpp.output_balancer")
+local bank = require("mpp.station_balancers")
 local station = {}
 local N,E,S,W = defines.direction.north,defines.direction.east,defines.direction.south,defines.direction.west
 
@@ -18,8 +19,15 @@ function station.valid_choices(choices)
 		and integer(choices.output_wagon_count_choice or 4,station.max_wagons)
 end
 
-function station.output_count(choices)
-	return (choices.output_wagon_count_choice or 4)*(choices.output_loading_side_choice=="single" and 1 or 2)
+function station.through_loading(choices,belt_name)
+	local name=belt_name or choices.belt_choice
+	return choices.output_loading_side_choice~="single"
+		and (name=="express-transport-belt" or name=="turbo-transport-belt")
+end
+
+function station.output_count(choices,belt_name)
+	return (choices.output_wagon_count_choice or 4)*(station.through_loading(choices,belt_name) and 6
+		or choices.output_loading_side_choice=="single" and 1 or 2)
 end
 
 function station.choices(choices)
@@ -28,12 +36,15 @@ function station.choices(choices)
 		output_loading_side_choice=choices.output_loading_side_choice or "double"}
 end
 
-function station.geometry(inputs,choices,belt_name)
+function station.geometry(inputs,choices,belt_name,weights)
 	if not station.valid_choices(choices) then return nil,{"mpp.output_station_count_error",station.max_locomotives,station.max_wagons} end
 	local heads,wagons=choices.output_locomotive_count_choice or 2,choices.output_wagon_count_choice or 4
 	local double=choices.output_loading_side_choice~="single"
-	local outputs=station.output_count(choices)
-	local reference,err=balancer.geometry(inputs,outputs,belt_name,"matrix")
+	local through=station.through_loading(choices,belt_name)
+	local outputs=station.output_count(choices,belt_name)
+	local reference,err
+ if through then reference,err=bank.geometry(inputs,wagons,belt_name,weights)
+ else reference,err=balancer.geometry(inputs,outputs,belt_name,"matrix") end
 	if not reference then return nil,err end
 	local inserter=prototypes.entity["bulk-inserter"] and "bulk-inserter" or "fast-inserter"
 	for _,name in ipairs{"straight-rail","train-stop","steel-chest","medium-electric-pole",inserter} do
@@ -47,6 +58,7 @@ function station.geometry(inputs,choices,belt_name)
 	if double and bx<=.5 and bx+wagons-1>=-.5 then bx=-wagons-1.5 end
 	local tail=0
 	for _,piece in ipairs(reference.specs) do tail=math.max(tail,piece.y-reference.output_y) end
+	if through then bx,by=cargo_x(1)-2.5,-5.5 end
 	by=by-tail
 	local function add(name,x,y,direction,extra)
 		local spec={name=name,x=x,y=y,direction=direction or N,thing="belt"}
@@ -62,49 +74,62 @@ function station.geometry(inputs,choices,belt_name)
 	for _,p in ipairs(reference.keepout) do keepout[#keepout+1]={x=bx+p.x,y=by+p.y-reference.output_y} end
 	local ports={}
 	for _,p in ipairs(reference.inputs) do ports[#ports+1]={x=bx+p.x,y=by+p.y-reference.output_y} end
-	for i=0,wagons-1 do
-		local sx=bx+(double and wagons or 0)+i
-		local row=-8.5-i
-		local first=cargo_x(i+1)-.5
-		for y=by+1,row-1 do belt(sx,y,S) end
-		for x=sx,first-1 do belt(x,row,E) end
-		for y=row,-7.5 do belt(first,y,S) end
-	end
-	if double then
-		for i=0,wagons-1 do
-			local column=bx+i
-			local wagon=wagons-i
-			local row=8.5+wagons-1-i
-			local first=cargo_x(wagon)-.5
-			for y=by+1,-4.5 do belt(column,y,S) end
-			add(underground,column,-3.5,S,{type="input"})
-			add(underground,column,1.5,S,{type="output"})
-			for y=2.5,row-1 do belt(column,y,S) end
-			for x=column,first-1 do belt(x,row,E) end
-			for y=row,7.5,-1 do belt(first,y,N) end
-		end
-	end
-	local splitter=assert(balancer.equipment(belt_name))
 	local loading_inputs={}
-	for _,side in ipairs(double and {-1,1} or {-1}) do
-		for wagon=1,wagons do
-			local center=cargo_x(wagon)
-			local function feed(name,x,y,dir)
-				if side==1 then y=-y;dir=(S-dir)%16 end
-				return add(name,x,y,dir)
+	if through then
+		-- Six parallel feeds per wagon enter from one side. The blue/green
+		-- tunnel spans both chest rows and the rail; both endpoints are picked
+		-- by the loading arms, so no second belt bundle crosses the station.
+		for i=0,outputs-1 do
+			local wagon=math.floor(i/6)+1
+			local tx=bx+(wagon-1)*7+i%6
+			add(underground,tx,-4.5,S,{type="input"})
+			add(underground,tx,4.5,S,{type="output"})
+			loading_inputs[#loading_inputs+1]={x=tx,y=-4.5,wagon=wagon,side=-1}
+		end
+	else
+		for i=0,wagons-1 do
+			local sx=bx+(double and wagons or 0)+i
+			local row=-8.5-i
+			local first=cargo_x(i+1)-.5
+			for y=by+1,row-1 do belt(sx,y,S) end
+			for x=sx,first-1 do belt(x,row,E) end
+			for y=row,-7.5 do belt(first,y,S) end
+		end
+		if double then
+			for i=0,wagons-1 do
+				local column=bx+i
+				local wagon=wagons-i
+				local row=8.5+wagons-1-i
+				local first=cargo_x(wagon)-.5
+				for y=by+1,-4.5 do belt(column,y,S) end
+				add(underground,column,-3.5,S,{type="input"})
+				add(underground,column,1.5,S,{type="output"})
+				for y=2.5,row-1 do belt(column,y,S) end
+				for x=column,first-1 do belt(x,row,E) end
+				for y=row,7.5,-1 do belt(first,y,N) end
 			end
-			-- Compact loader: branch the wagon's belt, then feed each pair of boxes.
-			feed(splitter,center,-6.5,S)
-			feed(splitter,center-1,-5.5,S)
-			feed(belt_name,center+.5,-5.5,E)
-			feed(belt_name,center+1.5,-5.5,S)
-			for pair=-2,2,2 do
-				feed(splitter,center+pair,-4.5,S)
+		end
+		local splitter=assert(balancer.equipment(belt_name))
+		for _,side in ipairs(double and {-1,1} or {-1}) do
+			for wagon=1,wagons do
+				local center=cargo_x(wagon)
+				local function feed(name,x,y,dir)
+					if side==1 then y=-y;dir=(S-dir)%16 end
+					return add(name,x,y,dir)
+				end
+				-- Compact loader: branch the wagon's belt, then feed each pair of boxes.
+				feed(splitter,center,-6.5,S)
+				feed(splitter,center-1,-5.5,S)
+				feed(belt_name,center+.5,-5.5,E)
+				feed(belt_name,center+1.5,-5.5,S)
+				for pair=-2,2,2 do
+					feed(splitter,center+pair,-4.5,S)
+				end
+				for x=center-2.5,center+2.5 do for y=-7.5,-4.5 do
+					keepout[#keepout+1]={x=x,y=side==-1 and y or -y}
+				end end
+				loading_inputs[#loading_inputs+1]={x=center-.5,y=side*7.5,wagon=wagon,side=side}
 			end
-			for x=center-2.5,center+2.5 do for y=-7.5,-4.5 do
-				keepout[#keepout+1]={x=x,y=side==-1 and y or -y}
-			end end
-			loading_inputs[#loading_inputs+1]={x=center-.5,y=side*7.5,wagon=wagon,side=side}
 		end
 	end
 	local left=-4
@@ -131,7 +156,7 @@ function station.geometry(inputs,choices,belt_name)
 	local extent=0
 	for _,p in ipairs(specs) do extent=math.max(extent,math.abs(p.x),math.abs(p.y)) end
 	return {specs=specs,inputs=ports,loading_inputs=loading_inputs,keepout=keepout,outputs=outputs,extent=extent,
-		locomotives=heads,wagons=wagons,double=double,reference=reference.source_label}
+		locomotives=heads,wagons=wagons,double=double,through_loading=through,reference=reference.source_label,groups=reference.groups,shared=reference.shared}
 end
 
 function station.transform(x,y,direction,mirror)
@@ -213,7 +238,8 @@ function station.plan(state,route)
 		local gx,gy=grid(anchor.x+x,anchor.y+y)
 		connection.belt_input_targets[i]={x=math.floor(gx+.5),y=math.floor(gy+.5)}
 	end
-	-- Balancer inputs are interchangeable; preserve bundle order after reflection.
+	-- The global stage balances any source assignment; preserve bundle order
+	-- after reflection before trying alternate routes.
 	table.sort(connection.belt_input_targets,function(a,b)
 		if state.belt_direction==W then return a.y<b.y end
 		if state.belt_direction==E then return a.y>b.y end
@@ -221,7 +247,7 @@ function station.plan(state,route)
 		return a.x<b.x
 	end)
 	local ok,routes,diagnostic=route(connection)
-	if not ok and #connection.belt_input_targets>1 then
+	if not ok and connection.interchangeable_belt_inputs and #connection.belt_input_targets>1 then
 		-- Either input order has the same balance; reflection can put the shorter ingress on the other side.
 		local targets=connection.belt_input_targets
 		for i=1,math.floor(#targets/2) do targets[i],targets[#targets-i+1]=targets[#targets-i+1],targets[i] end

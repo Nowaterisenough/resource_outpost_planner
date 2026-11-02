@@ -1,5 +1,6 @@
 -- Real asynchronous planner + native entities on isolated visual-test surfaces.
 local large_common=require("layouts.common")
+local large_station=require("mpp.train_station")
 local large_cases={
  {id="01-compact-iron",ore="iron-ore",shape="lobed",direction="west",quality="normal",module="none",bonus=0,belt="turbo-transport-belt",outputs=24,dense=true},
  {id="02-staggered-copper",ore="copper-ore",shape="crescent",direction="south",quality="legendary",module="productivity-module-3",pole_quality="legendary",lamps=true,bonus=1,belt="turbo-transport-belt",outputs=32,dense=true},
@@ -20,7 +21,7 @@ local large_player,large_data,large_surface,large_resources,large_state,large_en
 local large_results,large_report={},nil
 local large_start_tick,large_timer,large_mine_state,large_failure
 local large_flow,large_flow_start
-local large_acid
+local large_acid,large_loading
 local large_preview_complete=preview.complete
 preview.complete=function(state)
  large_state=state
@@ -35,6 +36,8 @@ local large_task=task_runner.mining_patch_task
 end
 local function large_key(p) return math.floor(p.x)..","..math.floor(p.y) end
 local function large_shape(c,x,y)
+ local scale=c.scale or 1
+ x,y=x/scale,y/scale
  local a=math.atan2(y/72,x/96)
  local edge=1+.09*math.sin(7*a)+.05*math.cos(11*a)
  if c.shape=="lobed" then
@@ -63,7 +66,8 @@ local function large_begin()
   if not large_dense_matrix and not large_capacity_matrix then game.auto_save("large-mine-layouts") end
   large_phase="finish";large_wait=game.tick+90;return
  end
- game.speed=(c.measure_lanes or c.measure_acid) and 8 or 1
+ game.speed=c.station and 16 or (c.measure_lanes or c.measure_acid) and 8 or 1
+ large_loading=nil
  large_acid=nil
  large_player=game.get_player(1);conf.initialize_global(large_player.index)
  large_player.set_controller{type=defines.controllers.god}
@@ -90,7 +94,7 @@ local function large_begin()
    large_resources[#large_resources+1]=large_surface.create_entity{name=c.ore,position={x+.5,y+.5},amount=amount}
   end
  end end
- assert(#large_resources>10000,"fixture is not a huge irregular patch")
+ assert(#large_resources>10000*(c.scale or 1)^2,"fixture has insufficient ore for its configured scale")
  local choices=large_data.choices
  choices.layout_choice=c.dense and "super_compact" or "compact";choices.mining_layout_choice=choices.layout_choice;choices.miner_choice="big-mining-drill"
  choices.direction_choice=c.direction;choices.miner_quality_choice=c.quality
@@ -104,7 +108,8 @@ local function large_begin()
  choices.belt_merge_choice=large_auto_belts~=false and c.auto_belts~=false
  choices.belt_load_min_choice=c.lower or .8;choices.belt_load_max_choice=c.upper or 1.1
  choices.belt_planner_choice=true;choices.output_balance_choice=c.balance~=false;choices.output_belt_count_choice=c.outputs
- choices.output_station_choice=false;choices.statistics_choice=false
+ choices.output_station_choice=c.station==true;choices.statistics_choice=false
+ choices.output_locomotive_count_choice=2;choices.output_wagon_count_choice=4;choices.output_loading_side_choice="double"
  choices.terrain_mode_choice="avoid";choices.cliff_mode_choice="avoid";choices.remove_entities_choice=false
  gui.show_interface(large_player)
  large_report={case=c,auto_belts=choices.belt_merge_choice,ore_tiles=#large_resources,min_tile_amount=min_amount,max_tile_amount=max_amount}
@@ -146,6 +151,9 @@ local function large_materialize()
   local e=large_surface.create_entity{name=spec.inner_name,position=spec.position,direction=spec.direction,
    quality=spec.quality,type=spec.type,force=large_player.force}
   assert(e,"native creation failed: "..helpers.table_to_json(spec))
+  if spec.input_priority then e.splitter_input_priority=spec.input_priority end
+  if spec.output_priority then e.splitter_output_priority=spec.output_priority end
+  if spec.filter then e.splitter_filter=spec.filter end
   large_entities[#large_entities+1]=e;counts[e.name]=(counts[e.name] or 0)+1
   if e.type=="mining-drill" then
    large_drills[#large_drills+1]=e
@@ -166,6 +174,38 @@ local function large_materialize()
  large_supply.power_production=1e13;large_supply.electric_buffer_size=1e13;large_supply.energy=1e13
  assert(large_supply_pole.get_wire_connector(defines.wire_connector_id.pole_copper,true).connect_to(
   large_poles[1].get_wire_connector(defines.wire_connector_id.pole_copper,true),false,defines.wire_origin.script))
+ if c.station then
+  large_loading={boxes={},arms={},wagons={},seen={},start=game.tick}
+  local anchor=large_report.output_target
+  if c.measure_station_balance then
+   large_loading.balance={feeds={},counts={},start=game.tick}
+   for wagon=1,4 do for lane=0,5 do
+    local x,y=large_station.transform(3+7*(2+wagon-1)-2.5+lane,-5.5,defines.direction[c.direction],false)
+    local e=assert(large_surface.find_entity(c.belt,{anchor.x+x,anchor.y+y}),"missing station measurement belt")
+    local b=large_loading.balance
+    b.feeds[#b.feeds+1]=e;b.counts[#b.counts+1]=0
+   end end
+  end
+  local nearest,distance
+  for _,pole in ipairs(large_poles) do
+   local d=pole.position.x^2+pole.position.y^2
+   if not distance or d<distance then nearest,distance=pole,d end
+  end
+  if nearest.electric_network_id~=large_supply_pole.electric_network_id then
+   assert(large_supply_pole.get_wire_connector(defines.wire_connector_id.pole_copper,true).connect_to(
+    nearest.get_wire_connector(defines.wire_connector_id.pole_copper,true),false,defines.wire_origin.script))
+  end
+  for _,e in ipairs(large_entities) do
+   if e.type=="container" then large_loading.boxes[#large_loading.boxes+1]=e end
+   if e.type=="inserter" then large_loading.arms[#large_loading.arms+1]=e end
+  end
+  for i=1,6 do
+   local p=large_station.transform_piece({x=3+7*(i-1),y=0,direction=12,station_stock=true},defines.direction[c.direction],false)
+   local e=assert(large_surface.create_entity{name=i<=2 and "locomotive" or "cargo-wagon",
+    position={anchor.x+p.x,anchor.y+p.y},orientation=p.orientation,force=large_player.force})
+   if i>2 then large_loading.wagons[#large_loading.wagons+1]=e end
+  end
+ end
  large_wait=game.tick+240;large_phase="audit"
 end
 -- Supply the generated pipe network through one native infinity pipe. Drills
@@ -392,7 +432,8 @@ local function large_audit()
   end end
  end
  -- Keep power running, but remove the distant fixture supply wire from photographs.
- if not c.measure_lanes and not c.measure_acid then large_supply_pole.get_wire_connector(defines.wire_connector_id.pole_copper,true).disconnect_all() end
+ if not c.measure_lanes and not c.measure_acid and not c.station then large_supply_pole.get_wire_connector(defines.wire_connector_id.pole_copper,true).disconnect_all() end
+ if c.station then large_phase="station-flow";large_wait=game.tick+1;return end
  local pos={x=(left+right)/2,y=(top+bottom)/2}
  local zoom=math.min(2400/((right-left+14)*32),1800/((bottom-top+14)*32),.38)
  large_capture("overview",pos,{2400,1800},zoom)
@@ -421,6 +462,57 @@ local function large_measure_flow()
  large_report.flow=measured
  helpers.write_file("large-mine-result.json",helpers.table_to_json(large_results),false)
  log("LARGE MINE FLOW "..helpers.table_to_json(measured))
+ large_phase="mine-shot";large_wait=game.tick+1
+end
+local function large_station_flow()
+ local a,c=large_loading,large_cases[large_index]
+ if a.balance then
+  -- Measure actual ore mined on this patch before allowing the same flow to
+  -- load the train. Full chests alone cannot demonstrate equal delivery.
+  local b=a.balance
+  local elapsed=game.tick-b.start
+  for i,e in ipairs(b.feeds) do for side=1,2 do
+   local n=e.get_transport_line(side).remove_item{name=c.ore,count=1000}
+   if elapsed>6000 then b.counts[i]=b.counts[i]+n end
+  end end
+  if elapsed<9600 then return end
+  local low,high,total,wagons=math.huge,0,0,{0,0,0,0}
+  for i,n in ipairs(b.counts) do
+   low=math.min(low,n);high=math.max(high,n);total=total+n
+   local wagon=math.ceil(i/6);wagons[wagon]=wagons[wagon]+n
+  end
+  assert(low>0 and high-low<=math.max(16,total/24*.03),"actual mine ore is not globally balanced: "..helpers.table_to_json(b.counts))
+  large_report.station_balance={sample_ticks=3600,counts=b.counts,wagon_totals=wagons,
+   total_per_second=total/60,min=low,max=high}
+  helpers.write_file("large-mine-result.json",helpers.table_to_json(large_results),false)
+  log("LARGE MINE STATION BALANCE "..helpers.table_to_json(large_report.station_balance))
+  a.balance=nil;a.start=game.tick;a.seen={}
+ end
+ for i,box in ipairs(a.boxes) do
+  if box.get_inventory(defines.inventory.chest).get_item_count(c.ore)>0 then a.seen[i]=true end
+ end
+ if game.tick-a.start<18000 then return end
+ assert(#a.boxes==48 and table_size(a.seen)==48,"mine ore did not reach all 48 station chests")
+ local cargo={}
+ for _,wagon in ipairs(a.wagons) do
+  cargo[#cargo+1]=wagon.get_inventory(defines.inventory.cargo_wagon).get_item_count(c.ore)
+  assert(cargo[#cargo]>0,"mine ore did not reach a cargo wagon")
+ end
+ for _,arm in ipairs(a.arms) do assert(arm.energy>0 and arm.pickup_target and arm.drop_target,"station arm lost power or target") end
+ large_report.station_flow={elapsed_ticks=game.tick-a.start,loaded_boxes=table_size(a.seen),wagon_items=cargo}
+ helpers.write_file("large-mine-result.json",helpers.table_to_json(large_results),false)
+ log("LARGE MINE STATION FLOW "..helpers.table_to_json(large_report.station_flow))
+ -- Hide only the distant fixture supply wire for this screenshot frame.
+ large_supply_pole.get_wire_connector(defines.wire_connector_id.pole_copper,true).disconnect_all()
+ local b=large_report.bounds
+ local pos={x=(b.left+b.right)/2,y=(b.top+b.bottom)/2}
+ local zoom=math.min(3200/((b.right-b.left+14)*32),2400/((b.bottom-b.top+14)*32),c.overview_max_zoom or .6)
+ large_capture("overview",pos,{3200,2400},zoom)
+ local anchor=large_report.output_target
+ local x,y=large_station.transform(27,-35,defines.direction[c.direction],false)
+ large_capture("station-connection",{x=anchor.x+x,y=anchor.y+y},{2400,1800},.65)
+ x,y=large_station.transform(20,-12,defines.direction[c.direction],false)
+ large_capture("station-loaded",{x=anchor.x+x,y=anchor.y+y},{2200,2200},1.1)
  large_phase="mine-shot";large_wait=game.tick+1
 end
 local function large_step()
@@ -504,9 +596,10 @@ local function large_step()
   log{"","LARGE MINE TIMING ",large_cases[large_index].id," mine ",large_timer}
   local c=large_cases[large_index]
   large_report.incoming_belts=large_data.preview.belt_specification.count
-  large_report.expected_outputs=c.balance==false and large_report.incoming_belts or c.outputs
+  large_report.expected_outputs=c.station and large_station.output_count(large_data.choices) or c.balance==false and large_report.incoming_belts or c.outputs
   local distance=c.output_distance or 235.5+2*math.max(0,large_report.incoming_belts-24)
   local target=({west={x=-distance,y=-15.5},east={x=distance,y=-15.5},north={x=-15.5,y=-distance},south={x=-15.5,y=distance}})[c.direction]
+  if c.station then target.x=math.floor(target.x/2)*2+1;target.y=math.floor(target.y/2)*2+1 end
   large_report.output_target=target
   large_timer=helpers.create_profiler(true);large_start_tick=game.tick
   assert(preview.set_belt_target(large_data,{position=target,direction=defines.direction[c.direction]}))
@@ -521,6 +614,7 @@ local function large_step()
   log{"","LARGE MINE TIMING ",large_cases[large_index].id," output ",large_timer};large_timer=nil
   large_materialize()
  elseif large_phase=="audit" then large_audit()
+ elseif large_phase=="station-flow" then large_station_flow()
  elseif large_phase=="flow" then large_measure_flow()
  elseif large_phase=="acid" then large_measure_acid()
  elseif large_phase=="mine-shot" then

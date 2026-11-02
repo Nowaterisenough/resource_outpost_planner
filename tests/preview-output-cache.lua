@@ -1,7 +1,7 @@
 -- Cache invalidation and read-only routing state, without a game process.
 defines={direction={west=12}}
 game={tick=1}
-package.loaded["mpp.train_station"]={output_count=function(c) return (c.output_wagon_count_choice or 4)*(c.output_loading_side_choice=="single" and 1 or 2) end}
+package.loaded["mpp.train_station"]=nil
 function table.deepcopy(value)
 	if type(value)~="table" then return value end
 	local result={};for k,v in pairs(value) do result[k]=table.deepcopy(v) end;return result
@@ -121,10 +121,19 @@ check(not cache.resume(data),"untrimmed collection reused for a compact same-fac
 data.preview.belt_target.direction=0
 check(cache.resume(data),"rotation that retains collection geometry should reuse it")
 
+data,state=fixture()
+data.choices.belt_choice="express-transport-belt"
+data.preview.output_basis.environment.choices.belt_choice="express-transport-belt"
+data.choices.output_station_choice=true
+check(not cache.resume(data),"blue 24-feed station reused an 8-output mining budget")
+data.preview.output_basis.environment.choices.output_belt_count_choice=24
+check(cache.resume(data),"matching 24-feed station needlessly rebuilt mining geometry")
+
 data,state=fixture();data.preview.output_basis=nil
 state._preview_specs[1].name="tile-ghost"
 cache.complete(state,data.preview)
 check(not data.preview.output_basis,"mining landfill incorrectly assumed independent of output")
+
 data,state=fixture();data.preview.output_basis=nil
 state._preview_specs[2].name="tile-ghost"
 cache.complete(state,data.preview)
@@ -132,6 +141,7 @@ check(not data.preview.output_basis,"output landfill may also cover mining tiles
 data,state,ore=fixture();data.preview.output_basis=nil;ore.amount=1
 cache.complete(state,data.preview)
 check(not data.preview.output_basis,"resources changed during mining planning but basis was retained")
+
 data,state=fixture();data.preview.output_basis=nil;state._obstacle_skipped=1
 cache.complete(state,data.preview)
 check(not data.preview.output_basis,"partial mining placement was retained")

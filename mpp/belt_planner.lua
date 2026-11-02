@@ -10,7 +10,7 @@ local belt_load = require("mpp.belt_load")
 local forced_build = require("mpp.forced_build")
 local belt_planner = {}
 local blueprint_name = "mpp-blueprint-belt-planner"
-local station_cursor_version = 4
+local station_cursor_version = 6
 local search_directions={WEST,NORTH,SOUTH,EAST}
 local landfill_hazards
 
@@ -128,6 +128,7 @@ function belt_planner.update_blueprint(player, spec)
 		if data.belt_cursor_station_signature==signature and #entities==#layout.specs and station_grid_matches(stack) then return stack end
 		data.belt_cursor_station_signature=signature
 		data.belt_cursor_station_layout=layout
+		data.belt_cursor_station_variants=nil
 		data.belt_cursor_restore=nil
 		stack.set_blueprint_entities({})
 		stack.set_blueprint_entities(train_station.cursor_entities(layout,direction,data.belt_cursor_mirror))
@@ -139,7 +140,7 @@ function belt_planner.update_blueprint(player, spec)
 		stack.set_blueprint_entities({});entities={}
 		stack.blueprint_snap_to_grid=nil
 		stack.blueprint_absolute_snapping=false
-		data.belt_cursor_station_layout=nil;data.belt_cursor_station_signature=nil
+		data.belt_cursor_station_layout=nil;data.belt_cursor_station_signature=nil;data.belt_cursor_station_variants=nil
 	end
 	local quality = spec.belt_quality_choice or "normal"
 	local count = spec.output_count or spec.count

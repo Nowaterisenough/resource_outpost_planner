@@ -205,4 +205,16 @@ assert(balancer.geometry(1,1,"transport-belt").reference_count==11)
 assert(balancer.geometry(2,2,"transport-belt").reference_count==16)
 for _,n in ipairs{33,39,64,65,128} do for _,m in ipairs{8,24,32} do verify(n,m) end end
 for inputs=9,20 do verify(inputs,4) end
+for _,pair in ipairs{{4,66},{24,36},{32,66},{32,96}} do verify(pair[1],pair[2],"express-transport-belt","matrix") end
+-- Compact station cores must not regress to the wide permutation grid.
+for _,limits in ipairs{{24,41,49,1800},{30,47,59,2100},{34,51,63,2200}} do
+ local layout=assert(balancer.geometry(limits[1],24,"express-transport-belt","matrix"))
+ local left,top,right,bottom=math.huge,math.huge,-math.huge,-math.huge
+ for _,p in ipairs(layout.specs) do
+  left=math.min(left,math.floor(p.x));right=math.max(right,math.ceil(p.x))
+  top=math.min(top,math.floor(p.y));bottom=math.max(bottom,math.ceil(p.y))
+ end
+ assert(right-left+1<=limits[2] and bottom-top+1<=limits[3] and #layout.specs<=limits[4],
+  "24-feed station balancer expanded beyond its compact footprint")
+end
 print("Output balancer OK: "..cases.." physical flow shares, tunnel pairing, rotations-ready geometry and configurable outputs")
