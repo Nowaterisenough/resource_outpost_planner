@@ -137,4 +137,47 @@ for _,spec in ipairs(normal) do check(spec.row_y<9 or spec.row_y>32,"empty middl
 state.beacon_quality_choice="legendary"
 prototypes.entity.beacon.get_supply_area_distance=function(q) return q=="legendary" and 12 or 3 end
 check(#rows.specifications(state,state.best_attempt)>#normal,"useful towers respect quality supply radius")
+-- Compact big drills share lateral columns without putting towers in their
+-- facing output corridors. Every drill must receive towers from both sides.
+for _,direction in ipairs{"north","east","south","west"} do
+ for _,gap in ipairs{0,1} do for _,corridor in ipairs{1,2} do
+  local state=fixture(direction,5,13,gap)
+  state._capacity_tight_big=true;state._capacity_row_gaps={[1]=corridor,[3]=corridor}
+  local attempt=state.best_attempt;attempt.miners={};attempt.lane_layout={}
+  local y=1
+  for row=1,4 do
+   attempt.lane_layout[row]={y=y}
+   for col=0,2 do
+    local x=1+col*(8+2*gap)
+    attempt.miners[#attempt.miners+1]={x=x,y=y,origin_x=x+2,origin_y=y+2}
+   end
+   y=y+5+(row%2==1 and corridor or 0)
+  end
+  rows.reserve(state);rows.finish(state)
+  check(state.beacon_summary[4]>=4,"compact drills need at least four actual side towers")
+  local footprints={}
+  for _,tower in ipairs(state.builder_beacons) do
+   for i=1,4,2 do
+    local first=attempt.lane_layout[i].y+5
+    check(tower.row_y+3<=first or tower.row_y>=first+corridor,"side tower occupies an output corridor")
+   end
+   local _,box=rows.position(state,tower)
+   for _,other in ipairs(footprints) do
+    check(not (box.left_top.x<other.right_bottom.x and other.left_top.x<box.right_bottom.x
+     and box.left_top.y<other.right_bottom.y and other.left_top.y<box.right_bottom.y),"compact side towers overlap")
+   end
+   footprints[#footprints+1]=box
+  end
+  for _,drill in ipairs(attempt.miners) do
+   local left,right=0,0
+   for _,tower in ipairs(state.builder_beacons) do
+    if tower.row_y-3<drill.y+5 and tower.row_y+6>drill.y then
+     if tower.row_x==drill.x-3-gap then left=left+1 end
+     if tower.row_x==drill.x+5+gap then right=right+1 end
+    end
+   end
+   check(left>=2 and right>=2,"compact drill has sparse or one-sided towers")
+  end
+ end end
+end
 print("Beacon rows: "..cases.." assertions passed")

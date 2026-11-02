@@ -81,7 +81,7 @@ function paired.prepare(state,production,limit,issue)
     local a,b=g.rates[1]/state.belt.speed,g.rates[2]/state.belt.speed
     state.belts[#state.belts+1]={index=#state.belts+1,capacity_row=i,capacity_pair=true,
      has_drills=true,is_output=true,lane1=g.lane1,lane2=g.lane2,
-     x1=x1,x2=x2,x_entry=x1-M.middle,x_end=x2+M.middle,x_start=attempt.sx-5,
+     x1=x1,x2=x2,x_entry=x1-M.middle,x_end=x2+M.middle,x_start=attempt.sx-(state._capacity_beacon_width or 0)-(state.beacon_pipe_gap or 0)-5,
      source_y=y,y=y+j-1,turn_x=x1-1,capacity_weave=#groups[i]==2,throughput1=a,throughput2=b,merged_throughput1=a,merged_throughput2=b}
    end
   end
@@ -102,8 +102,8 @@ local function drop(state,m)
  return m.x+p.x,m.y+p.y
 end
 
--- Long gaps can contain beacon pockets. Fixed underground spans may put a
--- relay endpoint inside a pocket; move each relay onto two free adjacent tiles.
+-- Long gaps can contain beacon columns. Fixed underground spans may put a
+-- relay endpoint inside a tower; move each relay onto two free adjacent tiles.
 function paired.pipe_spans(grid,x,y,width,reach)
  local last=x+width
  local function blocked(at)
@@ -152,7 +152,7 @@ function paired.poles(state)
   list[#list+1]=spec;G:build_thing_simple(x,y,thing)
   return true
  end
- local join_x=attempt.sx-2
+ local join_x=attempt.sx-(state._capacity_beacon_width or 0)-(state.beacon_pipe_gap or 0)-2
  local step=max(1,floor(min(state.pole.wire,state.pole.radius*2)))
  local previous
  local columns=state.miner_max_column
@@ -167,12 +167,23 @@ function paired.poles(state)
    local collector=collector_rows[i] and collector_rows[i][x]
    local py=collector and 2*y+1-collector or y
    place(x,py,"pole",state.pole_choice,state.builder_power_poles)
+   if state._beacon_rows and state.beacon_pipe_gap>0 then
+    -- Fluid channels widen the column pitch beyond a medium pole's wire.
+    place(x+M.size,py,"pole",state.pole_choice,state.builder_power_poles)
+   end
   end
   place(join_x,y,"pole",state.pole_choice,state.builder_power_poles)
   if previous then for py=previous+step,y-1,step do
    place(join_x,py,"pole",state.pole_choice,state.builder_power_poles)
   end end
   previous=y
+ end
+ -- Fill the one-tile gaps in each beacon column. Corridor poles reach
+ -- the drills, but cannot supply the middle of a back-to-back drill block.
+ for _,beacon in ipairs(state.builder_beacons or {}) do
+  local proto=prototypes.entity[beacon.name]
+  place(beacon.grid_x,beacon.row_y-1,"pole",state.pole_choice,state.builder_power_poles)
+  place(beacon.grid_x,beacon.row_y+proto.tile_height,"pole",state.pole_choice,state.builder_power_poles)
  end
  rows.prune_poles(state)
  if state.lamp_choice then for _,p in ipairs(state.builder_power_poles) do

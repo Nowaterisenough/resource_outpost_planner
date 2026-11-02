@@ -34,32 +34,6 @@ function rows.specifications(state, attempt, selected)
 			end
 		end
 	end
-	if state._capacity_beacon_slots then
-		local specs={}
-		for _,slot in ipairs(attempt.beacon_slots) do
-			-- The lower edge of each 5x5 pocket supplies this row and the
-			-- following row, including across a two-tile belt corridor.
-			local x,y=slot.x+floor((state.miner.size-w)/2),slot.y+state.miner.size-h
-			local spec={name=state.beacon_choice,quality=state.beacon_quality_choice,thing="beacon",
-				grid_x=x+(w-1)/2,grid_y=y+(h-1)/2,extent_w=w/2,extent_h=h/2,row_x=x,row_y=y}
-			local _,box=rows.position(state,spec)
-			local area={left_top={x=box.left_top.x-distance,y=box.left_top.y-distance},
-				right_bottom={x=box.right_bottom.x+distance,y=box.right_bottom.y+distance}}
-			local affected,collision=false,false
-			for bx=floor(area.left_top.x/cell_size),floor(area.right_bottom.x/cell_size) do
-				for by=floor(area.left_top.y/cell_size),floor(area.right_bottom.y/cell_size) do
-					for _,i in ipairs(buckets[bx..","..by] or {}) do
-						if overlap(area,boxes[i]) then affected=true end
-						if overlap(box,boxes[i]) then collision=true end
-					end
-				end
-			end
-			if affected and not collision and (not selected or not obstacles.blocked_box(selected,box)) then
-				specs[#specs+1]=spec
-			end
-		end
-		return specs
-	end
 	local strips = {}
 	for _,miner in ipairs(attempt.miners) do
 		for _,x in ipairs{miner.x-w-gap,miner.x+state.miner.size+gap} do
@@ -72,12 +46,43 @@ function rows.specifications(state, attempt, selected)
 	for _,strip in pairs(strips) do ordered[#ordered+1] = strip end
 	table.sort(ordered,function(a,b) return a.x<b.x end)
 	local specs = {}
+	local corridors={}
+	if state._capacity_tight_big then
+		for i=1,#attempt.lane_layout,2 do
+			local start=attempt.lane_layout[i].y+state.miner.size
+			local following=attempt.lane_layout[i+1]
+			local gap=state._capacity_row_gaps and state._capacity_row_gaps[i] or 1
+			corridors[#corridors+1]={start,following and following.y or start+gap}
+		end
+	end
+	local function clear_corridor(y)
+		for _,c in ipairs(corridors) do if y<c[2] and y+h>c[1] then return false end end
+		return true
+	end
 	for _,strip in ipairs(ordered) do
 		local y1 = attempt.sy+floor((strip.y1-attempt.sy)/h)*h
 		local y2 = attempt.sy+ceil((strip.y2-attempt.sy)/h)*h
+		local positions={}
+		if state._capacity_tight_big then
+			-- Pack each side of the belt corridor independently. Spread the
+			-- remainder between towers so both ends of a drill block get coverage.
+			local first,last=strip.y1-h+1,strip.y2+h-1
+			local function segment(a,b)
+				local count=floor((b-a)/h)
+				for i=0,count-1 do
+					positions[#positions+1]=a+(count==1 and floor((b-a-h)/2) or floor(i*(b-a-h)/(count-1)))
+				end
+			end
+			for _,c in ipairs(corridors) do
+				if c[1]>first then segment(first,min(last,c[1])) end
+				first=max(first,c[2]);if first>=last then break end
+			end
+			if first<last then segment(first,last) end
+		else for y=y1,y2-1,h do positions[#positions+1]=y end end
 		local function phase(offset)
 			local candidates,covered,effects,blocked = {},{},0,false
-			for y=y1+offset,y2-1+offset,h do
+			for _,row in ipairs(positions) do
+				local y=row+offset
 				local spec={name=state.beacon_choice,quality=state.beacon_quality_choice,thing="beacon",
 					grid_x=strip.x+(w-1)/2,grid_y=y+(h-1)/2,extent_w=w/2,extent_h=h/2,row_x=strip.x,row_y=y}
 				local _,box=rows.position(state,spec)
@@ -92,7 +97,7 @@ function rows.specifications(state, attempt, selected)
 						end
 					end
 				end
-				if next(affected) and not collision then
+				if next(affected) and not collision and clear_corridor(y) then
 					if selected and obstacles.blocked_box(selected,box) then blocked=true
 					else
 						candidates[#candidates+1]=spec

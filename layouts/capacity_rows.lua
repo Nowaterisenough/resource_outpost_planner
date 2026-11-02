@@ -53,11 +53,9 @@ function layout:initialize_capacity_layout(state)
 	state.beacon_pipe_gap=state._capacity_fluid and (state._beacon_rows or state.miner.size<5) and 1 or 0
 	local proto=state._beacon_rows and prototypes.entity[state.beacon_choice]
 	state._capacity_beacon_width=proto and proto.tile_width or 0
-	-- Big compact layouts put beacons in local drill-sized pockets instead of
-	-- opening a three-tile-wide strip through the whole patch.
-	state._capacity_beacon_slots=state._capacity_tight_big and state._beacon_rows
-		and proto.tile_width<=3 and proto.tile_height<=3
-	if state._capacity_beacon_slots then state._capacity_beacon_width=0;state.beacon_pipe_gap=0 end
+	-- Reserve a shared beacon column on each side of every drill column.
+	-- Facing rows retain their one/two-tile output corridor.
+	state._capacity_beacon_slots=nil
 	state.miner_stride=state.miner.size+state._capacity_beacon_width+2*state.beacon_pipe_gap
 	if reuse then
 		-- Changing lane spacing does not change ore convolution or forbidden tiles.
@@ -72,7 +70,7 @@ end
 
 function layout:_placement_attempt(state,attempt)
 	local M,C=state.miner,state.coords
-	local miners,postponed,lanes,beacon_slots={},{},{},{}
+	local miners,postponed,lanes={},{},{}
 	local H=common.init_heuristic_values()
 	local sx,sy=attempt[1],attempt[2]
 	local bx,by,b2x,b2y=math.huge,math.huge,-math.huge,-math.huge
@@ -89,9 +87,7 @@ function layout:_placement_attempt(state,attempt)
 		while x<=C.tw+M.size do
 			local tile=state.grid:get_tile(x,y)
 			price=price+M.area
-			if state._capacity_beacon_slots and line%2==1 and column%3==2 then
-				beacon_slots[#beacon_slots+1]={x=x,y=y}
-			elseif tile and not tile.forbidden and tile.neighbors_outer>0 then
+			if tile and not tile.forbidden and tile.neighbors_outer>0 then
 				local miner={x=x,y=y,origin_x=x+M.x,origin_y=y+M.y,tile=tile,line=line,column=column,direction=state._capacity_tight_big and line%2==0 and N or S}
 				if heuristic(tile) then
 					miners[#miners+1]=miner
@@ -106,7 +102,7 @@ function layout:_placement_attempt(state,attempt)
 		line=line+1
 	end
 	local result={sx=sx,sy=sy,bx=bx,by=by,b2x=b2x,b2y=b2y,miners=miners,postponed=postponed,
-		lane_layout=lanes,beacon_slots=beacon_slots,heuristics=H,price=price,heuristic_score=0}
+		lane_layout=lanes,heuristics=H,price=price,heuristic_score=0}
 	common.finalize_heuristic_values(result,H,C)
 	return result
 end

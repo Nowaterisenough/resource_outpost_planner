@@ -372,6 +372,20 @@ local function large_audit()
     if b.left_top.x-r<box.right_bottom.x and b.right_bottom.x+r>box.left_top.x
      and b.left_top.y-r<box.right_bottom.y and b.right_bottom.y+r>box.left_top.y then n=n+1 end
    end
+   local actual=drill.get_beacons() or {}
+   assert(#actual==n,"native beacon influence differs from geometric coverage")
+   assert(drill.beacons_count==n,"native beacon count differs from connected beacons")
+   local left,right=false,false
+   local lateral=(c.direction=="north" or c.direction=="south") and "x" or "y"
+   for _,tower in ipairs(actual) do
+    left=left or tower.position[lateral]<drill.position[lateral]
+    right=right or tower.position[lateral]>drill.position[lateral]
+    assert(tower.energy>0 and tower.get_module_inventory().get_item_count{name="speed-module-3",quality=c.beacon_module_quality or "normal"}>0,"beacon has no power or modules")
+   end
+   if c.beacon_sides then
+    assert(left and right,"drill lacks native beacon coverage on one lateral side")
+    assert(n>=(c.min_beacons or 4),"compact drill has too few side beacons: "..n)
+   end
    if n==0 then counts.beacon_uncovered=counts.beacon_uncovered+1 end
    counts.beacons_per_drill_min=math.min(counts.beacons_per_drill_min,n)
    counts.beacons_per_drill_max=math.max(counts.beacons_per_drill_max,n)
@@ -541,7 +555,7 @@ local function large_step()
     previous=lane.y
    end
    if large_state._capacity_tight_big then
-    assert(large_state.miner_stride==5,"compact big-drill columns contain a reserved strip")
+    assert(large_state.miner_stride==5+large_state._capacity_beacon_width+2*large_state.beacon_pipe_gap,"compact big-drill columns contain unused spacing")
     local split_buses=0
     for _,belt in ipairs(large_state.belts) do
      if belt.is_output and belt.y>belt.source_y then
