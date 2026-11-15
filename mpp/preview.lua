@@ -26,10 +26,33 @@ local function cancel_render(draft)
 end
 
 function preview.dispose_task(state)
-	if state.blueprint and state.blueprint.valid_for_read then state.blueprint.clear() end
+	if state.blueprint and state.blueprint.valid and state.blueprint.valid_for_read then state.blueprint.clear() end
 	if state.blueprint_inventory and state.blueprint_inventory.valid then state.blueprint_inventory.destroy() end
 	if state._preview_rectangle and state._preview_rectangle.valid then state._preview_rectangle.destroy() end
 	destroy(state._render_objects)
+end
+
+function preview.remove_player(player_index)
+	-- on_player_removed runs after the LuaPlayer becomes invalid. Dispose only
+	-- owned resources here; normal cancellation also touches the cursor and GUI.
+	for _, tasks in pairs{storage.tasks, storage.immediate_tasks} do
+		for index=#tasks,1,-1 do
+			local state=tasks[index]
+			if not state.player.valid or state.player.index==player_index then
+				preview.dispose_task(state)
+				table.remove(tasks,index)
+			end
+		end
+	end
+	local data=storage.players[player_index]
+	if not data then return end
+	if data.preview then
+		cancel_render(data.preview)
+		destroy(data.preview.renderings)
+		data.preview=nil
+	end
+	if data.last_state then preview.dispose_task(data.last_state) end
+	destroy(data.selection_render)
 end
 
 local function stop_tasks(player_index)

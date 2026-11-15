@@ -452,9 +452,10 @@ end)
 
 script.on_event(defines.events.on_player_removed, function(e)
 	---@cast e EventData.on_player_removed
-	preview.cancel(storage.players[e.player_index],true)
-	if storage.players[e.player_index].blueprint_items then
-		storage.players[e.player_index].blueprint_items.destroy()
+	preview.remove_player(e.player_index)
+	local data = storage.players[e.player_index]
+	if data and data.blueprint_items and data.blueprint_items.valid then
+		data.blueprint_items.destroy()
 	end
 	storage.players[e.player_index] = nil
 end)
