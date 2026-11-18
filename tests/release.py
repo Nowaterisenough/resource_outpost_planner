@@ -146,6 +146,16 @@ class ReleaseTests(unittest.TestCase):
         self.assertEqual(m1, m2)
         self.assertEqual((self.out / m1["archive"]).read_bytes(), (out2 / m2["archive"]).read_bytes())
 
+    def test_existing_tag_recognizes_legacy_windows_metadata(self):
+        manifest = self.prepare()
+        commit = release.release_commit(self.root, self.out, manifest)
+        path = self.out / "changelog.txt"
+        path.write_bytes(path.read_bytes().replace(b"\n", b"\r\n"))
+        self.assertEqual(release.existing_release_commit(self.root, self.out, manifest), commit)
+        path.write_bytes(path.read_bytes() + b"different release\r\n")
+        with self.assertRaisesRegex(release.ReleaseError, "metadata differs"):
+            release.existing_release_commit(self.root, self.out, manifest)
+
     def test_explicit_version_and_notes_survive_retry_even_without_metadata_diff(self):
         self.info["version"] = "2.0.0"
         (self.root / "info.json").write_text(json.dumps(self.info, indent=2) + "\n")

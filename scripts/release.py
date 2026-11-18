@@ -111,8 +111,8 @@ def prepare(root, output):
     output.mkdir(parents=True, exist_ok=True)
     # Package the prospective version without leaving local source edits behind.
     try:
-        (root / "info.json").write_text(info_text)
-        (root / "changelog.txt").write_text(changelog)
+        (root / "info.json").write_text(info_text, encoding="utf-8", newline="\n")
+        (root / "changelog.txt").write_text(changelog, encoding="utf-8", newline="\n")
         archive = package_mod.package(root, output)
     finally:
         for p, data in original.items():
@@ -121,8 +121,8 @@ def prepare(root, output):
     manifest = dict(name=info["name"], title=info["title"], version=info["version"],
                     tag="v" + info["version"], source_commit=source, archive=archive.name,
                     sha256=hashlib.sha256(data).hexdigest(), sha1=hashlib.sha1(data).hexdigest())
-    (output / "info.json").write_text(info_text)
-    (output / "changelog.txt").write_text(changelog)
+    (output / "info.json").write_text(info_text, encoding="utf-8", newline="\n")
+    (output / "changelog.txt").write_text(changelog, encoding="utf-8", newline="\n")
     (output / "notes.md").write_text(notes)
     (output / "SHA256SUMS").write_text(f"{manifest['sha256']}  {archive.name}\n")
     (output / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
@@ -142,10 +142,10 @@ def verify(root, output):
     data = (output / m["archive"]).read_bytes()
     if hashlib.sha256(data).hexdigest() != m["sha256"] or hashlib.sha1(data).hexdigest() != m["sha1"]:
         raise ReleaseError("Release archive checksum mismatch")
-    info = json.loads((output / "info.json").read_text())
+    info = json.loads((output / "info.json").read_text(encoding="utf-8"))
     if (info["name"], info["version"]) != (m["name"], m["version"]):
         raise ReleaseError("Release metadata mismatch")
-    if (output / "notes.md").read_text() != release_notes((output / "changelog.txt").read_text(), m["version"]):
+    if (output / "notes.md").read_text() != release_notes((output / "changelog.txt").read_text(encoding="utf-8"), m["version"]):
         raise ReleaseError("Release notes do not match the changelog")
     if (output / "SHA256SUMS").read_text() != f"{m['sha256']}  {m['archive']}\n":
         raise ReleaseError("Release checksum file mismatch")
@@ -314,7 +314,11 @@ def existing_release_commit(root, output, m):
             if set(changed) - {"info.json", "changelog.txt"}:
                 raise ReleaseError("Release tag changes code beyond version metadata")
         for path in ("info.json", "changelog.txt"):
-            if run("git", "show", f"{commit}:{path}", cwd=root, binary=True) != (output / path).read_bytes():
+            # A prepared release from an older Windows runner can already be
+            # tagged with Git-normalized LF while its immutable artifact has CRLF.
+            tagged = run("git", "show", f"{commit}:{path}", cwd=root, binary=True)
+            prepared = (output / path).read_bytes()
+            if tagged.replace(b"\r\n", b"\n") != prepared.replace(b"\r\n", b"\n"):
                 raise ReleaseError("Release tag metadata differs from the tested artifact")
         return commit
     return None
