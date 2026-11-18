@@ -1,6 +1,12 @@
 -- Run in three isolated native-server processes to exercise real save/reload.
 local cache_test=require("mpp.preview_output_cache")
 require("mpp.preview_construction").budget=128 -- force several serializable construction batches in this fixture
+local renderer=require("mpp.preview_renderer")
+local render_step=renderer.step
+renderer.step=function(draft,job,limit)
+ if draft.render_job==job then limit=math.min(limit,128) end
+ return render_step(draft,job,limit)
+end
 local original_refresh=cache_test.refresh
 cache_test.refresh=function(state)
  if not state._output_work then storage.preview_cache_test.refreshes=storage.preview_cache_test.refreshes+1 end
@@ -84,7 +90,7 @@ script.on_nth_tick(1,function()
   assert(v.ready and t.refreshes==1,"initial output did not reuse mining geometry")
   t.expected=snapshot(v.specs);preview.request(d);t.phase="full"
  elseif t.phase=="full" then
-  error("save/reload fixture did not produce a chunked render")
+  error("save/reload fixture did not produce a chunked render: "..#v.specs.." specs, error="..serpent.line(v.error))
  elseif t.phase=="resume-render" then
   assert(v.ready and v.output_basis and snapshot(v.specs)==t.expected,"resumed rendering changed the mining layout")
   t.before=t.refreshes
