@@ -28,3 +28,16 @@ assert(#storage.tasks==1 and storage.tasks[1]==still_valid and not still_valid.d
 assert(#storage.immediate_tasks==0 and extension.disposed and partial.disposed and new.order_cancelled and not new.valid)
 assert(data.last_state==prior and prior._collected_ghosts[1]==old and not prior.belts and #data.belt_planner_stack==0)
 assert(data.choices.belt_choice=="transport-belt" and data.choices.miner_choice=="electric-mining-drill")
+
+local function ore(kind,category)
+	return {resource_category=category,mineable_properties={products=kind and {{type=kind}} or nil}}
+end
+local resources={gas=ore("fluid","mixed"),ore=ore("item","mixed"),empty=ore(nil,"mixed"),oil=ore("fluid","liquid")}
+local drills={multi={resource_categories={mixed=true,liquid=true},fluidbox_prototypes={}},
+	fluid_only={resource_categories={liquid=true},fluidbox_prototypes={}}}
+prototypes.get_entity_filtered=function(filter) return filter[1].type=="resource" and resources or drills end
+local enums=require('mpp.enums')
+local miners,categories=enums.get_available_miners()
+assert(miners.multi and not miners.fluid_only and categories.mixed and not categories.liquid)
+assert(enums.is_solid_resource("ore") and not enums.is_solid_resource("empty") and not enums.is_solid_resource("gas"))
+print("Configuration removal: stale equipment, partial build rollback, Undo ownership and mixed resource categories passed")

@@ -236,12 +236,12 @@ local function process_entities(entities, available_resource_categories, resourc
 	local x2, y2 = -math.huge, -math.huge
 	local _, cached_resource_categories = enums.get_available_miners()
 	for _, entity in pairs(entities) do
-		local name, proto = entity.name, entity.prototype
-		local category = proto.resource_category
+		local name = entity.name
+		local category = found_resources[name] or entity.prototype.resource_category
 
 		found_resources[name] = category
 		if available_resource_categories[category]
-			and (resource_filter and resource_filter(entity) or not resource_filter and cached_resource_categories[category]) then
+			and (resource_filter and resource_filter(entity) or not resource_filter and cached_resource_categories[category] and enums.is_solid_resource(name)) then
 			counts[name] = 1 + (counts[name] or 0)
 			filtered:push(entity)
 			local position = entity.position
