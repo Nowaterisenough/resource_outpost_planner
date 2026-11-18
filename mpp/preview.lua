@@ -140,7 +140,7 @@ function preview.invalidate(data,err)
 	preview.update_gui(data)
 end
 
-function preview.request(data,output_change)
+function preview.request(data,output_change,typing)
 	local draft=data.preview
 	if not draft or draft.applying then return end
 	if not output_change then draft.output_basis=nil end
@@ -165,7 +165,7 @@ function preview.request(data,output_change)
 	draft.error=nil
 	draft.warning=nil
 	-- Output clicks are discrete commands; only rapidly edited settings need debouncing.
-	draft.refresh_at=game.tick+(output_change and 1 or 8)
+	draft.refresh_at=game.tick+(output_change and not typing and 1 or 8)
 	preview.update_gui(data)
 	script.on_event(defines.events.on_tick,task_runner_handler)
 end

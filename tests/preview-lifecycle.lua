@@ -168,6 +168,9 @@ for i=1,60 do
 	assert(preview.set_belt_target(data,{position={x=0,y=-10},direction=0,mirror=false}))
 end
 assert(draft.revision==revision and draft.refresh_at==deadline,"held clicks keep postponing or canceling the plan")
+preview.request(data,true,true)
+assert(draft.output_change and draft.refresh_at==game.tick+8,"typing output counts did not debounce cached replans")
+revision=draft.revision
 preview.set_belt_target(data,{position={x=1,y=-10},direction=0})
 assert(draft.revision==revision+1,"moving the output is ignored")
 data.choices.output_belt_count_choice=8

@@ -216,7 +216,7 @@ local function cursor_stack_check(e)
 		return
 	end
 
-	if player_data.input_mode then
+	if player_data.input_mode and not (frame and frame.valid and frame.visible) then
 		gui.show_interface(player)
 		algorithm.on_gui_open(player_data)
 	end
@@ -277,8 +277,10 @@ script.on_event(defines.events.on_research_finished, function(event)
 	if #qualities_to_unhide == 0 then return end
 	
 	conf.unhide_qualities_for_force(event.research.force, qualities_to_unhide)
-	for player_index, player_data in pairs(storage.players) do
-		gui.update_quality_sections(player_data)
+	for _, player in pairs(event.research.force.players) do
+		local data = storage.players[player.index]
+		gui.update_quality_sections(data)
+		preview.request(data)
 	end
 end)
 

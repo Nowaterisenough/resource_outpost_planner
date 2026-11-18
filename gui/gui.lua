@@ -1600,12 +1600,14 @@ local function update_selections(player)
 	player_data.belt_load_invalid=not belt_capacity.valid_range(belt_capacity.ratios(choices))
 	player_data.gui.output_station_toggle.state=choices.output_station_choice
 	player_data.gui.output_balance_toggle.state=choices.output_station_choice or choices.output_balance_choice
-	player_data.gui.output_count.text=tostring(choices.output_station_choice and train_station.output_count(choices) or choices.output_belt_count_choice)
-	player_data.gui.output_train_fields.locomotive.text=tostring(choices.output_locomotive_count_choice or 2)
-	player_data.gui.output_train_fields.wagon.text=tostring(choices.output_wagon_count_choice or 4)
-	player_data.output_station_invalid_fields={}
-	player_data.output_station_count_invalid=false
-	player_data.output_count_invalid=false
+	if not player_data.output_count_invalid or choices.output_station_choice then
+		player_data.gui.output_count.text=tostring(choices.output_station_choice and train_station.output_count(choices) or choices.output_belt_count_choice)
+	end
+	for field,element in pairs(player_data.gui.output_train_fields) do
+		if not (player_data.output_station_invalid_fields or {})[field] then
+			element.text=tostring(choices["output_"..field.."_count_choice"])
+		end
+	end
 	player_data.gui.output_count.enabled=can_output and choices.output_balance_choice
 	update_debugging_selection(player_data)
 	update_quality_sections(player_data)
@@ -1780,7 +1782,13 @@ local function on_gui_click(event)
 		local disabled = evt_ele_tags.mpp_optional and (last_value == value or event.button == defines.mouse_button_type.right)
 		player_data.choices[choice] = disabled and "none" or value
 		if action=="miner" then algorithm.select_miner(player_data,value) end
-		update_selections(player)
+		if action=="direction" then update_direction_section(player_data)
+		elseif action=="pipe" then update_pipe_selection(player_data)
+		elseif action=="pole" then update_pole_selection(player_data)
+		elseif action=="logistics" then update_logistics_selection(player_data)
+		elseif action=="belt" then update_belt_selection(player)
+		elseif action=="space_belt" then update_space_belt_selection(player)
+		else update_selections(player) end
 	elseif evt_ele_tags["mpp_terrain_mode"] then
 		abort_blueprint_mode(player)
 		local value = evt_ele_tags.value
@@ -2050,7 +2058,7 @@ script.on_event(defines.events.on_gui_text_changed, function(event)
 		event.element.tooltip=valid and {"mpp.output_station_tooltip"} or {"mpp.output_station_count_error",8,16}
 		if data.choices.output_station_choice then
 			data.gui.output_count.text=tostring(train_station.output_count(data.choices))
-			preview.request(data,true)
+			preview.request(data,true,true)
 			update_output_cursor(game.get_player(event.player_index),data)
 			if not data.output_station_count_invalid and data.input_mode=="output" then input_mode.output(data,game.get_player(event.player_index)) end
 		end
@@ -2062,7 +2070,7 @@ script.on_event(defines.events.on_gui_text_changed, function(event)
 			data.output_count_invalid=false
 			data.choices.output_belt_count_choice=count
 			event.element.tooltip={"mpp.output_balance_tooltip"}
-			preview.request(data,true)
+			preview.request(data,true,true)
 			update_output_cursor(game.get_player(event.player_index),data)
 		else
 			data.output_count_invalid=true
