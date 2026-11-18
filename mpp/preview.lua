@@ -39,6 +39,7 @@ function preview.remove_player(player_index)
 		for index=#tasks,1,-1 do
 			local state=tasks[index]
 			if not state.player.valid or state.player.index==player_index then
+				if state.oil_job and not state.preview_only then algorithm.layouts.oil:rollback(state) end
 				preview.dispose_task(state)
 				table.remove(tasks,index)
 			end

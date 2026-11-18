@@ -19,26 +19,6 @@ local function round(x)
   return math.floor(x+0.5)
 end
 
-local function IsEmpty(t)
-  -- Returns true is a table is empty
-  for _, _ in pairs(t)
-  do
-    return false
-  end
-
-  return true
-end
-
-local function First(t)
-  -- Returns the first value from a table
-  for _, v in pairs(t)
-  do
-    return v
-  end
-
-  return nil
-end
-
 local function MoreThanOne(t)
   -- Returns true if the given table has more than one value
   local count = 0
@@ -54,7 +34,7 @@ local function MoreThanOne(t)
 end
 
 local function CopyTable(t)
-  copy = {}
+  local copy = {}
 
   for key, val in pairs(t)
   do
@@ -187,7 +167,7 @@ end
 local function AddLandfillUnder(args)
   local player = args.player
   local ghosts = args.ghosts
-  local filled = {}
+  local filled = args.filled
 
   for _, ghost in pairs(ghosts)
   do
@@ -311,304 +291,110 @@ local function AnySpotForbidden(args)
   return false
 end
 
-local function AddForbiddenPoints(args)
-  local min_x = args.bounds.min_x
-  local min_y = args.bounds.min_y
-  local max_x = args.bounds.max_x
-  local max_y = args.bounds.max_y
-  local surface = args.surface
-  local force = args.force
-  local player_data = args.player_data
-  local forbidden = args.forbidden
-
-  local collision_mask = prototypes.entity.pipe.collision_mask.layers
-
-  if args.obstacles then
-    for x=min_x,max_x do
-      for y=min_y,max_y do
-        local box={left_top={x=x-0.49,y=y-0.49},right_bottom={x=x+0.49,y=y+0.49}}
-        if obstacles.blocked_box(args.obstacles,box) then forbidden[Pos2Str{x=x,y=y}]=true end
+-- Resume from tile coordinates. Per-position queries preserve collision and force filters.
+local function scan(job, state)
+  local surface, force, settings = state.surface, state.player.force, state.oil_settings
+  local bounds = job.bounds
+  local layers = prototypes.entity.pipe.collision_mask.layers
+  local x1, y1 = job.scan_x or bounds.min_x, job.scan_y or bounds.min_y
+  local x2, y2 = math.min(x1+15,bounds.max_x), math.min(y1+15,bounds.max_y)
+  local index = obstacles.collect(surface, {{x1-.5,y1-.5},{x2+.5,y2+.5}}, job.ignored, state)
+  for x=x1,x2 do
+    for y=y1,y2 do
+      local pos = {x=x, y=y}
+      if obstacles.blocked_bounds(index, x-.49,y-.49,x+.49,y+.49)
+        or (not settings.remove_existing and (surface.count_entities_filtered{
+          position=pos, collision_mask=layers, force=force} > 0 or surface.count_entities_filtered{
+          position=pos, type="entity-ghost", force=force} > 0))
+        or (not settings.add_landfill and surface.count_tiles_filtered{
+          position=pos, radius=.5, collision_mask=layers} > 0) then
+        job.forbidden[Pos2Str(pos)] = true
       end
     end
   end
+  job.scan_x, job.scan_y = x1, y2+1
+  if job.scan_y>bounds.max_y then job.scan_x,job.scan_y=x2+1,bounds.min_y end
+  return job.scan_x>bounds.max_x
+end
 
-  local function check_for(predicate)
-    for x = min_x,max_x
-    do
-      for y = min_y,max_y
-      do
-        local pos = {x = x, y = y}
-        if predicate(pos)
-        then
-          forbidden[Pos2Str(pos)] = true
-        end
+local function in_bounds(bounds, pos)
+  return pos.x >= bounds.min_x and pos.x <= bounds.max_x
+     and pos.y >= bounds.min_y and pos.y <= bounds.max_y
+end
+
+-- Partition candidate outlets by connectivity. The queue and visited set are
+-- part of the task so joining clients resume the same wave of the flood fill.
+local function partition_step(tree)
+  if not tree.remaining then
+    tree.remaining = {}
+    for _,target in ipairs(tree.targets) do
+      for _,pos in pairs(target) do
+        if not tree.forbidden[Pos2Str(pos)] then table.insert(tree.remaining,pos) end
       end
     end
+    tree.best_count = 0
   end
-
-  if not player_data.remove_existing
-  then
-    check_for(function(pos)
-      return surface.count_entities_filtered{
-          position=pos,
-          collision_mask=collision_mask,
-          force=force,
-        } > 0 or
-        surface.count_entities_filtered{
-          position=pos,
-          type="entity-ghost",
-          force=force,
-        } > 0
-      end)
+  if not tree.queue then
+    if #tree.remaining == 0 then return true end
+    local origin = tree.remaining[1]
+    tree.queue, tree.head, tree.visited = {origin}, 1, {[Pos2Str(origin)]=true}
   end
-
-  if not player_data.add_landfill
-  then
-    check_for(function(pos)
-      return surface.count_tiles_filtered{
-          position=pos,
-          radius=0.5,
-          collision_mask=collision_mask,
-        } > 0
-      end)
+  for _=1,512 do
+    local pos = tree.queue[tree.head]
+    if not pos then
+      local other = {}
+      for _,p in ipairs(tree.remaining) do
+        if not tree.visited[Pos2Str(p)] then table.insert(other,p) end
+      end
+      local count = #tree.remaining-#other
+      if count > tree.best_count then tree.best_count,tree.reachable=count,tree.visited end
+      tree.remaining, tree.queue, tree.visited = other, nil, nil
+      return #other == 0
+    end
+    tree.head = tree.head+1
+    for _,off in ipairs(orthogonal_neighbours) do
+      local p = {x=pos.x+off.x, y=pos.y+off.y}
+      local key = Pos2Str(p)
+      if in_bounds(tree.bounds,p) and not tree.visited[key] and not tree.forbidden[key] then
+        tree.visited[key]=true
+        table.insert(tree.queue,p)
+      end
+    end
   end
 end
 
-local function FloodFill(args)
-  local min_x = args.bounds.min_x
-  local min_y = args.bounds.min_y
-  local max_x = args.bounds.max_x
-  local max_y = args.bounds.max_y
-  local origin = args.origin
-  local adjacency = args.adjacency
-  local forbidden = args.forbidden
-
-  local to_check = {origin}
-  local next_to_check = {}
-  local reachable = {[Pos2Str(origin)] = true}
-
-  while not IsEmpty(to_check)
-  do
-    for _, pos in pairs(to_check)
-    do
-      for _, off in pairs(adjacency)
-      do
-        local candidate = { x = pos.x + off.x, y = pos.y + off.y }
-        local candidate_s = Pos2Str(candidate)
-
-        local valid_and_new = (
-          not reachable[candidate_s]
-          and candidate.x >= min_x
-          and candidate.x <= max_x
-          and candidate.y >= min_y
-          and candidate.y <= max_y
-          and not forbidden[candidate_s])
-
-        if valid_and_new
-        then
-          table.insert(next_to_check, candidate)
-          reachable[candidate_s] = true
-        end
-      end
-    end
-
-    to_check = next_to_check
-    next_to_check = {}
-  end
-
-  return reachable
-end
-
-local function SolveSteinerTree(args)
-  local min_x = args.bounds.min_x
-  local min_y = args.bounds.min_y
-  local max_x = args.bounds.max_x
-  local max_y = args.bounds.max_y
-  local targets = args.targets
-  local adjacency = args.adjacency
-  local forbidden = args.forbidden
+-- Returns nil while a search is in progress, or its final tree/failure.
+local function SolveSteinerTree(args, debug)
+  local targets, adjacency = args.targets, args.adjacency
   local forbid_adjacency = args.forbid_adjacency or {}
-  local skip_flood_fill = args.skip_flood_fill
-  local choose_subtarget = args.choose_subtarget
-  local debug_viz_surface = args.debug_viz_surface
-
-  -- Sanity check args
-  assert(min_x < max_x, "Invalid x range")
-  assert(min_y < max_y, "Invalid y range")
-  assert(#targets, "Must have at least one target")
-
-  if debug_viz_surface ~= nil
-  then
-    for _, target in pairs(targets)
-    do
-      for i, subtarget in pairs(target)
-      do
-        local debug_pos = { x = subtarget.x + 0.25, y = subtarget.y }
-        local color = {1,1,1}
-        if forbidden[Pos2Str(subtarget)]
-        then
-          color = {1, 0, 0}
-        end
-        rendering.draw_text{
-          text="s",
-          surface=debug_viz_surface,
-          target=debug_pos,
-          color=color,
-        }
+  if not args.paths then
+    if not args.skip_flood_fill and not partition_step(args) then return end
+    local unreachable = {}
+    for i,target in ipairs(targets) do
+      for k,pos in pairs(target) do
+        local key = Pos2Str(pos)
+        if args.forbidden[key] or not in_bounds(args.bounds,pos)
+          or (not args.skip_flood_fill and not (args.reachable and args.reachable[key])) then target[k]=nil end
       end
+      if not next(target) then table.insert(unreachable,i) end
     end
+    if #unreachable>0 then return {failed=true,unreachable_targets=unreachable} end
+    args.remaining, args.reachable = nil, nil
+    args.nearest, args.neighbourhoods, args.indices = {}, {}, {}
+    args.paths, args.extra_forbidden, args.choices = {}, {}, {}
   end
-
-  local reachable = {}
-
-  if args.skip_flood_fill
-  then
-    -- If we're asked to skip the flood fill then we instead build a reachable
-    -- array that's simply all the non-forbidden points within bounds
-    for x = min_x,max_x
-    do
-      for y = min_y,max_y
-      do
-        local pos = {x = x, y = y}
-        local pos_s = Pos2Str(pos)
-        if not forbidden[pos_s]
-        then
-          reachable[pos_s] = true
-        end
-      end
-    end
-  else
-    -- First, we want to partition the subtargets into connected components.
-    -- This avoids the issue where we pick a subtarget for a particular target
-    -- and it turns out to not be able to connect to other ones.  Do this by
-    -- flood filling from an arbitrary subtarget and seeing which others we
-    -- reach.  Then repeat until we've covered all of them.
-    local all_subtargets = {}
-    local unreachable_targets = {}
-
-    -- Remove forbidden points from the targets whilst adding the others to the
-    -- big list
-    for target_idx, target in pairs(targets)
-    do
-      for i, subtarget in pairs(target)
-      do
-        if forbidden[Pos2Str(subtarget)]
-        then
-          target[i] = nil
-        else
-          table.insert(all_subtargets, subtarget)
-        end
-      end
-
-      if IsEmpty(target)
-      then
-        table.insert(unreachable_targets, target_idx)
-      end
-    end
-
-    if #unreachable_targets > 0
-    then
-      return {failed=true, unreachable_targets=unreachable_targets}
-    end
-
-    local partitions = {}
-    while not IsEmpty(all_subtargets)
-    do
-      local start_point
-      for _, subtarget in pairs(all_subtargets)
-      do
-        start_point = subtarget
-        break
-      end
-
-      assert(start_point ~= nil)
-
-      local filled = FloodFill{
-        origin=start_point,
-        bounds=args.bounds,
-        adjacency=adjacency,
-        forbidden=forbidden,
-      }
-
-      local this_part = {}
-      local remaining_subtargets = {}
-
-      for _, subtarget in pairs(all_subtargets)
-      do
-        if filled[Pos2Str(subtarget)]
-        then
-          table.insert(this_part, subtarget)
-        else
-          table.insert(remaining_subtargets, subtarget)
-        end
-      end
-
-      table.insert(partitions, {subtargets=this_part, all_points=filled})
-
-      all_subtargets = remaining_subtargets
-    end
-
-    -- Now pick the largest partition to be the one we stick with
-    table.sort(partitions, function(l, r)
-      return #l.subtargets > #r.subtargets
-    end)
-
-    local chosen_partition = partitions[1]
-    reachable = chosen_partition.all_points
+  local nearest_target_to = args.nearest
+  local target_neighbourhoods = args.neighbourhoods
+  local target_neighbourhood_index = args.indices
+  local paths,extra_forbidden = args.paths,args.extra_forbidden
+  local function choose_subtarget(i,k,pos)
+    args.choices[i]={index=k,pos=pos}
   end
-
-  -- Eliminate all the subtargets that aren't in the largest partition
-  local unreachable_targets = {}
-  for target_idx, target in pairs(targets)
-  do
-    for i, subtarget in pairs(target)
-    do
-      if not reachable[Pos2Str(subtarget)]
-      then
-        target[i] = nil
-      end
-    end
-
-    if IsEmpty(target)
-    then
-      table.insert(unreachable_targets, target_idx)
-    end
+  if #targets==1 then
+    local k,pos=next(targets[1])
+    choose_subtarget(1,k,pos)
+    return {paths={[Pos2Str(pos)]=pos},choices=args.choices}
   end
-
-  if #unreachable_targets > 0
-  then
-    return {failed=true, unreachable_targets=unreachable_targets}
-  end
-
-  -- Special case for a single target
-  if #targets == 1
-  then
-    path_node = First(targets[1])
-    choose_subtarget(1, 1, path_node)
-    return {
-      paths = { [Pos2Str(path_node)] = path_node },
-    }
-  end
-
-  -- We spread out from each target in parallel until two collide, then join
-  -- those two along the shortest path.  As soon as we join two, they become
-  -- one combined target which we reset and spread out from once more.
-  -- Once all targets have combined into one large set, we are done.
-
-  -- For each i:
-  --   target_neighbourhoods[i] is an array of points in that neighbourhood,
-  --     sorted in increasing order of disance from the target
-  --   target_neighbourhood_index[i] is an index into target_neighbourhoods[i]
-  --     of the next entry to examine
-  local nearest_target_to = {}
-  local target_neighbourhoods = {}
-  local target_neighbourhood_index = {}
-
-  local paths = {}
-  -- Sometimes placing an item should forbid some nearby items.  We track these
-  -- extra forbidden locations here
-  local extra_forbidden = {}
-
   local function AddExtraForbidden(pos)
     for _, offset in pairs(forbid_adjacency)
     do
@@ -626,73 +412,66 @@ local function SolveSteinerTree(args)
     target_neighbourhood_index[target_idx] = nil
   end
 
-  for target_idx, target_set in pairs(targets)
-  do
-    target_neighbourhoods[target_idx] = {}
-    target_neighbourhood_index[target_idx] = 1
-
-    for subtarget_idx, subtarget in pairs(target_set)
+  if not args.seeded then
+    for target_idx, target_set in pairs(targets)
     do
-      subtarget_str = Pos2Str(subtarget)
-      if not extra_forbidden[subtarget_str]
-      then
-        if nearest_target_to[subtarget_str] ~= nil
-        then
-          -- Two targets share a square where a path could start.
-          -- Immediately pick the subtarget for both and merge their
-          -- target_neighbournoods accordingly
-          choose_subtarget(target_idx, subtarget_idx, subtarget)
-          ClearNeighbourhood(target_idx)
+      target_neighbourhoods[target_idx] = {}
+      target_neighbourhood_index[target_idx] = 1
 
-          other_target_info = nearest_target_to[subtarget_str]
-          other_target = other_target_info.target
-          other_subtarget_idx = other_target_info.subtarget_idx
-          if other_subtarget_idx ~= nil
+      for subtarget_idx, subtarget in pairs(target_set)
+      do
+        subtarget_str = Pos2Str(subtarget)
+        if not extra_forbidden[subtarget_str]
+        then
+          if nearest_target_to[subtarget_str] ~= nil
           then
-            choose_subtarget(other_target, other_subtarget_idx, subtarget)
-            ClearNeighbourhood(other_target)
-            nearest_target_to[subtarget_str] = {target=other_target}
-            target_neighbourhoods[other_target] = {}
-            target_neighbourhood_index[other_target] = 1
+            -- Two targets share a square where a path could start.
+            -- Immediately pick the subtarget for both and merge their
+            -- target_neighbournoods accordingly
+            choose_subtarget(target_idx, subtarget_idx, subtarget)
+            ClearNeighbourhood(target_idx)
+
+            other_target_info = nearest_target_to[subtarget_str]
+            other_target = other_target_info.target
+            other_subtarget_idx = other_target_info.subtarget_idx
+            if other_subtarget_idx ~= nil
+            then
+              choose_subtarget(other_target, other_subtarget_idx, subtarget)
+              ClearNeighbourhood(other_target)
+              nearest_target_to[subtarget_str] = {target=other_target}
+              target_neighbourhoods[other_target] = {}
+              target_neighbourhood_index[other_target] = 1
+              table.insert(
+                target_neighbourhoods[other_target],
+                {pos=subtarget, distance=1}
+              )
+              paths[subtarget_str] = subtarget
+              AddExtraForbidden(subtarget)
+            end
+            break
+          else
+            nearest_target_to[subtarget_str] = {
+              target=target_idx, subtarget_idx=subtarget_idx
+            }
             table.insert(
-              target_neighbourhoods[other_target],
+              target_neighbourhoods[target_idx],
               {pos=subtarget, distance=1}
             )
-            paths[subtarget_str] = subtarget
-            AddExtraForbidden(subtarget)
-            if debug_viz_surface ~= nil
-            then
-              rendering.draw_text{
-                text="x",
-                surface=debug_viz_surface,
-                target=subtarget,
-                color={1,1,1}
-              }
-            end
           end
-          break
-        else
-          nearest_target_to[subtarget_str] = {
-            target=target_idx, subtarget_idx=subtarget_idx
-          }
-          table.insert(
-            target_neighbourhoods[target_idx],
-            {pos=subtarget, distance=1}
-          )
         end
       end
     end
+
+    args.seeded = true
   end
 
-  --print(serpent.block({ min_x=min_x, max_x=max_x, min_y=min_y, max_y=max_y}))
-  --print("forbidden = "..serpent.block(forbidden))
-
   local function FindMergeTarget()
-    local process_distance = 1
-    while true
-    do
-      for i, target_neighbourhood in pairs(target_neighbourhoods)
-      do
+    local process_distance = args.distance or 1
+    local i = args.search_target or next(target_neighbourhoods)
+    local budget = math.max(1, math.floor(4096/#adjacency))
+    while true do
+      while i do
+        local target_neighbourhood = target_neighbourhoods[i]
         local idx = target_neighbourhood_index[i]
         assert(idx ~= nil, "idx == nil")
 
@@ -717,6 +496,12 @@ local function SolveSteinerTree(args)
             break
           end
 
+          if budget == 0 then
+            target_neighbourhood_index[i] = idx
+            args.search_target, args.distance = i, process_distance
+            return false
+          end
+          budget = budget-1
           local pos = next_neighbour.pos
           --print("idx = "..idx..", pos ("..pos.x..","..pos.y..")")
 
@@ -725,7 +510,7 @@ local function SolveSteinerTree(args)
             local candidate = { x = pos.x + off.x, y = pos.y + off.y }
             local candidate_s = Pos2Str(candidate)
             --print("Considering candidate ("..candidate.x..","..candidate.y.."), forbidden="..serpent.block(forbidden[candidate_s])..", valid="..serpent.block(valid))
-            if reachable[candidate_s] and not extra_forbidden[candidate_s]
+            if in_bounds(args.bounds,candidate) and not args.forbidden[candidate_s] and not extra_forbidden[candidate_s]
             then
               --print("Candidate valid position")
               local nearest_target_info = nearest_target_to[candidate_s]
@@ -741,6 +526,7 @@ local function SolveSteinerTree(args)
                 then
                   --print("Candidate a self reference")
                 else
+                  args.search_target, args.distance = nil, nil
                   return {
                     t1 = i,
                     t2 = other_target,
@@ -756,24 +542,24 @@ local function SolveSteinerTree(args)
 
           if idx > 10000
           then
-            args.debug({"mpp-oil.msg_too_big"})
+            debug({"mpp-oil.msg_too_big"})
             return nil
           end
         end
 
         target_neighbourhood_index[i] = idx
+        i = next(target_neighbourhoods,i)
       end
-
+      i = next(target_neighbourhoods)
       process_distance = process_distance + 1
     end
   end
 
-  local path_index = 0
 
-  while MoreThanOne(target_neighbourhoods)
-  do
+  if MoreThanOne(target_neighbourhoods) then
     local merge_target = FindMergeTarget()
 
+    if merge_target == false then return end
     if merge_target == nil
     then
       return {failed=true}
@@ -797,7 +583,7 @@ local function SolveSteinerTree(args)
 
         if #this_path > 500
         then
-          args.debug("Generated path was too long")
+          debug("Generated path was too long")
           return {failed=true}
         end
 
@@ -882,23 +668,13 @@ local function SolveSteinerTree(args)
             ..serpent.line(nearest_target_to[path_node_str]))
       end
 
-      if debug_viz_surface ~= nil
-      then
-        local debug_pos = { x = path_node.x, y = path_node.y - path_index/8 }
-        rendering.draw_text{
-          text=tostring(path_index),
-          surface=debug_viz_surface,
-          target=debug_pos,
-          color={1,1,1}
-        }
-      end
     end
 
-    path_index = path_index + 1
+    return
   end
 
   return {
-    paths=paths
+    paths=paths, choices=args.choices
   }
 end
 
@@ -914,63 +690,45 @@ local function ReportSteinerTreeFailure(tree_result, debug, debug_entity_name)
   end
 end
 
-local function FindPipePaths(args)
-  local bounds = args.bounds
-  local targets = args.targets
-  local forbidden = args.forbidden
-  local min_underground_distance = args.min_underground_distance
-  local max_underground_distance = args.max_underground_distance
-  local debug_viz_surface = args.debug_viz_surface
-
-  local directions = {}
-  local directional_pipes = {}
-
-  local function ChooseSubtarget(target_idx, subtarget_idx, pos)
-    --print("ChooseSubtarget("..target_idx..", "..subtarget_idx..", "..serpent.line(pos)..")")
-    directions[target_idx] = subtarget_idx
-    pos_str = Pos2Str(pos)
-    if directional_pipes[pos_str] == nil
-    then
-      directional_pipes[pos_str] = subtarget_idx
-    else
-      directional_pipes[pos_str] = 0
-    end
+local function convert_pipes(tree_result, underground_proto)
+  local directions, directional_pipes = {}, {}
+  for i,choice in pairs(tree_result.choices) do
+    directions[i]=choice.index
+    local key=Pos2Str(choice.pos)
+    directional_pipes[key]=directional_pipes[key] and 0 or choice.index
   end
-
-  local tree_result = SolveSteinerTree{
-    targets=targets,
-    adjacency=orthogonal_neighbours,
-    bounds=bounds,
-    forbidden=forbidden,
-    choose_subtarget=ChooseSubtarget,
-    debug=args.debug,
-    debug_viz_surface=debug_viz_surface
-  }
-
-  if tree_result.failed
-  then
-    ReportSteinerTreeFailure(tree_result, args.debug, args.debug_entity_name)
-    return nil
-  end
-
   local pipes = tree_result.paths
   local undergrounds = {}
 
+  if not underground_proto then return {directions=directions,pipes=pipes,undergrounds=undergrounds} end
+  local min_underground_distance = 3
+  local max_underground_distance = underground_proto.max_underground_distance
+  -- Only scan occupied rows and columns. Long empty spans do not participate in conversion.
+  local spans = {x={},y={}}
+  for _,p in pairs(pipes) do
+    for _,axis in ipairs{"x","y"} do
+      local key = p[axis]
+      local inner = axis=="x" and p.y or p.x
+      local span = spans[axis][key]
+      if not span then spans[axis][key]={inner,inner}
+      else span[1],span[2]=math.min(span[1],inner),math.max(span[2],inner) end
+    end
+  end
   -- Now we have placed all the pipes, we want to search for places where we
   -- might be able to replace a sequence of pipes with an underground pipe.
   local function ReplacePipes(args)
     local outer_name = args.outer
-    local min_outer = args.min_outer
-    local max_outer = args.max_outer
     local inner_name = args.inner
-    local min_inner = args.min_inner
-    local max_inner = args.max_inner
     local lower_direction = args.lower_direction
     local upper_direction = args.upper_direction
     local valid_directions = args.valid_directions
 
-    for outer = min_outer, max_outer
-    do
+    local lines = {}
+    for outer in pairs(spans[outer_name]) do table.insert(lines,outer) end
+    table.sort(lines)
+    for _,outer in ipairs(lines) do
+      local span=spans[outer_name][outer]
+      local min_inner,max_inner=span[1],span[2]
       local start_of_run = nil
 
       for inner = min_inner, max_inner+1
@@ -1049,11 +807,7 @@ local function FindPipePaths(args)
   valid_directions[3] = true
   ReplacePipes{
     outer="x",
-    min_outer=bounds.min_x,
-    max_outer=bounds.max_x,
     inner="y",
-    min_inner=bounds.min_y,
-    max_inner=bounds.max_y,
     valid_directions=valid_directions,
     lower_direction=defines.direction.north,
     upper_direction=defines.direction.south,
@@ -1063,11 +817,7 @@ local function FindPipePaths(args)
   valid_directions[4] = true
   ReplacePipes{
     outer="y",
-    min_outer=bounds.min_y,
-    max_outer=bounds.max_y,
     inner="x",
-    min_inner=bounds.min_x,
-    max_inner=bounds.max_x,
     valid_directions=valid_directions,
     lower_direction=defines.direction.west,
     upper_direction=defines.direction.east,
@@ -1080,11 +830,7 @@ local function FindPipePaths(args)
   }
 end
 
-local function FindHeatPipePaths(args)
-  local bounds = args.bounds
-  local entities = args.entities
-  local forbidden = args.forbidden
-
+local function heat_targets(entities)
   local targets = {}
 
   for _, entity in pairs(entities)
@@ -1112,204 +858,70 @@ local function FindHeatPipePaths(args)
     table.insert(targets, subtargets)
   end
 
-  local function ChooseSubtarget(target_idx, subtarget_idx, pos)
-    -- no implementation needed
-  end
-
-  local tree_result = SolveSteinerTree{
-    targets=targets,
-    adjacency=orthogonal_neighbours,
-    bounds=bounds,
-    forbidden=forbidden,
-    choose_subtarget=ChooseSubtarget,
-    debug=args.debug,
-  }
-
-  if tree_result.failed
-  then
-    return tree_result
-  end
-
-  return {
-    heat_pipe_poss = tree_result.paths
-  }
+  return targets
 end
 
-local function FindBeaconLocations(args)
-  local surface = args.surface
-  local bounds = args.bounds
-  local beacon_name = args.beacon_name
-  local quality = args.quality
-  local target_entities = args.entities
-  local forbidden = args.forbidden
-  local entity_radius = args.entity_radius
-  local score_threshold = args.min_beacon_utility
-
-  --args.debug("score_threshold = "..score_threshold)
-
-  local beacon_proto = prototypes.entity[beacon_name]
-  local beacon_radius = beacon_proto.selection_box.right_bottom.x
-  local beacon_to_entity_max = (
-    beacon_proto.get_supply_area_distance(quality)
-    + beacon_radius + entity_radius - 1)
-  local profile = beacon_proto.profile
-  if profile == nil
-  then
-    profile = {1}
+-- Build candidates and make one greedy choice in bounded passes. Candidate order
+-- is also the tie breaker, so saving between passes cannot change the result.
+local function beacon_step(job, settings)
+  local b = job.beacon_search
+  local bounds = job.bounds
+  local proto = prototypes.entity[job.names.beacon]
+  local reach = proto.get_supply_area_distance(job.qualities.beacon)+job.beacon_radius+job.radius-1
+  local profile = proto.profile or {1}
+  if not b then
+    b={x=bounds.min_x,y=bounds.min_y,candidates={},counts={},index=1}
+    job.beacon_search=b
   end
-
-  -- We do a simple greedy search, choosing the best beacon position first and
-  -- working down to the worst.
-
-  -- Step 1: Assemble a list of potential positions, together with the set of
-  -- entities they touch
-
-  beacon_candidates = {}
-  for x = bounds.min_x,bounds.max_x
-  do
-    for y = bounds.min_y,bounds.max_y
-    do
-      local pos = {x = x, y = y}
-      if AnySpotForbidden{
-        collision_box=beacon_proto.collision_box,
-        position=pos,
-        forbidden=forbidden,
-      }
-      then
-        goto skip_pos
-      end
-
-      matching_targets = {}
-      for _, target_pos in pairs(target_entities)
-      do
-        local max_dist = math.max(
-          math.abs(x - target_pos.x), math.abs(y - target_pos.y)
-        )
-        if max_dist <= beacon_to_entity_max
-        then
-          table.insert(matching_targets, target_pos)
+  if b.x then
+    local budget=math.max(1,math.floor(1024/#job.positions))
+    for _=1,budget do
+      local x,y=b.x,b.y
+      local pos={x=x,y=y}
+      if not AnySpotForbidden{position=pos,collision_box=proto.collision_box,forbidden=job.forbidden} then
+        local matches={}
+        for i,target in ipairs(job.positions) do
+          if math.max(math.abs(x-target.x), math.abs(y-target.y)) <= reach then table.insert(matches,i) end
         end
+        if #matches>0 then table.insert(b.candidates,{pos=pos,targets=matches}) end
       end
-
-      if #matching_targets > 0
-      then
-        table.insert(
-          beacon_candidates,
-          { pos=pos, targets=matching_targets }
-        )
+      b.y=y+1
+      if b.y>bounds.max_y then b.y=bounds.min_y; b.x=x+1 end
+      if b.x>bounds.max_x then b.x=nil; break end
+    end
+    return
+  end
+  local last=job.beacons[#job.beacons]
+  local function effect(n) return n*(profile[n] or profile[#profile]) end
+  for i=b.index,math.min(#b.candidates,b.index+255) do
+    local c=b.candidates[i]
+    if not c.discarded then
+      local score=0
+      for _,target in ipairs(c.targets) do
+        local count=b.counts[target] or 0
+        score=score+effect(count+1)-effect(count)
       end
-
-      ::skip_pos::
+      if score<(settings.min_beacon_utility or 2) or (last and math.max(
+        math.abs(last.x-c.pos.x),math.abs(last.y-c.pos.y))<2*job.beacon_radius) then c.discarded=true
+      elseif not b.best or score>b.score then b.best,b.score=i,score end
     end
+    b.index=i+1
   end
-
-  -- Step 2: Keep track of how many beacons currently placed affect each
-  -- target
-  local target_counts = {}
-  for _, target in pairs(target_entities)
-  do
-    target_counts[target] = 0
-  end
-
-  -- Step 3: Sort the candidates by their effect
-  local function beacon_effect(count)
-    if count == 0
-    then
-      return 0
-    end
-    local result = profile[count]
-    -- If we go past the end of the profile, just use the last element
-    if result == nil
-    then
-      result = profile[#profile]
-    end
-    return result * count
-  end
-
-  local function score_candidate(candidate)
-    local tally = 0
-    for _, target in pairs(candidate.targets)
-    do
-      local target_count = target_counts[target]
-      local current = beacon_effect(target_count)
-      local new = beacon_effect(target_count + 1)
-      local add = new - current
-      tally = tally + add
-    end
-    return tally
-  end
-
-  local function compare_candidates(l, r)
-    return score_candidate(l) > score_candidate(r)
-  end
-
-  -- Step 4: Grab candidates until their score falls below some threshold
-  local beacon_poss = {}
-  local last_added_pos = nil
-
-  while true
-  do
-    -- Filter out anything where the score is below the threshold or it's too
-    -- close the the one we last added
-    local new_candidates = {}
-    for _, candidate in pairs(beacon_candidates)
-    do
-      if score_candidate(candidate) < score_threshold
-      then
-        goto skip_candidate
-      end
-
-      if last_added_pos ~= nil
-      then
-        local this_pos = candidate.pos
-        local max_dist = math.max(
-          math.abs(this_pos.x - last_added_pos.x),
-          math.abs(this_pos.y - last_added_pos.y)
-        )
-        if max_dist < 2 * beacon_radius
-        then
-          goto skip_candidate
-        end
-      end
-
-      table.insert(new_candidates, candidate)
-
-      ::skip_candidate::
-    end
-    beacon_candidates = new_candidates
-
-    table.sort(beacon_candidates, compare_candidates)
-
-    if #beacon_candidates == 0
-    then
-      break
-    end
-
-    local chosen = beacon_candidates[1]
-    last_added_pos = chosen.pos
-    --args.debug("Adding beacon at "..serpent.line(last_added_pos).." with "..#chosen.targets.." neighbours and score "..score_candidate(chosen))
-    table.insert(beacon_poss, last_added_pos)
-
-    -- Increment the counts for all the relevant targets
-    for _, target in pairs(chosen.targets)
-    do
-      target_counts[target] = target_counts[target] + 1
-    end
-  end
-
-  return {
-    beacon_poss=beacon_poss
-  }
+  if b.index<=#b.candidates then return end
+  if not b.best then job.beacon_search=nil; return true end
+  local chosen=b.candidates[b.best]
+  table.insert(job.beacons,chosen.pos)
+  for _,target in ipairs(chosen.targets) do b.counts[target]=(b.counts[target] or 0)+1 end
+  b.best,b.score,b.index=nil,nil,1
 end
 
-local function FindPowerPolePositions(args)
+local function pole_tree(args)
   local bounds = args.bounds
   local entity_sets = args.targets
   local forbidden = args.forbidden
   local wire_reach = args.wire_reach
   local supply_distance = args.supply_distance
   local size = args.size
-  local debug_viz_surface = args.debug_viz_surface
 
   local targets = {}
 
@@ -1368,10 +980,6 @@ local function FindPowerPolePositions(args)
     end
   end
 
-  local function ChooseSubtarget(target_idx, subtarget_idx, pos)
-    -- Nothing to do
-  end
-
   local offset_forbidden = forbidden
   local offset_bounds = bounds
   local forbid_adjacency = {}
@@ -1416,195 +1024,12 @@ local function FindPowerPolePositions(args)
     }
   end
 
-  tree_result = SolveSteinerTree{
-    targets=targets,
-    bounds=offset_bounds,
-    adjacency=pole_adjacency,
-    forbidden=offset_forbidden,
-    forbid_adjacency=forbid_adjacency,
-    skip_flood_fill=true,
-    choose_subtarget=ChooseSubtarget,
-    debug=args.debug,
-    --debug_viz_surface=debug_viz_surface,
-  }
-
-  if tree_result.failed
-  then
-    ReportSteinerTreeFailure(tree_result, args.debug, args.debug_entity_name)
-    return nil
-  end
-
-  local poles = tree_result.paths
-
-  return {
-    pole_poss = poles
-  }
+  return {targets=targets, bounds=offset_bounds, adjacency=pole_adjacency,
+    forbidden=offset_forbidden, forbid_adjacency=forbid_adjacency, skip_flood_fill=true}
 end
 
-local function TryPipesAndHeatPipes(args)
-  local bounds = args.bounds
-  local forbidden = args.forbidden
-  local out_pipe_sets = args.out_pipe_sets
-  local pumpjack_type = args.pumpjack_type
-  local pipe_type = args.pipe_type
-  local underground_pipe_type = args.underground_pipe_type
-  local entities_require_heating = args.entities_require_heating
-  local heat_pipe_type = args.heat_pipe_type
-  local oil_patches = args.oil_patches
-
-  -- Figure out other properties of the chosen entities
-  local underground_proto
-  local min_underground_distance
-  local max_underground_distance
-  if underground_pipe_type == "none"
-  then
-    min_underground_distance = 1e10
-  else
-    underground_proto = prototypes.entity[underground_pipe_type]
-    max_underground_distance = underground_proto.max_underground_distance
-    min_underground_distance = 3
-  end
-
-  local forbidden_for_pipes = CopyTable(forbidden)
-
-  ::try_pipes_again::
-
-  local my_result = {heat_pipe_poss={}}
-
-  local pipe_result = FindPipePaths{
-    bounds=bounds,
-    targets=out_pipe_sets,
-    forbidden=forbidden_for_pipes,
-    min_underground_distance=min_underground_distance,
-    max_underground_distance=max_underground_distance,
-    debug=args.debug,
-    debug_entity_name=pipe_type,
-    --debug_viz_surface=args.debug_viz_surface
-  }
-
-  if pipe_result == nil
-  then
-    my_result.failed_pipe_layout = true
-    return my_result
-  end
-
-  local directions = pipe_result.directions
-  my_result.directions = directions
-  my_result.pipes = pipe_result.pipes
-  my_result.undergrounds = pipe_result.undergrounds
-
-  -- Next step is to add heat pipes, but only if the surface requires them
-  if entities_require_heating and heat_pipe_type ~= "none"
-  then
-    -- Construct a list of entities which need heating
-    local entities = {}
-    local forbidden_for_heat_pipes = CopyTable(forbidden)
-
-    local pipe_proto = prototypes.entity[pipe_type]
-    assert(pipe_proto ~= nil)
-    for _, pipe_pos in pairs(pipe_result.pipes)
-    do
-      table.insert(entities, {position=pipe_pos, prototype=pipe_proto})
-      forbidden_for_heat_pipes[Pos2Str(pipe_pos)] = true
-    end
-
-    local underground_pipe_proto = prototypes.entity[underground_pipe_type]
-    assert(underground_pipe_proto ~= nil)
-    for _, underground_info in pairs(pipe_result.undergrounds)
-    do
-      local pos = underground_info.pos
-      table.insert(entities, {position=pos, prototype=underground_proto})
-      forbidden_for_heat_pipes[Pos2Str(pos)] = true
-    end
-
-    local pumpjack_proto = prototypes.entity[pumpjack_type]
-    assert(pumpjack_proto ~= nil)
-    for i, patch in pairs(oil_patches)
-    do
-      table.insert(entities, {position=patch.position, prototype=pumpjack_proto})
-    end
-
-    local heat_pipe_result = FindHeatPipePaths{
-      bounds=bounds,
-      entities=entities,
-      forbidden=forbidden_for_heat_pipes,
-      debug=args.debug,
-    }
-
-    if heat_pipe_result.failed
-    then
-      if heat_pipe_result.unreachable_targets == nil
-      then
-        ReportSteinerTreeFailure(heat_pipe_result, args.debug, heat_pipe_type)
-        my_result.failed_heat_pipe_layout = true
-        return my_result
-      end
-
-      -- We can hope to try again.  If some pipe was unreachable, then we
-      -- forbid that specific spot and loop back.  We need to construct a list
-      -- of the positions of all the pipes and undergrounds we originally
-      -- passed in so that we can convert the unreachable target indices back
-      -- into useful positions
-      local entity_poss = {}
-      for _, pipe_pos in pairs(pipe_result.pipes)
-      do
-        table.insert(entity_poss, pipe_pos)
-      end
-
-      for _, underground_info in pairs(pipe_result.undergrounds)
-      do
-        table.insert(entity_poss, underground_info.pos)
-      end
-      local num_entity_poss = #entity_poss
-
-      for _, target_idx in pairs(heat_pipe_result.unreachable_targets)
-      do
-        if target_idx > num_entity_poss
-        then
-          -- This was a pumpjack.  We can't help with that.
-          my_result.failed_heat_pipe_layout = true
-          return my_result
-        end
-
-        local orig_pos = entity_poss[target_idx]
-        local orig_pos_str = Pos2Str(orig_pos)
-        assert(
-          not forbidden_for_pipes[orig_pos_str],
-          "Pipe in forbidden location?"
-        )
-        forbidden_for_pipes[orig_pos_str] = true
-      end
-
-      goto try_pipes_again
-    end
-
-    my_result.heat_pipe_poss = heat_pipe_result.heat_pipe_poss
-  end
-
-  return my_result
-end
-
-function layout.Plan(player, player_data, entities, selected_surface, observers)
-  observers = observers or {}
-  local function debug(message)
-    if observers.preview_only then
-      if observers.on_message and type(message)=="table" and message[1]~="mpp-oil.msg_count_patches" then
-        observers.on_message(message)
-      end
-    else player.print(message) end
-  end
-  local function PlaceGhost(args)
-    args.allow_removal = player_data.remove_existing
-    args.on_created = observers.on_created
-    args.on_deconstruction = observers.on_deconstruction
-    args.on_blocked = observers.on_blocked
-    args.obstacles = observers.obstacles
-    args.terrain_choices = observers.terrain_choices or {deconstruction_choice=not player_data.remove_existing}
-    args.module_plan = observers.module_plan and observers.module_plan(args.proto,args.quality)
-    args.preview_only = observers.preview_only
-    args.on_preview = observers.on_preview
-    return ForceGhostAt(args)
-  end
+local function begin(state,debug)
+  local player_data,entities,surface = state.oil_settings,state.resources,state.surface
   local oil_patches = {}
   local chosen_entity_name
   local resource_category
@@ -1613,6 +1038,7 @@ function layout.Plan(player, player_data, entities, selected_surface, observers)
 
   for _, entity in ipairs(entities)
   do
+    if not entity.valid then debug({"mpp-oil.msg_no_patches"}); return end
     local entity_proto = entity.prototype
 
     if chosen_entity_name == nil
@@ -1653,14 +1079,7 @@ function layout.Plan(player, player_data, entities, selected_surface, observers)
     #oil_patches
   })
 
-  local direction_array = {
-    defines.direction.north,
-    defines.direction.east,
-    defines.direction.south,
-    defines.direction.west,
-  }
-
-  -- Offsets corresponding to the respective directions in direction_array
+  -- Native fluidbox positions use north, east, south, west order.
   local direction_offset_array = {
     { x = 0, y = -1 },
     { x = 1, y = 0 },
@@ -1668,7 +1087,6 @@ function layout.Plan(player, player_data, entities, selected_surface, observers)
     { x = -1, y = 0 },
   }
 
-  local surface = selected_surface or player.surface
   local planet = surface.planet
   local entities_require_heating = false
   if planet ~= nil
@@ -1698,12 +1116,6 @@ function layout.Plan(player, player_data, entities, selected_surface, observers)
   local power_pole_quality = player_data.qualities["pole"] or default_quality
 
   -- Figure out other properties of the chosen entities
-  local underground_proto
-  if underground_pipe_type ~= "none"
-  then
-    underground_proto = prototypes.entity[underground_pipe_type]
-  end
-
   local pumpjack_proto = prototypes.entity[pumpjack_type]
   local pumpjack_radius = pumpjack_proto.selection_box.right_bottom.x
   local pumpjack_radius_int = math.floor(pumpjack_radius)
@@ -1762,13 +1174,15 @@ function layout.Plan(player, player_data, entities, selected_surface, observers)
   local max_x = -min_x
   local max_y = max_x
 
-  for _, patch in pairs(oil_patches)
+  local positions={}
+  for _, patch in ipairs(oil_patches)
   do
     local pos = patch.position
+    table.insert(positions,pos)
     local subtargets = {}
-    for i, offset in pairs(pipe_connection.positions)
+    for i, offset in ipairs(pipe_connection.positions)
     do
-      direction_offset = direction_offset_array[i]
+      local direction_offset = direction_offset_array[i]
       table.insert(
         subtargets,
         {
@@ -1798,242 +1212,165 @@ function layout.Plan(player, player_data, entities, selected_surface, observers)
     max_y=max_y,
   }
 
-  AddForbiddenPoints{
-    forbidden=forbidden_points,
-    force=player.force,
-    surface=surface,
-    player_data=player_data,
-    obstacles=observers.obstacles,
-    bounds=bounds,
-    debug=debug,
-  }
+  return {phase="scan",bounds=bounds,positions=positions,outlets=out_pipe_sets,forbidden=forbidden_points,
+    patches=oil_patches,needs_heat=entities_require_heating and heat_pipe_type~="none",radius=pumpjack_radius,beacon_radius=beacon_radius,
+    names={pump=pumpjack_type,pipe=pipe_type,underground=underground_pipe_type,heat=heat_pipe_type,
+      beacon=beacon_type,pole=power_pole_type},
+    qualities={pump=pumpjack_quality,pipe=pipe_quality,underground=underground_pipe_quality,heat=heat_pipe_quality,
+      beacon=beacon_quality,pole=power_pole_quality},beacons={},placements={},ignored=obstacles.ignored_entities(state)}
+end
 
-  local pipe_result = TryPipesAndHeatPipes{
-    bounds=bounds,
-    forbidden=forbidden_points,
-    out_pipe_sets=out_pipe_sets,
-    pumpjack_type=pumpjack_type,
-    pipe_type=pipe_type,
-    underground_pipe_type=underground_pipe_type,
-    heat_pipe_type=heat_pipe_type,
-    entities_require_heating=entities_require_heating,
-    oil_patches=oil_patches,
-    debug=debug,
-    --debug_viz_surface=surface
-  }
+local function begin_pipes(job)
+  job.tree={bounds=job.bounds,targets=table.deepcopy(job.outlets),adjacency=orthogonal_neighbours,
+    forbidden=job.pipe_forbidden or job.forbidden}
+  job.phase="pipes"
+end
 
-  if pipe_result.failed_pipe_layout
-  then
-    debug({"mpp-oil.msg_pipe_layout_failed"})
+local function begin_heat(job)
+  local entities={}
+  local forbidden=CopyTable(job.forbidden)
+  local function add(pos,kind)
+    table.insert(entities,{position=pos,prototype=prototypes.entity[job.names[kind]]})
+    forbidden[Pos2Str(pos)]=true
+  end
+  for _,pos in pairs(job.route.pipes) do add(pos,"pipe") end
+  for _,pair in pairs(job.route.undergrounds) do add(pair.pos,"underground") end
+  job.pipe_positions={}
+  for _,e in ipairs(entities) do table.insert(job.pipe_positions,e.position) end
+  for _,pos in ipairs(job.positions) do add(pos,"pump") end
+  job.tree={targets=heat_targets(entities),bounds=job.bounds,adjacency=orthogonal_neighbours,forbidden=forbidden}
+  job.phase="heat"
+end
+
+local function add_placement(job,kind,pos,direction)
+  table.insert(job.placements,{kind=kind,position=pos,direction=direction})
+end
+
+local function finish_route(job,heat)
+  local directions={defines.direction.north,defines.direction.east,defines.direction.south,defines.direction.west}
+  for i,pos in ipairs(job.positions) do
+    add_placement(job,"pump",pos,directions[assert(job.route.directions[i])])
+  end
+  local function add_pipe(kind,pos,direction)
+    add_placement(job,kind,pos,direction)
+    job.forbidden[Pos2Str(pos)]=true
+  end
+  for _,pos in pairs(job.route.pipes) do add_pipe("pipe",pos) end
+  for _,pair in pairs(job.route.undergrounds) do add_pipe("underground",pair.pos,pair.direction) end
+  for _,pos in pairs(heat or {}) do add_pipe("heat",pos) end
+  job.route,job.pipe_positions,job.pipe_forbidden,job.tree,job.outlets=nil,nil,nil,nil,nil
+  job.phase="beacons"
+end
+
+local function place_batch(job,state,observers)
+  local player=state.player
+  local first=job.next_placement or 1
+  local ghosts={}
+  for i=first,math.min(first+63,#job.placements) do
+    local place=job.placements[i]
+    -- Pumpjacks are the first placements, in patch order. A patch can be
+    -- depleted or removed while a multi-tick route is still being planned.
+    if place.kind=="pump" and not job.patches[i].valid then
+      observers.message({"mpp-oil.msg_no_patches"}); return false
+    end
+    local proto=prototypes.entity[job.names[place.kind]]
+    local quality=job.qualities[place.kind]
+    local box=obstacles.entity_box(proto.name,place.position,place.direction)
+    local index=obstacles.collect(state.surface,box,job.ignored,state)
+    local ghost=ForceGhostAt{surface=state.surface,player=player,proto=proto,position=place.position,
+      direction=place.direction,quality=quality,terrain_choices=state,obstacles=index,
+      module_plan=observers.module_plan(proto,quality),on_created=observers.on_created,
+      on_deconstruction=observers.on_deconstruction,on_blocked=observers.on_blocked,
+      preview_only=state.preview_only,on_preview=observers.on_preview}
+    if ghost then
+      if not state.preview_only and ghost.valid and ghost.unit_number then job.ignored[ghost.unit_number]=true end
+      table.insert(ghosts,ghost)
+      if job.module_ghosts then table.insert(job.module_ghosts,ghost) end
+    end
+  end
+  if state.oil_settings.add_landfill then
+    AddLandfillUnder{player=player,ghosts=ghosts,filled=job.filled,debug=observers.message,
+      on_created=observers.on_created,preview_only=state.preview_only,on_preview=observers.on_preview,
+      terrain_choices=state,on_blocked=observers.on_blocked}
+  end
+  job.next_placement=first+64
+  if job.next_placement<=#job.placements then return end
+  if job.module_ghosts and remote.interfaces.ModuleInserterEx then
+    remote.call("ModuleInserterEx","apply_module_config_to_entities",player.index,job.module_ghosts)
+  end
+  return true
+end
+
+-- nil means continue next tick, true means built, false means planning failed.
+-- Only data lives in oil_job. Engine callbacks are rebound at every invocation.
+function layout.step(state,observers)
+  local job=state.oil_job
+  local message=observers.message
+  if not job then
+    state.oil_job=begin(state,message)
+    if not state.oil_job then return false end
     return
   end
-
-  if pipe_result.failed_heat_pipe_layout then
-    debug({"mpp-oil.msg_heat_pipe_layout_failed"})
-    return
-  end
-
-  local directions = pipe_result.directions
-  local pipes = pipe_result.pipes
-  local undergrounds = pipe_result.undergrounds
-
-  --print("Got directions "..serpent.line(directions))
-  assert(#oil_patches == #directions, "Did not get one direction per patch\n"
-  ..serpent.line(oil_patches).."\n"..serpent.line(directions))
-
-  pumpjack_positions = {}
-  ghosts = {}
-
-  for i, patch in pairs(oil_patches)
-  do
-    local position = patch.position
-    table.insert(pumpjack_positions, position)
-    local dir_index = directions[i]
-    local direction = direction_array[dir_index]
-    --print("Using direction "..direction.." for patch at "..serpent.line(position))
-    local ghost = PlaceGhost{
-      surface=surface,
-      proto=pumpjack_proto,
-      position=position,
-      direction=direction,
-      quality=pumpjack_quality,
-      player=player,
-      debug=debug,
-    }
-    table.insert(ghosts, ghost)
-  end
-
-  local pipe_proto = prototypes.entity[pipe_type]
-  for _, pipe_pos in pairs(pipe_result.pipes)
-  do
-    local ghost = PlaceGhost{
-      surface=surface,
-      proto=pipe_proto,
-      position=pipe_pos,
-      quality=pipe_quality,
-      player=player,
-      debug=debug,
-    }
-    forbidden_points[Pos2Str(pipe_pos)] = true
-    table.insert(ghosts, ghost)
-  end
-
-  for _, underground_info in pairs(pipe_result.undergrounds)
-  do
-    local pos = underground_info.pos
-    local direction = underground_info.direction
-
-    local ghost = PlaceGhost{
-      surface=surface,
-      proto=underground_proto,
-      position=pos,
-      direction=direction,
-      quality=underground_pipe_quality,
-      player=player,
-    }
-    forbidden_points[Pos2Str(pos)] = true
-    table.insert(ghosts, ghost)
-  end
-
-  local heat_pipe_poss = pipe_result.heat_pipe_poss
-  local heat_pipe_proto = prototypes.entity[heat_pipe_type]
-  for _, pos in pairs(heat_pipe_poss)
-  do
-    local ghost = PlaceGhost{
-      surface=surface,
-      proto=heat_pipe_proto,
-      position=pos,
-      quality=heat_pipe_quality,
-      player=player,
-    }
-    forbidden_points[Pos2Str(pos)] = true
-    table.insert(ghosts, ghost)
-  end
-
-  -- Next we add beacons (if requested).  This happens after heat pipes, so we
-  -- might end up with unheated beacons, but that is a problem for another day.
-  local beacon_poss = {}
-  if beacon_type ~= "none"
-  then
-    assert(beacon_radius ~= nil, "Nil radius")
-    assert(beacon_radius ~= 0, "Zero radius")
-
-    local min_beacon_utility = player_data.min_beacon_utility
-    if min_beacon_utility == nil
-    then
-      min_beacon_utility = 2
+  if job.phase=="scan" then
+    if scan(job,state) then begin_pipes(job) end
+  elseif job.phase=="pipes" then
+    local tree=SolveSteinerTree(job.tree,message)
+    if not tree then return end
+    if tree.failed then
+      ReportSteinerTreeFailure(tree,message,job.names.pipe)
+      message({"mpp-oil.msg_pipe_layout_failed"}); return false
     end
-
-    local result = FindBeaconLocations{
-      surface=surface,
-      bounds=bounds,
-      beacon_name=beacon_type,
-      quality=beacon_quality,
-      entities=pumpjack_positions,
-      entity_radius=pumpjack_radius,
-      min_beacon_utility=min_beacon_utility,
-      forbidden=forbidden_points,
-      debug=debug
-    }
-
-    beacon_poss = result.beacon_poss
-    for _, pos in pairs(beacon_poss)
-    do
-      local ghost = PlaceGhost{
-        surface=surface,
-        proto=beacon_proto,
-        position=pos,
-        quality=beacon_quality,
-        player=player,
-        debug=debug,
-      }
-
-      ForbidPointsInBox{
-        pos=pos,
-        collision_box=beacon_proto.collision_box,
-        forbidden=forbidden_points,
-      }
-      table.insert(ghosts, ghost)
+    job.route=convert_pipes(tree,job.names.underground~="none" and prototypes.entity[job.names.underground])
+    if job.needs_heat then begin_heat(job) else finish_route(job) end
+  elseif job.phase=="heat" then
+    local tree=SolveSteinerTree(job.tree,message)
+    if not tree then return end
+    if tree.failed then
+      if tree.unreachable_targets then
+        job.pipe_forbidden=job.pipe_forbidden or CopyTable(job.forbidden)
+        for _,i in ipairs(tree.unreachable_targets) do
+          local pos=job.pipe_positions[i]
+          if not pos then message({"mpp-oil.msg_heat_pipe_layout_failed"}); return false end
+          job.pipe_forbidden[Pos2Str(pos)]=true
+        end
+        begin_pipes(job)
+      else message({"mpp-oil.msg_heat_pipe_layout_failed"}); return false end
+    else finish_route(job,tree.paths) end
+  elseif job.phase=="beacons" then
+    if job.names.beacon~="none" then
+      if not beacon_step(job,state.oil_settings) then return end
+      local box=prototypes.entity[job.names.beacon].collision_box
+      for _,pos in ipairs(job.beacons) do
+        add_placement(job,"beacon",pos)
+        ForbidPointsInBox{pos=pos,collision_box=box,forbidden=job.forbidden}
+      end
     end
-  end
-
-  -- Now pumpjacks, pipes, and beacons are complete, the final step is to add
-  -- power poles
-  if power_pole_type ~= "none"
-  then
-    local power_pole_proto = prototypes.entity[power_pole_type]
-    local wire_reach = power_pole_proto.get_max_wire_distance(power_pole_quality)
-    local supply_distance = power_pole_proto.get_supply_area_distance(power_pole_quality)
-    local power_pole_cbox = power_pole_proto.collision_box
-    local power_pole_size = math.ceil(
-      power_pole_cbox.right_bottom.x - power_pole_cbox.left_top.x)
-
-    result = FindPowerPolePositions{
-      bounds=bounds,
-      targets={
-        {
-          poss=pumpjack_positions,
-          radius=pumpjack_radius
-        },
-        {
-          poss=beacon_poss,
-          radius=beacon_radius
-        },
-      },
-      forbidden=forbidden_points,
-      wire_reach=wire_reach,
-      supply_distance=supply_distance,
-      size=power_pole_size,
-      debug=debug,
-      debug_entity_name=power_pole_type,
-      --debug_viz_surface=surface,
-    }
-
-    if result == nil
-    then
-      debug({"mpp-oil.msg_pole_layout_failed"})
-      return
+    job.phase="poles"
+  elseif job.phase=="poles" then
+    if job.names.pole~="none" then
+      if not job.tree then
+        local proto=prototypes.entity[job.names.pole]
+        local q=job.qualities.pole
+        local box=proto.collision_box
+        job.tree=pole_tree{bounds=job.bounds,forbidden=job.forbidden,
+          targets={{poss=job.positions,radius=job.radius},{poss=job.beacons,radius=job.beacon_radius}},
+          wire_reach=proto.get_max_wire_distance(q),supply_distance=proto.get_supply_area_distance(q),
+          size=math.ceil(box.right_bottom.x-box.left_top.x)}
+      end
+      local tree=SolveSteinerTree(job.tree,message)
+      if not tree then return end
+      if tree.failed then
+        ReportSteinerTreeFailure(tree,message,job.names.pole)
+        message({"mpp-oil.msg_pole_layout_failed"}); return false
+      end
+      for _,pos in pairs(tree.paths) do add_placement(job,"pole",pos) end
     end
-
-    pole_poss = result.pole_poss
-
-    for _, pole_pos in pairs(pole_poss)
-    do
-      local ghost = PlaceGhost{
-        surface=surface,
-        proto=power_pole_proto,
-        position=pole_pos,
-        quality=power_pole_quality,
-        player=player,
-        debug=debug,
-      }
-      table.insert(ghosts, ghost)
-    end
-  end
-
-  local setting = player.mod_settings["mpp-oil-interface-with-module-inserter-ex"]
-  if not observers.preview_only and setting and setting.value and remote.interfaces["ModuleInserterEx"] then
-    remote.call(
-      "ModuleInserterEx",
-      "apply_module_config_to_entities",
-      player.index,
-      ghosts
-    )
-  end
-
-  if player_data.add_landfill then
-    AddLandfillUnder{
-      player=player,
-      ghosts=ghosts,
-      debug=debug,
-      on_created=observers.on_created,
-      preview_only=observers.preview_only,
-      on_preview=observers.on_preview,
-      terrain_choices=observers.terrain_choices,
-      on_blocked=observers.on_blocked,
-    }
-  end
-  return ghosts
+    local setting=state.player.mod_settings["mpp-oil-interface-with-module-inserter-ex"]
+    if not state.preview_only and setting and setting.value and remote.interfaces.ModuleInserterEx then job.module_ghosts={} end
+    job.tree,job.forbidden,job.filled,job.phase=nil,nil,{},"place"
+  elseif job.phase=="place" then
+    return place_batch(job,state,observers)
+  else error("Unknown oil planning phase: "..tostring(job.phase)) end
 end
 
 return layout

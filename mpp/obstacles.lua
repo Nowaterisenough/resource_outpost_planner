@@ -125,6 +125,27 @@ function obstacles.entity_box(name, position, direction)
  return {left_top={x=x1,y=y1},right_bottom={x=x2,y=y2}}
 end
 
+function obstacles.ignored_entities(state)
+	local ignored = {}
+	local previous = state._previous_state
+	-- Only output extensions explicitly own the previous mine. A new selection
+	-- must see earlier ghosts as existing equipment, including overlapping areas.
+	local seen_lists={}
+	for _, list in pairs{state._collected_ghosts or {}, previous and previous._collected_ghosts or {}} do
+		if not seen_lists[list] then
+			seen_lists[list]=true
+			for _, entity in pairs(list) do
+				-- Ownership is reread each time. An entity's unit number is immutable;
+				-- retaining the number of a destroyed entity cannot hide a new one.
+				local id=owned_ids[entity]
+				if not id and entity.valid then id=entity.unit_number;owned_ids[entity]=id end
+				if id then ignored[id]=true end
+			end
+		end
+	end
+	return ignored
+end
+
 function obstacles.get(state)
 	local saved = cache[state]
 	local search_area=state._belt_search_area
@@ -145,25 +166,8 @@ function obstacles.get(state)
 		margin = math.max(margin, (state.belt_specification and state.belt_specification.count or 0) + 16,
 			state._belt_search_margin or 0)
 	end
-	local ignored = {}
-	local previous = state._previous_state
-	-- Only output extensions explicitly own the previous mine. A new selection
-	-- must see earlier ghosts as existing equipment, including overlapping areas.
-	local seen_lists={}
-	for _, list in pairs{state._collected_ghosts or {}, previous and previous._collected_ghosts or {}} do
-		if not seen_lists[list] then
-			seen_lists[list]=true
-			for _, entity in pairs(list) do
-				-- Ownership is reread each time. An entity's unit number is immutable;
-				-- retaining the number of a destroyed entity cannot hide a new one.
-				local id=owned_ids[entity]
-				if not id and entity.valid then id=entity.unit_number;owned_ids[entity]=id end
-				if id then ignored[id]=true end
-			end
-		end
-	end
 	local area=search_area or {{x1-margin,y1-margin},{x2+margin,y2+margin}}
-	local index = obstacles.collect(state.surface,area,ignored,state)
+	local index = obstacles.collect(state.surface,area,obstacles.ignored_entities(state),state)
 	cache[state] = {tick=game.tick,index=index,margin=margin,area=area,explicit_area=search_area~=nil}
 	return index
 end
