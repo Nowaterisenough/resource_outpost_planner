@@ -59,6 +59,9 @@ local function plan(points,opts)
   for _,p in ipairs(points) do table.insert(state.resources,{valid=true,type="resource",name="crude-oil",
     position={x=p[1]+.5,y=p[2]+.5},prototype={resource_category="oil"}}) end
   local layout=require("layouts.oil")
+  state._previous_state={_collected_ghosts={{valid=true,order_deconstruction=function()
+    error("oil planning scheduled an earlier plan's ghost for removal")
+  end}}}
   local callback=layout:start(state)
   local restored={}
   for tick=1,20000 do

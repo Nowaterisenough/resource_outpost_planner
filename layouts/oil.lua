@@ -60,11 +60,6 @@ function layout:initialize(state)
 end
 
 function layout:start(state)
-	if state._previous_state and not state.preview_only then
-		for _, ghost in pairs(state._previous_state._collected_ghosts or {}) do
-			if ghost.valid then ghost.order_deconstruction(state.player.force, state.player) end
-		end
-	end
 	state._deconstruction_orders = {}
 	state.oil_force=state.player.force
 	return "plan_oil"
