@@ -8,6 +8,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 DIRECTORIES = {"graphics", "gui", "layouts", "locale", "mpp", "oil", "prototypes"}
 ROOT_FILES = {"info.json", "LICENSE", "changelog.txt", "thumbnail.png"}
+UNUSED_LAYOUTS = {"blueprints2.lua", "throughput_t1.lua", "belt_task.lua"}
 
 
 def main():
@@ -28,6 +29,8 @@ def source_files(root):
         if not path.is_file():
             continue
         parts = path.relative_to(root).parts
+        if len(parts) == 2 and parts[0] == "layouts" and parts[1] in UNUSED_LAYOUTS:
+            continue
         if any(part.startswith(".") or part == "__pycache__" for part in parts):
             continue
         if len(parts) == 1 and (path.name in ROOT_FILES or path.suffix == ".lua"):
