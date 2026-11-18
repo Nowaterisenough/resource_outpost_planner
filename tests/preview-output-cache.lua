@@ -1,5 +1,5 @@
 -- Cache invalidation and read-only routing state, without a game process.
-defines={direction={west=12}}
+defines={direction={north=0,east=4,south=8,west=12}}
 game={tick=1}
 package.loaded["mpp.train_station"]=nil
 function table.deepcopy(value)
@@ -7,8 +7,6 @@ function table.deepcopy(value)
 	local result={};for k,v in pairs(value) do result[k]=table.deepcopy(v) end;return result
 end
 package.loaded["mpp.mpp_util"]={bp_direction={west={[12]=12}},revert_world=function(_,_,_,x,y) return {x,y} end}
-package.loaded["mpp.obstacles"]={entity_box=function() return {left_top={x=-.4,y=-.4},right_bottom={x=.4,y=.4}} end}
-package.loaded["mpp.terrain"]={blocked_tile=function(t) return t.prototype.hazard end}
 local routing_error,seen_grid
 package.loaded["mpp.belt_planner"]={
 	create_state=function(spec,target,choices)
@@ -32,19 +30,22 @@ end}
 package.loaded["layouts.common"]={create_belt_planner_specification=function(state)
 	return {count=1,coords=state.coords}
 end}
-prototypes={tile={grass={hazard=false},water={hazard=true}}}
+prototypes={tile={grass={collision_mask={layers={ground_tile=true}}},water={collision_mask={layers={water_tile=true}}}}}
+prototypes.entity={belt={tile_width=1,tile_height=1,has_flag=function() return false end,
+	collision_box={left_top={x=-.4,y=-.4},right_bottom={x=.4,y=.4}}}}
 local cache=require("mpp.preview_output_cache")
 local count=0
 local function check(value,label) assert(value,label);count=count+1 end
 local entities,tiles
-local function fixture()
-	routing_error=nil;entities={};tiles={}
+local function fixture(initial_entities,remove_trees)
+	routing_error=nil;entities=initial_entities or {};tiles={}
 	local surface={valid=true,global_effect={speed=0},find_entities_filtered=function() return entities end,
 		find_tiles_filtered=function() return tiles end}
 	local player={valid=true,index=1,force={index=1,mining_drill_productivity_bonus=2,belt_stack_size_bonus=3}}
 	local ore={valid=true,amount=100,position={x=5,y=6}}
 	local choices={layout_choice="compact",direction_choice="west",belt_merge_choice=true,belt_planner_choice=false,
-		output_balance_choice=true,output_belt_count_choice=8,belt_load_min_choice=0.8,belt_load_max_choice=1.1}
+		output_balance_choice=true,output_belt_count_choice=8,belt_load_min_choice=0.8,belt_load_max_choice=1.1,
+		remove_entities_choice=false,cliff_mode_choice="avoid",remove_trees_choice=remove_trees}
 	local data={choices=choices,preview={surface=surface,revision=1}}
 	storage={players={[1]=data}}
 	local state={preview_only=true,preview_revision=1,player=player,surface=surface,resources={ore},
@@ -95,12 +96,43 @@ for _,change in ipairs{
 	function(d,s) s.surface.valid=false end,
 	function(d,s) d.preview.surface={} end,
 	function() tiles={{name="water",position={x=4,y=4}}} end,
-	function() entities={{valid=true,name="steel-chest",type="container",position={x=4,y=4},direction=0,
-		quality={name="normal"},force={index=1},bounding_box={left_top={x=3.6,y=3.6},right_bottom={x=4.4,y=4.4}}}} end,
 } do
 	data,state,ore=fixture();change(data,state,ore)
 	check(not cache.resume(data),"mining input change reused stale geometry")
 end
+
+local function entity(kind,layers)
+	return {valid=true,name=kind,type=kind,position={x=4,y=4},direction=0,quality={name="normal"},force={index=1},
+		prototype={type=kind,collision_mask={layers=layers}},bounding_box={left_top={x=3.6,y=3.6},right_bottom={x=4.4,y=4.4}}}
+end
+
+local robot=entity("construction-robot",{})
+data,state=fixture({robot});data.preview.output_basis=nil
+robot.position.x=5
+cache.complete(state,data.preview)
+check(data.preview.output_basis,"a passing construction robot prevented cache capture")
+robot.position.x=6
+check(cache.resume(data),"a moving construction robot invalidated the mining layout")
+
+local ghost=entity("entity-ghost",{})
+ghost.ghost_name="steel-chest";ghost.ghost_prototype={type="container",collision_mask={layers={object=true}}}
+for _,blocker in ipairs{entity("container",{object=true}),entity("tree",{player=true}),
+	entity("locomotive",{train=true}),entity("cliff",{}),ghost} do
+	data,state=fixture();entities={blocker}
+	check(not cache.resume(data),"missed added "..blocker.type)
+	data.preview.output_basis=nil
+	cache.complete(state,data.preview)
+	check(not data.preview.output_basis,"missed blocker added while capturing")
+	data=fixture({blocker});check(cache.resume(data),"unchanged blocker invalidated layout")
+	blocker.position.x=7;check(not cache.resume(data),"missed moved "..blocker.type)
+	entities={};check(not cache.resume(data),"missed removed "..blocker.type)
+end
+
+local tree=entity("tree",{player=true})
+data=fixture({tree},true);entities={}
+check(cache.resume(data),"a tree already allowed for removal invalidated the layout")
+data.choices.remove_trees_choice=false
+check(not cache.resume(data),"changing tree retention reused the old layout")
 
 data,state=fixture()
 data.choices.output_station_choice=true
@@ -145,6 +177,9 @@ check(not data.preview.output_basis,"resources changed during mining planning bu
 data,state=fixture();data.preview.output_basis=nil;state._obstacle_skipped=1
 cache.complete(state,data.preview)
 check(not data.preview.output_basis,"partial mining placement was retained")
+data,state=fixture();data.preview.output_basis=nil;state._output_basis=nil;state._preview_environment.geometry_revision=nil
+cache.capture(state);cache.complete(state,data.preview)
+check(not data.preview.output_basis,"grid from a pre-upgrade task was cached with the new coverage rules")
 data,state=fixture();state._preview_environment=nil;state._apply_after_preview=true
 cache.begin(state)
 check(not state._preview_environment,"Apply validation performed cache bookkeeping")

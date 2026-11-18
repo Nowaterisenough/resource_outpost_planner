@@ -22,6 +22,17 @@ function obstacles.active(state)
 		or state.deconstruction_choice or state.landfill_choice
 end
 
+function obstacles.find_candidates(surface, area)
+	return surface.find_entities_filtered{area=area,type=ignored_types,invert=true}
+end
+
+function obstacles.blocks_layout(entity, choices)
+	local proto = entity.type == "entity-ghost" and entity.ghost_prototype or entity.prototype
+	local layers = proto.collision_mask.layers
+	return (entity.type == "cliff" or layers.object or layers.player or layers.train)
+		and (not choices or terrain.blocks_entity(entity, choices))
+end
+
 function obstacles.collect(surface, area, ignored, choices)
 	local index = {tiles={}, underground_tiles={}, cells={}, boxes={}, boxes_by_cell={}}
 	local function cell(x, y) index.cells[key(x,y)] = {x=x, y=y} end
@@ -48,12 +59,9 @@ function obstacles.collect(surface, area, ignored, choices)
 	-- but it must still route around terrain whose filling is disabled.
 	if choices and choices._force_build_mode and choices._belt_routing then return index end
 	-- Ore patches can contain thousands of resources that never obstruct placement.
-	for _, entity in pairs(surface.find_entities_filtered{area=area,type=ignored_types,invert=true}) do
+	for _, entity in pairs(obstacles.find_candidates(surface, area)) do
 		if entity.valid and not (entity.unit_number and ignored and ignored[entity.unit_number]) then
-			local proto = entity.type == "entity-ghost" and entity.ghost_prototype or entity.prototype
-			local layers = proto.collision_mask.layers
-			local selected = not choices or terrain.blocks_entity(entity, choices)
-			if selected and (entity.type == "cliff" or layers.object or layers.player or layers.train) then
+			if obstacles.blocks_layout(entity, choices) then
 				local box = entity.bounding_box
 				index.boxes[#index.boxes + 1] = box
 				for x=floor(box.left_top.x),ceil(box.right_bottom.x)-1 do

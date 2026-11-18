@@ -1,5 +1,6 @@
 local util = require("mpp.mpp_util")
 local terrain = require("mpp.terrain")
+local obstacles = require("mpp.obstacles")
 local planner = require("mpp.belt_planner")
 local train_station = require("mpp.train_station")
 local common = require("layouts.common")
@@ -7,7 +8,6 @@ local work=require("mpp.preview_construction")
 local cache = {}
 local geometry_revision = 18 -- Coverage includes the final item of each grid pass.
 
-local ignored_types={"resource","character","unit","corpse","item-entity","tile-ghost"}
 local hazard_names
 
 local function equal(a,b)
@@ -44,12 +44,12 @@ local function same_options(saved,choices)
 	return true
 end
 
-local function world(state,area)
+local function world(state,area,choices)
 	local result={entities={},tiles={},force=state.player.force.index,
 		productivity=state.player.force.mining_drill_productivity_bonus,
 		stack=state.player.force.belt_stack_size_bonus,effects=table.deepcopy(state.surface.global_effect)}
-	for _,e in pairs(state.surface.find_entities_filtered{area=area,type=ignored_types,invert=true}) do
-		if e.valid then
+	for _,e in pairs(obstacles.find_candidates(state.surface,area)) do
+		if e.valid and obstacles.blocks_layout(e,choices) then
 			local p,b=e.position,e.bounding_box
 			local row=table.concat({e.name,e.type=="entity-ghost" and e.ghost_name or "",p.x,p.y,e.direction,
 				e.quality.name,e.force.index,b.left_top.x,b.left_top.y,b.right_bottom.x,b.right_bottom.y},":")
@@ -102,11 +102,14 @@ function cache.begin(state)
 		local p=e.position
 		resources.amounts[i],resources.x[i],resources.y[i]=e.amount,p.x,p.y
 	end
-	state._preview_environment={area=area,world=world(state,area),resources=resources,choices=options(data.choices)}
+	local choices=options(data.choices)
+	state._preview_environment={geometry_revision=geometry_revision,area=area,resources=resources,
+		choices=choices,world=world(state,area,choices)}
 end
 
 function cache.capture(state)
-	if not state._preview_environment or state.preview_error or state._apply_after_preview
+	local environment=state._preview_environment
+	if not environment or environment.geometry_revision~=geometry_revision or state.preview_error or state._apply_after_preview
 		or state.beacon_choice~="none" and not state._beacon_rows then return end
 	-- Save only routing occupancy, not the ore convolution grid or discarded attempts.
 	local occupied={}
@@ -124,15 +127,16 @@ function cache.capture(state)
 		end
 	end
 	state._output_basis={geometry_revision=geometry_revision,occupied=occupied,planned=planned,trimmed=trimmed(state,state.belt_target,state),
-		environment=state._preview_environment,_capacity_rows=state._capacity_rows}
+		environment=environment,_capacity_rows=state._capacity_rows}
 end
 
 function cache.complete(state,draft)
 	if state._from_output_cache or not state._output_basis or state.preview_error
 		or (state._obstacle_skipped or 0)>0 or not state._output_preview_range then return end
 	local basis=state._output_basis
+	if basis.geometry_revision~=geometry_revision then return end
 	local env=basis.environment
-	if not resources_match(env.resources) or not equal(env.world,world(state,env.area)) then return end
+	if not resources_match(env.resources) or not equal(env.world,world(state,env.area,env.choices)) then return end
 	local range=state._output_preview_range
 	basis.before,basis.after={},{}
 	for i,spec in ipairs(state._preview_specs) do
@@ -163,7 +167,7 @@ function cache.resume(data)
 	if not source.surface.valid or source.surface~=draft.surface or not source.player.valid
 		or not same_options(env.choices,data.choices)
 		or basis.trimmed~=trimmed({_capacity_rows=basis._capacity_rows,direction_choice=source.direction_choice},draft.belt_target,data.choices)
-		or not resources_match(env.resources) or not equal(env.world,world(source,env.area)) then return end
+		or not resources_match(env.resources) or not equal(env.world,world(source,env.area,env.choices)) then return end
 	local state={}
 	for k,v in pairs(data.choices) do state[k]=v end
 	for k,v in pairs(source) do state[k]=v end
