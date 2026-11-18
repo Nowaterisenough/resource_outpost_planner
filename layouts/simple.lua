@@ -336,7 +336,7 @@ function layout:process_grid(state)
 		end
 	end --]]
 
-	if state.resource_iter >= num_resources then
+	if state.resource_iter > num_resources then
 		state.resource_iter = 1
 		local convolved = state.convolution_cache
 		local new = {}
@@ -377,7 +377,7 @@ function layout:process_grid_convolution(state)
 	end
 	state.resource_iter = i
 
-	if state.resource_iter >= num_resources then
+	if state.resource_iter > num_resources then
 		state.convolution_cache = nil
 		return self:prepare_layout_attempts(state)
 	end
