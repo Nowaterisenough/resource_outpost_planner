@@ -78,11 +78,11 @@ local function choose_reference(inputs,outputs,reach,matrix)
 end
 
 local function geometry(inputs, outputs, belt_name, preference)
-	local splitter, underground, reach = equipment(belt_name)
-	if not splitter or not reach or reach<2 then return nil,{"mpp.output_balance_equipment"} end
 	local matrix=preference=="matrix" or preference=="station" or inputs<=8 and outputs<=8
 	local cache_key = inputs..":"..outputs..":"..belt_name..":"..tostring(matrix)..(preference=="station" and ":station" or "")
 	if cache[cache_key] then return cache[cache_key] end
+	local splitter, underground, reach = equipment(belt_name)
+	if not splitter or not reach or reach<2 then return nil,{"mpp.output_balance_equipment"} end
 	-- Preserve independent mining feeds. When they exceed the reference book's
 	-- input width, fold them outside the mine before the normal output balancer.
 	-- The final output count is unchanged; each fold preserves both belt sides.
