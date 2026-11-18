@@ -292,36 +292,80 @@ function beacons.prepare(state, production)
 	end
 	planning.miner_index=last+1
 	if planning.miner_index<=#miners then return true end
+	-- Index scores by the miners that contribute to them. Selecting a tower
+	-- changes only the scores of candidates that cover or replace those miners.
+	local function score_candidate(candidate)
+		local uncovered,needed,gain=0,0,0
+		for _,target in ipairs(candidate.targets) do if not target.removed then
+			local count=state._beacon_counts[target.placement]
+			if count==0 then uncovered=uncovered+1 end
+			if fill or count<target_count then needed=needed+1 end
+			gain=gain+planning.production[count+1]-planning.production[count]
+		end end
+		local remove=candidate.remove
+		local safe=not planning.productive or gain>0.000001
+		if remove then
+			safe=not remove.removed
+			for _,resource in ipairs(remove.resources) do if resource.count<=1 then safe=false;break end end
+			if safe then gain=gain-planning.production[state._beacon_counts[remove.placement]] end
+			safe=safe and gain>0.000001
+		end
+		local value=uncovered*(#miners+1)+needed+gain/(1+planning.production[1])
+		return safe and needed>0 and value or nil
+	end
+	local function higher(a,b)
+		return a.score>b.score or a.score==b.score and a.index<b.index
+	end
+	local function update(candidate)
+		local heap=planning.heap
+		local i=candidate.heap_index
+		if not i then
+			if candidate.used or (planning.regular_pass and not candidate.regular) then return end
+			i=#heap+1
+		end
+		candidate.score=score_candidate(candidate) or -math.huge
+		while i>1 and higher(candidate,heap[floor(i/2)]) do
+			local parent=floor(i/2); heap[i]=heap[parent]; heap[i].heap_index=i; i=parent
+		end
+		while i*2<=#heap do
+			local child=i*2
+			if child<#heap and higher(heap[child+1],heap[child]) then child=child+1 end
+			if not higher(heap[child],candidate) then break end
+			heap[i]=heap[child]; heap[i].heap_index=i; i=child
+		end
+		heap[i]=candidate;candidate.heap_index=i
+	end
+	local function reset_heap()
+		planning.heap={}
+		for i,candidate in ipairs(candidates) do
+			candidate.index=i;candidate.heap_index=nil;update(candidate)
+		end
+	end
+	if not planning.heap then
+		for _,candidate in ipairs(candidates) do
+			local function watch(target)
+				target.candidates=target.candidates or {};table.insert(target.candidates,candidate)
+			end
+			for _,target in ipairs(candidate.targets) do watch(target) end
+			if candidate.remove then watch(candidate.remove) end
+		end
+		reset_heap()
+	end
 	local processed=0
 	while true do
-		local best,score
-		for _,candidate in ipairs(candidates) do
-			if not candidate.used and (not planning.regular_pass or candidate.regular) then
-				local uncovered,needed,gain=0,0,0
-				for _,target in ipairs(candidate.targets) do if not target.removed then
-					local count=state._beacon_counts[target.placement]
-					if count==0 then uncovered=uncovered+1 end
-					if fill or count<target_count then needed=needed+1 end
-					gain=gain+planning.production[count+1]-planning.production[count]
-				end end
-				local remove=candidate.remove
-				local safe=not planning.productive or gain>0.000001
-				if remove then
-					safe=not remove.removed
-					for _,resource in ipairs(remove.resources) do if resource.count<=1 then safe=false;break end end
-					if safe then gain=gain-planning.production[state._beacon_counts[remove.placement]] end
-					safe=safe and gain>0.000001
-				end
-				local value=uncovered*(#miners+1)+needed+gain/(1+planning.production[1])
-				if safe and needed>0 and (not score or value>score) then
-					local clear=free(state.beacon_choice,candidate.pos,remove)
-					if clear then best,score=candidate,value else candidate.used=true end
-				end
-			end
-		end
-		if not best then
-			if planning.regular_pass then planning.regular_pass=false else break end
+		local heap=planning.heap
+		local best=heap[1]
+		if not best or best.score==-math.huge then
+			if planning.regular_pass then planning.regular_pass=false;reset_heap() else break end
 		else
+			local tail=table.remove(heap)
+			best.heap_index=nil
+			if #heap>0 then heap[1]=tail;tail.heap_index=1;update(tail) end
+			-- Resource coverage can fall after a replacement. Recheck its safety
+			-- before committing as well as the current spatial occupancy.
+			if not score_candidate(best) or not free(state.beacon_choice,best.pos,best.remove) then
+				best.used=true;goto next_candidate
+			end
 			best.used=true
 			if best.remove then occupy(best.remove.box,nil) end
 			occupy(best.box,true)
@@ -350,9 +394,16 @@ function beacons.prepare(state, production)
 				occupy(best.box,nil)
 				if best.remove then occupy(best.remove.box,best.remove) end
 			end
+			for _,target in ipairs(best.targets) do
+				for _,candidate in ipairs(target.candidates) do if candidate.heap_index then update(candidate) end end
+			end
+			if best.remove then
+				for _,candidate in ipairs(best.remove.candidates) do if candidate.heap_index then update(candidate) end end
+			end
 			processed=processed+1
 			if processed>=budget then return true end
 		end
+		::next_candidate::
 	end
 	local function keep(list,predicate)
 		local n=0
