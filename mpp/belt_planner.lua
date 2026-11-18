@@ -319,19 +319,20 @@ local function path(start, finish, finish_direction, allowed, bounds, penalty, b
 		else turns=(direction==horizontal or direction==vertical) and 1 or 2 end
 		return distance+turns*turn_cost,distance
 	end
-	-- Compact search records: score, turns, distance, sequence, x, y, direction, cost, previous, key.
+	-- Heap entries and predecessor links are integer indices in dense columns.
+	local scores,turn_counts,distances,xs,ys,arrivals,costs,parents,keys={},{},{},{},{},{},{},{},{}
 	local function before(a,b)
-		local left,right=a[1],b[1]
-		if left~=right then return left<right end
-		left,right=a[2],b[2]
-		if left~=right then return left<right end
-		left,right=a[3],b[3]
-		if left~=right then return left<right end
-		return a[4]<b[4]
+		if scores[a]~=scores[b] then return scores[a]<scores[b] end
+		if turn_counts[a]~=turn_counts[b] then return turn_counts[a]<turn_counts[b] end
+		if distances[a]~=distances[b] then return distances[a]<distances[b] end
+		return a<b
 	end
-	local function push(node)
+	local function push(score,turns,distance,x,y,dir,cost,parent,key)
 		sequence=sequence+1
-		node[4]=sequence
+		local node=sequence
+		scores[node],turn_counts[node],distances[node]=score,turns,distance
+		xs[node],ys[node],arrivals[node]=x,y,dir
+		costs[node],parents[node],keys[node]=cost,parent,key
 		heap_size=heap_size+1
 		local i = heap_size
 		while i>1 do
@@ -364,7 +365,7 @@ local function path(start, finish, finish_direction, allowed, bounds, penalty, b
 	end
 	if start.x==finish.x and start.y==finish.y and WEST==(finish_direction+SOUTH)%ROTATION then return end
 	local distance=abs(start.x-finish.x)+abs(start.y-finish.y)
-	if budget and budget.remaining<=0 then return end
+	if budget and (budget.remaining<=0 or budget.total and budget.total.remaining<=0) then return end
 	if distance>0 then
 		-- A sealed destination cannot be reached, regardless of turns or congestion costs.
 		local entry=false
@@ -386,17 +387,21 @@ local function path(start, finish, finish_direction, allowed, bounds, penalty, b
 	local cost=distance==0 and WEST~=finish_direction and turn_cost or 0
 	local k=node_key(start.x,start.y,WEST)
 	best[k]=cost
-	push{cost+estimate(start.x,start.y,WEST),0,distance,0,start.x,start.y,WEST,cost,nil,k}
+	push(cost+estimate(start.x,start.y,WEST),0,distance,start.x,start.y,WEST,cost,nil,k)
 	local visits=0
-	while heap_size>0 and visits<131072 and (not budget or budget.remaining>0) do
+	local limit=min(131072,budget and budget.remaining or math.huge,budget and budget.total and budget.total.remaining or math.huge)
+	while heap_size>0 and visits<limit do
 		local node=pop()
-		local nx,ny,arrival,previous_cost=node[5],node[6],node[7],node[8]
-		if previous_cost==best[node[10]] then
+		local nx,ny,arrival,previous_cost=xs[node],ys[node],arrivals[node],costs[node]
+		if previous_cost==best[keys[node]] then
 			visits=visits+1
-			if budget then budget.remaining=budget.remaining-1 end
+			if budget then
+				budget.remaining=budget.remaining-1
+				if budget.total then budget.total.remaining=budget.total.remaining-1 end
+			end
 			if nx==finish.x and ny==finish.y then
 				local result={}
-				while node do result[#result+1]={x=node[5],y=node[6]}; node=node[9] end
+				while node do result[#result+1]={x=xs[node],y=ys[node]}; node=parents[node] end
 				local ordered={}
 				for i=#result,1,-1 do ordered[#ordered+1]=result[i] end
 				return ordered
@@ -416,7 +421,7 @@ local function path(start, finish, finish_direction, allowed, bounds, penalty, b
 					if extra==nil then extra=penalty(x,y);penalties[cell]=extra end
 				end
 				local turning=dir~=arrival
-				local turns=node[2]+(turning and 1 or 0)
+				local turns=turn_counts[node]+(turning and 1 or 0)
 				local cost=previous_cost+1+(turning and turn_cost or 0)+extra
 				if x==finish.x and y==finish.y and dir~=finish_direction then
 					cost=cost+turn_cost
@@ -429,7 +434,7 @@ local function path(start, finish, finish_direction, allowed, bounds, penalty, b
 					if not passable then goto continue end
 					local remaining,distance=estimate(x,y,dir)
 					best[k]=cost
-					push{cost+remaining,turns,distance,0,x,y,dir,cost,node,k}
+					push(cost+remaining,turns,distance,x,y,dir,cost,node,k)
 				end
 				::continue::
 			end
@@ -492,8 +497,9 @@ local function edge_path(start, finish, allowed, key, budget)
 		end
 		local phase=stages[depth]
 		if phase==0 then
-			if budget.remaining<=0 then return end
+			if budget.remaining<=0 or budget.total and budget.total.remaining<=0 then return end
 			budget.remaining=budget.remaining-1
+			if budget.total then budget.total.remaining=budget.total.remaining-1 end
 		end
 		stages[depth]=phase+1
 		local nx,ny=x,y
@@ -706,6 +712,7 @@ local function route_bundle(state, reverse, negotiate, outer_corridor, backward_
 	local completed={}
 	local lane_routes, usage, history = {}, {}, {}
 	local budget=backward_budget or edge_priority and {remaining=65536} or negotiate and {remaining=262144} or nil
+	if budget then budget.total=context.budget else budget=context.budget end
 	for pass=1,negotiate and 32 or 1 do
 		result,completed={},{}
 		for _, i in ipairs(order) do
@@ -835,7 +842,7 @@ local function route_bundle(state, reverse, negotiate, outer_corridor, backward_
 					for j=1,floor(#route/2) do route[j],route[#route-j+1]=route[#route-j+1],route[j] end
 				end
 			elseif not outer_corridor then
-				route=route or path({x=start.x-1,y=start.y},approach,dir,allowed,bounds)
+				route=route or path({x=start.x-1,y=start.y},approach,dir,allowed,bounds,nil,budget)
 			end
 			if not route then
 				return false,{"mpp.msg_obstacle_route_failed"},{routes=result,completed=completed,failed_lane=i,reason="route"}
@@ -875,9 +882,9 @@ local function route_bundle(state, reverse, negotiate, outer_corridor, backward_
 	return false,{"mpp.msg_obstacle_route_failed"},{routes={},failed_lane=1,reason="route"}
 end
 
-local function plan_routes(state)
+local function plan_routes(state,request_budget)
 	-- Share only immutable cells within this synchronous call; lane reservations remain local to each attempt.
-	local context={}
+	local context={budget=request_budget or {remaining=131072}}
 	if state.belt_direction==WEST and not state.belt_input_targets then
 		local compact, routes=route_bundle(state,false,false,false,nil,context,true)
 		if compact then return true,routes end
@@ -939,7 +946,7 @@ local function plan_routes(state)
 			-- This relaxed route is explanatory only; every segment stays red and Apply remains disabled.
 			local route=path({x=start.x-1,y=start.y},approach,dir,function(x,y)
 				return x~=finish.x or y~=finish.y
-			end,bounds) or {approach}
+			end,bounds,nil,context.budget) or {approach}
 			table.insert(route,1,start)
 			route[#route+1]=finish
 			for index,node in ipairs(route) do
@@ -966,9 +973,11 @@ local function plan_routes(state)
 end
 
 function belt_planner.plan(state)
-	if state.output_station_choice then return train_station.plan(state,plan_routes) end
-	if state.output_balance_choice then return output_balancer.plan(state,plan_routes) end
-	return plan_routes(state)
+	local budget={remaining=131072}
+	local function route(connection) return plan_routes(connection,budget) end
+	if state.output_station_choice then return train_station.plan(state,route) end
+	if state.output_balance_choice then return output_balancer.plan(state,route) end
+	return plan_routes(state,budget)
 end
 
 function belt_planner.layout(state)
