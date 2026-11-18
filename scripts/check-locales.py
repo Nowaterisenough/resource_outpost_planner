@@ -1,10 +1,10 @@
-"""Validate the English and Simplified Chinese localisation catalogues."""
+"""Check all shipped catalogues against the English keys and substitutions."""
 
 import re
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-LANGUAGES = ("en", "zh-CN")
+LANGUAGES = tuple(sorted(path.name for path in (ROOT / "locale").iterdir() if path.is_dir()))
 
 
 def catalogue(language):
@@ -15,7 +15,7 @@ def catalogue(language):
             line = raw.strip()
             if line.startswith("[") and line.endswith("]"):
                 section = line[1:-1]
-            elif "=" in line and not line.startswith(";"):
+            elif "=" in line and not line.startswith((";", "#")):
                 key, value = line.split("=", 1)
                 key = f"{section}.{key}"
                 if key in entries:
@@ -26,7 +26,7 @@ def catalogue(language):
 
 def main():
     catalogues = {language: catalogue(language) for language in LANGUAGES}
-    expected = set().union(*(set(entries) for entries in catalogues.values()))
+    expected = set(catalogues["en"])
     errors = []
     for language, entries in catalogues.items():
         errors.extend(f"{language}: missing {key}" for key in sorted(expected - set(entries)))
@@ -44,13 +44,20 @@ def main():
             if key not in entries:
                 errors.append(f"{language}: missing referenced key {key}")
 
-    for key in sorted(set(catalogues["en"]) & set(catalogues["zh-CN"])):
-        placeholders = [sorted(re.findall(r"__(?:\d+|CONTROL(?:_KEY_SHIFT|_RIGHT_CLICK)?[^\s]*?)__", catalogues[language][key])) for language in LANGUAGES]
-        if placeholders[0] != placeholders[1]:
-            errors.append(f"{key}: placeholder mismatch: {placeholders}")
+    def substitutions(text):
+        # Languages may express a quantity without a plural suffix.
+        text = re.sub(r"__plural_for_parameter__\d+__\{[^}]*\}__", "", text)
+        return sorted(re.findall(r"__CONTROL__[\w-]+__|__CONTROL_[A-Z_]+?__|__\d+__", text))
+
+    for key in sorted(expected):
+        wanted = substitutions(catalogues["en"][key])
+        for language, entries in catalogues.items():
+            value = entries.get(key, "")
+            if not value.strip() or substitutions(value) != wanted:
+                errors.append(f"{language}: empty or incorrect substitutions in {key}")
     if errors:
         raise SystemExit("\n".join(errors))
-    print(f"Locales OK: {len(expected)} keys per language; {len(references)} literal references checked.")
+    print(f"Locales OK: {len(expected)} keys in {len(LANGUAGES)} languages; {len(references)} literal references checked.")
 
 
 if __name__ == "__main__":
