@@ -8,6 +8,7 @@ local grid_meta = require("mpp.grid_mt")
 local bp_meta = require("mpp.blueprintmeta")
 local render_util = require("mpp.render_util")
 local mpp_util = require("mpp.mpp_util")
+local poles = require("mpp.pole_connections")
 local task_runner = require("mpp.task_runner")
 local preview = require("mpp.preview")
 local belt_planner = require("mpp.belt_planner")
@@ -27,6 +28,7 @@ script.on_init(conf.initialize_storage)
 
 ---@param event EventData
 function task_runner_handler(event)
+	poles.tick()
 	belt_planner.restore_cursors()
 	preview.tick()
 	if #storage.immediate_tasks > 0 then
@@ -52,7 +54,7 @@ function task_runner_handler(event)
 	end
 	
 	if #storage.tasks == 0 and #storage.immediate_tasks == 0 and not preview.has_pending()
-		and not belt_planner.has_pending_cursor() then
+		and not storage.pole_jobs and not belt_planner.has_pending_cursor() then
 		return script.on_event(defines.events.on_tick, nil)
 	end
 end
@@ -188,7 +190,7 @@ script.on_load(function()
 	end
 
 	if storage.tasks and (#storage.tasks > 0 or #storage.immediate_tasks > 0 or preview.has_pending()
-		or belt_planner.has_pending_cursor()) then
+		or storage.pole_jobs or belt_planner.has_pending_cursor()) then
 		script.on_event(defines.events.on_tick, task_runner_handler)
 		for _, task in ipairs(storage.tasks) do
 			---@type Layout
