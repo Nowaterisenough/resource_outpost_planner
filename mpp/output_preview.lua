@@ -12,7 +12,7 @@ function output.begin(data,player)
 	if not source or source.surface~=player.surface then return false end
 	local spec=common.create_belt_planner_specification(source)
 	if not spec then return false end
-	data.preview={player_index=player.index,surface=source.surface,resources=source.resources or {},
+	data.preview={player_index=player.index,surface=source.surface,resources={},resource_count=source.resource_count or #(source.resources or {}),
 		revision=0,renderings={},specs={},issues={},output_only=true,source_spec=spec,belt_specification=spec}
 	return true
 end

@@ -95,7 +95,7 @@ local function mining_patch_step(state)
 				type = state.type,
 				player = state.player,
 				surface = state.surface,
-				resources = state.resources,
+				resource_count = #state.resources,
 				coords = state.coords,
 				layout_choice = state.layout_choice,
 				direction_choice = state.direction_choice,

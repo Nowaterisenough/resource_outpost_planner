@@ -1675,6 +1675,7 @@ function gui.hide_interface(player)
 	local frame = player.gui.screen["mpp_settings_frame"]
 	local player_data = storage.players[player.index]
 	player_data.blueprint_add_mode = false
+	preview.cancel(player_data)
 	input_mode.idle(player_data, player)
 	if frame then
 		frame.visible = false
