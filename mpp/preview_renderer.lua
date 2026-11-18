@@ -351,7 +351,7 @@ function renderer.step(draft,job,limit)
 		local x,y=position(issue.position)
 		if issue.left_top then
 			objects[#objects+1]=rendering.draw_rectangle{surface=draft.surface,players={player},
-				left_top=issue.left_top,right_bottom=issue.right_bottom,filled=true,
+				left_top=issue.left_top,right_bottom=issue.right_bottom,filled=not issue.outline,width=issue.outline and 3 or nil,
 				color={1,0.15,0.1,0.3},draw_on_ground=true}
 		else
 			objects[#objects+1]=rendering.draw_circle{surface=draft.surface,players={player},

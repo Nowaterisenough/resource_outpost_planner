@@ -134,7 +134,7 @@ function preview.invalidate(data,err)
 	draft.error=err
 	draft.specs=draft.specs or {}
 	local pos=draft.belt_target and draft.belt_target.position or draft.specs[1] and draft.specs[1].position
-	draft.issues=pos and {{position=pos,reason=err}} or diagnostics.resource_issues(draft.resources,err)
+	draft.issues=pos and {{position=pos,reason=err}} or diagnostics.resource_issues(draft.resources,err,true)
 	render(data,draft)
 	preview.update_gui(data)
 end
@@ -271,7 +271,7 @@ function preview.tick()
 				else
 					draft.error=err or {"mpp.msg_miner_err_0"}
 					draft.specs={}
-					draft.issues=diagnostics.resource_issues(resources,draft.error)
+					draft.issues=diagnostics.resource_issues(resources,draft.error,true)
 					render(data,draft)
 					preview.update_gui(data)
 				end
@@ -338,7 +338,7 @@ function preview.complete(state)
 	local captured, diagnostic_error=pcall(diagnostics.capture,state)
 	if not captured then
 		log("Preview diagnostics failed: "..tostring(diagnostic_error))
-		state._preview_issues=diagnostics.resource_issues(state.resources,state.preview_error)
+		state._preview_issues=diagnostics.resource_issues(state.resources,state.preview_error,true)
 	end
 	draft.belt_specification=common.create_belt_planner_specification(state)
 	output_cache.complete(state,draft)
@@ -353,7 +353,7 @@ function preview.complete(state)
 	end
 	if #draft.specs==0 and not draft.error then draft.error={"mpp.preview_empty"} end
 	if draft.error and #draft.specs==0 and #draft.issues==0 then
-		draft.issues=diagnostics.resource_issues(draft.resources,draft.error)
+		draft.issues=diagnostics.resource_issues(draft.resources,draft.error,true)
 	end
 	draft.ready=not draft.error
 	if state._apply_after_preview then

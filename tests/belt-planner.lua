@@ -947,6 +947,13 @@ do
 	preview.complete{player=spec.player,surface=spec.surface,preview_only=true,preview_revision=1,
 		preview_error={"mpp.msg_err_unable_to_create_a_layout"},resources={{valid=true,position={x=2.5,y=3.5}}},_preview_specs={}}
 	assert(#data.preview.issues==1 and #data.preview.renderings==2,"no-miner failure does not highlight the selected resource")
+	local resources={}
+	for y=0,99 do for x=0,99 do resources[#resources+1]={valid=true,position={x=x+.5,y=y+.5}} end end
+	preview.complete{player=spec.player,surface=spec.surface,preview_only=true,preview_revision=1,
+		preview_error={"cant-build-reason.mining-with-fluid-not-available"},resources=resources,_preview_specs={}}
+	local issue=data.preview.issues[1]
+	assert(#data.preview.renderings==2 and issue.outline and issue.left_top.x==0 and issue.right_bottom.y==100,
+		"large failed selection must render one boundary and one explanation")
 	preview.cancel(data)
 	cases=cases+1
 end

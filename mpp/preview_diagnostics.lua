@@ -2,7 +2,24 @@ local builder = require("mpp.builder")
 local util = require("mpp.mpp_util")
 local diagnostics = {}
 
-function diagnostics.resource_issues(resources, reason)
+function diagnostics.resource_issues(resources, reason, selection_wide)
+	-- A validation error applies to the whole selection. Outline a large selection
+	-- once, keeping its explanation anchored to a real resource.
+	if selection_wide and resources and #resources>64 then
+		local first
+		local x1,y1,x2,y2=math.huge,math.huge,-math.huge,-math.huge
+		for _,resource in ipairs(resources) do
+			if resource.valid then
+				local p=resource.position
+				first=first or p
+				local x,y=math.floor(p.x),math.floor(p.y)
+				x1,y1=math.min(x1,x),math.min(y1,y)
+				x2,y2=math.max(x2,x+1),math.max(y2,y+1)
+			end
+		end
+		if not first then return {} end
+		return {{position=first,reason=reason,left_top={x=x1,y=y1},right_bottom={x=x2,y=y2},outline=true}}
+	end
 	local issues={}
 	for _,resource in ipairs(resources or {}) do
 		if resource.valid then
@@ -45,7 +62,7 @@ function diagnostics.capture(state)
 	end
 	state._preview_issues=state._preview_issues or {}
 	if #state._preview_specs==0 then
-		state._preview_issues=diagnostics.resource_issues(state.resources,state.preview_error)
+		state._preview_issues=diagnostics.resource_issues(state.resources,state.preview_error,true)
 	elseif #state._preview_issues==0 then
 		state._preview_issues[1]={position=state._preview_specs[1].position,reason=state.preview_error}
 	end
