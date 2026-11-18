@@ -379,6 +379,18 @@ function preview.complete(state)
 				for _,object in pairs(state._render_objects or {}) do draft.renderings[#draft.renderings+1]=object end
 				preview.update_gui(data);return
 			end
+			if state._apply_environment and output_cache.can_build(state,data) then
+				algorithm.clear_selection(data)
+				algorithm.on_gui_close(data)
+				state._undo_state=data.last_state
+				data.last_state=nil
+				state._apply_environment,state._apply_after_preview,state._preview_specs=nil,nil,nil
+				state.fill_tiles,state.fill_tile_progress,state._belt_landfill=nil,nil,nil
+				state._from_preview,state.preview_only,state._callback=true,false,"deconstruct_layout"
+				state._render_objects=List()
+				storage.tasks[#storage.tasks+1]=state
+				return
+			end
 			if commit(data) then
 				-- Keep the current overlay until the queued build finishes or reports a failure.
 				preview.update_gui(data)

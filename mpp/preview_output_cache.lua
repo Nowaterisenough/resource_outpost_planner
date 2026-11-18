@@ -88,14 +88,14 @@ local function trimmed(state,target,choices)
 		and target.direction==util.bp_direction[state.direction_choice][defines.direction.west]
 end
 
-function cache.begin(state)
-	if not state.preview_only or state._apply_after_preview or state._force_build_mode or state._preview_environment
-		or state._beacon_logistics or state.layout_choice=="blueprints" or state.layout_choice=="oil" then return end
-	local data=storage.players[state.player.index]
-	if not data or not data.preview then return end
+local function environment(state,data)
 	local c=state.coords
 	local margin=state.miner.area+32
 	local area={{c.x1-margin,c.y1-margin},{c.x2+margin,c.y2+margin}}
+	if state._apply_after_preview and state.belt_target then
+		local p=state.belt_target.position
+		area={{math.min(c.x1,p.x)-margin,math.min(c.y1,p.y)-margin},{math.max(c.x2,p.x)+margin,math.max(c.y2,p.y)+margin}}
+	end
 	local resources={entities=state.resources,amounts={},x={},y={}}
 	for i,e in ipairs(state.resources) do
 		if not e.valid then return end
@@ -103,8 +103,33 @@ function cache.begin(state)
 		resources.amounts[i],resources.x[i],resources.y[i]=e.amount,p.x,p.y
 	end
 	local choices=options(data.choices)
-	state._preview_environment={geometry_revision=geometry_revision,area=area,resources=resources,
+	return {geometry_revision=geometry_revision,area=area,resources=resources,
 		choices=choices,world=world(state,area,choices)}
+end
+
+function cache.begin(state)
+	if not state.preview_only or state._force_build_mode or state._preview_environment or state._apply_environment
+		or state.layout_choice=="blueprints" or state.layout_choice=="oil" then return end
+	local data=storage.players[state.player.index]
+	if not data or not data.preview then return end
+	if state._apply_after_preview then
+		if not state._native_build_mode then state._apply_environment=environment(state,data) end
+	elseif not state._beacon_logistics then state._preview_environment=environment(state,data) end
+end
+
+function cache.can_build(state,data)
+	local env=state._apply_environment
+	if not env or state.player.surface~=state.surface or state.requires_fluid and not state.player.force.mining_with_fluid
+		or (state._obstacle_skipped or 0)>0 or not equal(env.choices,options(data.choices))
+		or not resources_match(env.resources) or not equal(env.world,world(state,env.area,env.choices)) then return false end
+	for _,spec in ipairs(state._preview_specs) do
+		local p=spec.position
+		local x,y=p.x or p[1],p.y or p[2]
+		local x1,y1,x2,y2=x,y,x+1,y+1
+		if spec.name=="entity-ghost" then x1,y1,x2,y2=obstacles.entity_bounds(spec.inner_name,x,y,spec.direction) end
+		if x1<env.area[1][1] or y1<env.area[1][2] or x2>env.area[2][1] or y2>env.area[2][2] then return false end
+	end
+	return true
 end
 
 function cache.capture(state)

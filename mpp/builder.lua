@@ -97,6 +97,8 @@ function builder.create_entity_builder(state, opts)
 	local _build_check_type = defines.build_check_type.blueprint_ghost
 	
 	return function(ghost, check_allowed)
+		-- Validation and construction can share the planned placement lists.
+		if state._apply_environment then ghost=table.deepcopy(ghost) end
 		ghost.raise_built = true
 		ghost.player = _player
 		ghost.force = _force

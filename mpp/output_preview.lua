@@ -76,11 +76,11 @@ function output.apply(data,mode,facility_removal)
 		facility_removal=facility_removal or mode==nil
 		mode=defines.build_mode.superforced
 	end
-	if not mode and not output.refresh(data) then return false end
+
 	local fallback=not facility_removal and data.preview.error and mode or nil
 	local state,err,diagnostic=prepare(data,mode~=nil,fallback)
 	if err and mode and not fallback and not facility_removal then state,err,diagnostic=prepare(data,true,mode) end
-	if err or not state then data.preview.error=err;data.preview.ready=false;return false end
+	if err or not state or #diagnostic.routes==0 then data.preview.error=err or {"mpp.preview_empty"};data.preview.ready=false;return false end
 	local create=builder.create_entity_builder(state,{do_deconstruction=true})
 	for _,spec in ipairs(diagnostic.routes) do create(spec) end
 	planner.place_landfill(state,diagnostic.routes)
