@@ -45,7 +45,6 @@ function enums.get_available_miners()
 			end
 		else
 			invalid_resource[name] = true
-			break
 		end
 	end
 
