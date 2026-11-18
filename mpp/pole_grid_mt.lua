@@ -9,6 +9,7 @@ local floor, ceil = math.floor, math.ceil
 ---@field [number] table<number, GridPole>
 local pole_grid_mt = {}
 pole_grid_mt.__index = pole_grid_mt
+script.register_metatable("mpp.pole_grid", pole_grid_mt)
 
 ---@class GridPole
 ---@field ix number Position in the pole grid

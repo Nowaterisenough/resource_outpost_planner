@@ -9,6 +9,7 @@ local mpp_util = require("mpp.mpp_util")
 ---@field [number] GridRow
 local grid_mt = {}
 grid_mt.__index = grid_mt
+script.register_metatable("mpp.grid", grid_mt)
 
 ---Coordinate aggregate of the resource patch
 ---@class Coords

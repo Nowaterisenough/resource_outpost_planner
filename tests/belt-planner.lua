@@ -15,7 +15,7 @@ task_runner_handler=function() end
 helpers={is_valid_sprite_path=function() return false end}
 rendering={draw_rectangle=function() return {valid=true,destroy=function() end} end,
 	draw_sprite=function() return {valid=true,destroy=function() end} end}
-prototypes={entity={},quality={}}
+prototypes={entity={},quality={},collision_layer={}}
 local function prototype(name,typ,size)
 	local radius=size/2-0.1
 	prototypes.entity[name]={name=name,type=typ,tile_width=size,tile_height=size,supports_direction=true,
@@ -32,6 +32,15 @@ local common=require("layouts.common")
 local preview=require("mpp.preview")
 local input_mode=require("mpp.input_mode")
 local simple=require("layouts.simple")
+-- Restoring an older save starts with plain tables. The next blueprint belt
+-- step and blueprint metadata lookup both need their methods immediately.
+do
+	local layout=require("layouts.blueprints")
+	local saved={grid={},belt_grid={[7]={[3]={type="transport-belt"}}},cache={}}
+	layout:on_load(saved)
+	assert(saved.belt_grid:get_tile(3,7).type=="transport-belt" and saved.grid:get_tile(0,0)==nil)
+	assert(type(saved.cache.get_mining_drills)=="function")
+end
 local util=require("mpp.mpp_util")
 local N,E,S,W=defines.direction.north,defines.direction.east,defines.direction.south,defines.direction.west
 

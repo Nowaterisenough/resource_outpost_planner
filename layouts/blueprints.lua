@@ -5,6 +5,7 @@ local table_insert = table.insert
 local base = require("layouts.base")
 local simple = require("layouts.simple")
 local grid_mt = require("mpp.grid_mt")
+local bp_meta = require("mpp.blueprintmeta")
 local mpp_util = require("mpp.mpp_util")
 local color = require("mpp.color")
 local builder = require("mpp.builder")
@@ -110,6 +111,9 @@ function layout:on_load(state)
 	if state.grid then
 		setmetatable(state.grid, grid_mt)
 	end
+	-- Older saves predate metatable registration.
+	if state.belt_grid then setmetatable(state.belt_grid, grid_mt) end
+	if state.cache then setmetatable(state.cache, bp_meta) end
 end
 
 ---@param self BlueprintLayout

@@ -16,6 +16,7 @@ local WEST = defines.direction.west
 ---@field miner_name string Mining drill name
 local bp_meta = {}
 bp_meta.__index = bp_meta
+script.register_metatable("mpp.blueprint", bp_meta)
 
 ---@class BlueprintEntityEx : BlueprintEntity
 ---@field capstone_x boolean
