@@ -274,9 +274,12 @@ local function get_miner_categories(player_data)
 	if layout.get_resource_categories then
 		return layout:get_resource_categories(player_data)
 	elseif player_data.choices.layout_choice == "blueprints" then
-		return player_data.blueprints.cache[player_data.choices.blueprint_choice.item_number]:get_resource_categories()
+		local item=player_data.choices.blueprint_choice
+		local bp=item and item.valid and item.valid_for_read and player_data.blueprints.cache[item.item_number]
+		return bp and bp:get_resource_categories() or {}
 	else
-		return prototypes.entity[player_data.choices.miner_choice].resource_categories or {}
+		local miner=prototypes.entity[player_data.choices.miner_choice]
+		return miner and miner.resource_categories or {}
 	end
 end
 
