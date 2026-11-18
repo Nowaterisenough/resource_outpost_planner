@@ -90,6 +90,27 @@ table.remove(storage.tasks,1)
 preview.applied(build)
 assert(not data.preview and calls.destroyed==2,"completed construction left stale preview objects")
 
+-- A configuration reset discards the overlay after validation has queued the
+-- real build. Its error must neither crash nor invalidate a replacement draft.
+package.loaded["mpp.pole_connections"]={}
+package.loaded["mpp.mpp_util"]={}
+local runner=require("mpp.task_runner")
+algorithm.layouts={simple={tick=function() return false end}}
+for _,replace in ipairs{false,true} do
+	draft,overlays,prior=fixture()
+	assert(preview.apply(data))
+	preview.complete(storage.tasks[1])
+	table.remove(storage.tasks,1)
+	local building=storage.tasks[1]
+	building.layout_choice="simple"
+	building.preview_error={"mpp.msg_obstacle_route_failed"}
+	preview.cancel(data,true)
+	if replace then data.preview={revision=2,ready=true} end
+	runner.mining_patch_task(building)
+	assert(#storage.tasks==0 and data.last_state==prior)
+	assert(not replace or (data.preview.ready and data.preview.revision==2 and not data.preview.error))
+end
+
 draft,overlays=fixture()
 preview.complete(state{entities=draft.resources,preview_only=true,preview_revision=1})
 assert(calls.render==1 and calls.statistics==1 and calls.cursor==1,"ordinary preview refresh was skipped")

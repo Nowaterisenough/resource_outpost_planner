@@ -66,8 +66,10 @@ local function mining_patch_step(state)
 			preview.dispose_task(state)
 			table.remove(storage.tasks,1)
 			data.last_state=state._undo_state
-			data.preview.applying=false
-			preview.invalidate(data,state.preview_error)
+			if data.preview and not state._preview_detached then
+				data.preview.applying=false
+				preview.invalidate(data,state.preview_error)
+			end
 			return
 		end
 		if not state._forced_applied then pole_connections.connect(state) end

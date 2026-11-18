@@ -110,6 +110,11 @@ end
 function preview.cancel(data,force,keep_selection)
 	if not data then return true end
 	if data.preview and data.preview.applying and not force then return false end
+	if force and data.preview then
+		for _,state in ipairs(storage.tasks) do
+			if state._from_preview and state.player.index==data.preview.player_index then state._preview_detached=true end
+		end
+	end
 	stop_tasks(data.preview and data.preview.player_index or -1)
 	if data.preview then cancel_render(data.preview);destroy(data.preview.renderings) end
 	if not (keep_selection and data.input_mode == "select") then input_mode.idle(data) end
@@ -420,7 +425,7 @@ end
 
 function preview.applied(state)
 	local data=storage.players[state.player.index]
-	if data.preview then data.preview.applying=false; preview.cancel(data) end
+	if data.preview and not state._preview_detached then data.preview.applying=false; preview.cancel(data) end
 end
 
 input_mode.begin_output_preview=function(data,player)
